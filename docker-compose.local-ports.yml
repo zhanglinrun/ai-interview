@@ -1,0 +1,5 @@
+services:
+  minio:
+    ports: !override
+      - "19000:9000"
+      - "19001:9001"

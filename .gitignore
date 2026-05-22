@@ -1,41 +1,68 @@
+# Maven / Java
 target/
+**/target/
 !.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-.kotlin
+*.class
 
-### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+# Node.js / frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.pnpm-store/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+backend/src/main/resources/application-dev.yml
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+test-output.txt
+qodana.yaml
+
+# IntelliJ IDEA
+.idea/
 *.iws
 *.iml
 *.ipr
 
-### Eclipse ###
+# Eclipse
 .apt_generated
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
 .sts4-cache
 
-### NetBeans ###
+# NetBeans
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
-### VS Code ###
+# VS Code
 .vscode/
 
-### Mac OS ###
-.DS_Store
+# AI assistant / local tooling
+.claude/
+.playwright-mcp/
+CLAUDE.md
+GEMINI.md
+SETUP_API_KEYS.md
 
-.idea/
+# Upstream local documentation
+docs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project notes copied from upstream are kept local by default
+study/
