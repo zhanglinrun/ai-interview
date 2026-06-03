@@ -17,7 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * 知识库查询服务
@@ -97,6 +99,18 @@ public class KnowledgeBaseListService {
                 .map(KnowledgeBaseEntity::getName)
                 .orElse("未知知识库"))
             .toList();
+    }
+
+    /**
+     * 根据ID列表获取知识库名称映射，用于展示 RAG 引用来源。
+     */
+    public Map<Long, String> getKnowledgeBaseNameMap(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> uniqueIds = ids.stream().distinct().toList();
+        return knowledgeBaseRepository.findAllById(uniqueIds).stream()
+            .collect(Collectors.toMap(KnowledgeBaseEntity::getId, KnowledgeBaseEntity::getName));
     }
 
     // ========== 分类管理 ==========

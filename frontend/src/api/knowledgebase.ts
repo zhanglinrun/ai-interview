@@ -53,10 +53,18 @@ export interface QueryRequest {
   question: string;
 }
 
+export interface RagSource {
+  knowledgeBaseId: number | null;
+  documentTitle: string;
+  snippet: string;
+  similarity: number | null;
+}
+
 export interface QueryResponse {
   answer: string;
   knowledgeBaseId: number;
   knowledgeBaseName: string;
+  sources: RagSource[];
 }
 
 export const knowledgeBaseApi = {

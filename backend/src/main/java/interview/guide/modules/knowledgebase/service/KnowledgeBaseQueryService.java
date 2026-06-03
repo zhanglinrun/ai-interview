@@ -6,6 +6,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
+import interview.guide.modules.knowledgebase.model.RagSourceDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -24,10 +25,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * 知识库查询服务
@@ -39,6 +42,7 @@ public class KnowledgeBaseQueryService {
     private static final String NO_RESULT_RESPONSE = "抱歉，在选定的知识库中未检索到相关信息。请换一个更具体的关键词或补充上下文后再试。";
     private static final int STREAM_PROBE_CHARS = 120;
     private static final int MAX_REWRITE_HISTORY_CHAR = 200;
+    private static final int SOURCE_SNIPPET_MAX_CHARS = 220;
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final KnowledgeBaseVectorService vectorService;
@@ -124,6 +128,10 @@ public class KnowledgeBaseQueryService {
             return NO_RESULT_RESPONSE;
         }
 
+        return generateAnswer(knowledgeBaseIds, question, relevantDocs);
+    }
+
+    private String generateAnswer(List<Long> knowledgeBaseIds, String question, List<Document> relevantDocs) {
         String context = relevantDocs.stream()
                 .map(Document::getText)
                 .collect(Collectors.joining("\n\n---\n\n"));
@@ -170,16 +178,35 @@ public class KnowledgeBaseQueryService {
      * 查询知识库并返回完整响应
      */
     public QueryResponse queryKnowledgeBase(QueryRequest request) {
-        String answer = answerQuestion(request.knowledgeBaseIds(), request.question());
+        List<Long> knowledgeBaseIds = request.knowledgeBaseIds();
+        String question = request.question();
+
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+            return new QueryResponse(NO_RESULT_RESPONSE, null, "", List.of());
+        }
 
         // 获取知识库名称（多个知识库用逗号分隔）
-        List<String> kbNames = listService.getKnowledgeBaseNames(request.knowledgeBaseIds());
+        List<String> kbNames = listService.getKnowledgeBaseNames(knowledgeBaseIds);
         String kbNamesStr = String.join("、", kbNames);
 
         // 使用第一个知识库ID作为主要标识（兼容前端）
-        Long primaryKbId = request.knowledgeBaseIds().getFirst();
+        Long primaryKbId = knowledgeBaseIds.getFirst();
 
-        return new QueryResponse(answer, primaryKbId, kbNamesStr);
+        if (normalizeQuestion(question).isBlank()) {
+            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of());
+        }
+
+        countService.updateQuestionCounts(knowledgeBaseIds);
+
+        QueryContext queryContext = buildQueryContext(question, List.of());
+        List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
+
+        if (!hasEffectiveHit(relevantDocs)) {
+            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of());
+        }
+
+        String answer = generateAnswer(knowledgeBaseIds, question, relevantDocs);
+        return new QueryResponse(answer, primaryKbId, kbNamesStr, buildSources(relevantDocs));
     }
 
     /**
@@ -243,7 +270,13 @@ public class KnowledgeBaseQueryService {
                     .content();
 
             log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
-            return normalizeStreamOutput(responseFlux)
+            Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
+            String sourcesMarkdown = buildSourcesMarkdown(relevantDocs);
+            if (!sourcesMarkdown.isBlank()) {
+                normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
+            }
+
+            return normalizedFlux
                 .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
                 .onErrorResume(e -> {
                     log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
@@ -362,6 +395,103 @@ public class KnowledgeBaseQueryService {
 
     private boolean hasEffectiveHit(List<Document> docs) {
         return docs != null && !docs.isEmpty();
+    }
+
+    private List<RagSourceDTO> buildSources(List<Document> docs) {
+        if (!hasEffectiveHit(docs)) {
+            return List.of();
+        }
+
+        List<Long> knowledgeBaseIds = docs.stream()
+            .map(this::extractKnowledgeBaseId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<Long, String> nameMap = listService.getKnowledgeBaseNameMap(knowledgeBaseIds);
+
+        return docs.stream()
+            .map(doc -> {
+                Long knowledgeBaseId = extractKnowledgeBaseId(doc);
+                String title = knowledgeBaseId == null
+                    ? "未知知识库"
+                    : nameMap.getOrDefault(knowledgeBaseId, "未知知识库");
+                return new RagSourceDTO(
+                    knowledgeBaseId,
+                    title,
+                    buildSourceSnippet(doc.getText()),
+                    extractSimilarity(doc)
+                );
+            })
+            .toList();
+    }
+
+    private String buildSourcesMarkdown(List<Document> docs) {
+        List<RagSourceDTO> sources = buildSources(docs);
+        if (sources.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder("\n\n---\n\n## 参考来源\n\n");
+        for (int i = 0; i < sources.size(); i++) {
+            RagSourceDTO source = sources.get(i);
+            sb.append(i + 1)
+                .append(". **")
+                .append(source.documentTitle())
+                .append("**");
+            if (source.similarity() != null) {
+                sb.append("（相似度：")
+                    .append(String.format(Locale.ROOT, "%.2f", source.similarity()))
+                    .append("）");
+            }
+            sb.append("\n\n")
+                .append("   > ")
+                .append(source.snippet())
+                .append("\n\n");
+        }
+        return sb.toString();
+    }
+
+    private Long extractKnowledgeBaseId(Document doc) {
+        Map<String, Object> metadata = doc.getMetadata();
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+
+        Object kbId = metadata.get("kb_id");
+        if (kbId == null) {
+            kbId = metadata.get("kb_id_long");
+        }
+        if (kbId == null) {
+            return null;
+        }
+        if (kbId instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(kbId.toString());
+        } catch (NumberFormatException e) {
+            log.warn("无法解析引用来源知识库ID: kbId={}", kbId);
+            return null;
+        }
+    }
+
+    private String buildSourceSnippet(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String snippet = text.replaceAll("\\s+", " ").trim();
+        if (snippet.length() <= SOURCE_SNIPPET_MAX_CHARS) {
+            return snippet;
+        }
+        return snippet.substring(0, SOURCE_SNIPPET_MAX_CHARS) + "...";
+    }
+
+    private Double extractSimilarity(Document doc) {
+        Double score = doc.getScore();
+        if (score == null || score.isNaN() || score.isInfinite()) {
+            return null;
+        }
+        return Math.round(score * 10000.0) / 10000.0;
     }
 
     private String normalizeAnswer(String answer) {
