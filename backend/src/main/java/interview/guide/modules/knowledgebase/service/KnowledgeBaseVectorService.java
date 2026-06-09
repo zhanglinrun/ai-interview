@@ -85,11 +85,19 @@ public class KnowledgeBaseVectorService {
         int chunkPar = vectorizeProperties.getChunkParallelism();
         if (chunkPar > 1) {
             AtomicInteger seq = new AtomicInteger(0);
-            this.chunkExecutor = java.util.concurrent.Executors.newFixedThreadPool(chunkPar, r -> {
-                Thread t = new Thread(r, "vectorize-chunk-" + seq.incrementAndGet());
-                t.setDaemon(true);
-                return t;
-            });
+            this.chunkExecutor = new java.util.concurrent.ThreadPoolExecutor(
+                chunkPar,
+                chunkPar,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new java.util.concurrent.LinkedBlockingQueue<>(100),
+                r -> {
+                    Thread t = new Thread(r, "vectorize-chunk-" + seq.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                },
+                new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+            );
             log.info("向量化启用分块级并行: chunkParallelism={}", chunkPar);
         } else {
             this.chunkExecutor = null;
@@ -119,18 +127,18 @@ public class KnowledgeBaseVectorService {
 
     /**
      * 将知识库内容向量化并存储
+     * 注意：此方法不加事务，避免外部 API 调用占用 DB 连接
      * @param knowledgeBaseId 知识库ID
      * @param content 知识库文本内容
      */
-    @Transactional
     public void vectorizeAndStore(Long knowledgeBaseId, String content) {
         log.info("开始向量化知识库: kbId={}, contentLength={}", knowledgeBaseId, content.length());
         long startNanos = System.nanoTime();
         try {
-            // 1. 先删除该知识库的旧向量数据
+            // 1. 先删除该知识库的旧向量数据（事务方法）
             deleteByKnowledgeBaseId(knowledgeBaseId);
             
-            // 2. 将文本分块
+            // 2. 将文本分块（本地操作，无需事务）
             List<Document> chunks = textSplitter.apply(
                 List.of(new Document(content))
             );
@@ -138,9 +146,9 @@ public class KnowledgeBaseVectorService {
             log.info("文本分块完成: {} 个chunks", chunks.size());
             
             // 3. 为每个chunk添加metadata（知识库ID）
-            // 统一使用 String 类型存储，确保查询一致性
             chunks.forEach(chunk -> chunk.getMetadata().put("kb_id", knowledgeBaseId.toString()));
-            // 4. 分批向量化并存储（阿里云 DashScope API 限制 batch size <= 10）
+            
+            // 4. 分批向量化并存储（外部 API 调用，不在事务内）
             int totalChunks = chunks.size();
             int batchCount = (totalChunks + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
             log.info("开始分批向量化: 总共 {} 个chunks，分 {} 批处理，每批最多 {} 个",
@@ -153,8 +161,7 @@ public class KnowledgeBaseVectorService {
                 batches.add(chunks.subList(start, end));
             }
 
-            // 分块并行：单文档内的多个批次并发提交，吃满全局信号量许可，压低大文档关键路径；
-            // 未启用时保持历史的串行分批。
+            // 分块并行：单文档内的多个批次并发提交
             if (chunkExecutor != null && batchCount > 1) {
                 addBatchesInParallel(batches);
             } else {
