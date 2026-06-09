@@ -14,6 +14,23 @@ server:
       charset: UTF-8
       enabled: true
       force: true
+  tomcat:
+    # Tomcat 11 默认单个 multipart 请求最多 10 个文件部分，批量上传需放宽；-1 表示不限制
+    max-part-count: ${APP_TOMCAT_MAX_PART_COUNT:256}
+
+# Actuator / Micrometer 监控端点
+# 暴露 prometheus 端点供采集 RAG 检索、Agent 决策、结构化输出等指标
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ai-interview-platform
 
 # SpringDoc OpenAPI / Swagger配置
 springdoc:
@@ -61,7 +78,8 @@ spring:
     multipart:
       enabled: true
       max-file-size: 50MB  # 支持知识库上传（简历限制在业务层检查）
-      max-request-size: 50MB
+      # 批量上传一次携带多个文档，请求体上限放宽到容纳整批；单文件仍受 max-file-size 约束
+      max-request-size: ${APP_MULTIPART_MAX_REQUEST_SIZE:300MB}
   
 
   # Redisson配置 (使用 spring.redis.redisson，参考官方文档)
@@ -171,6 +189,25 @@ app:
         topk-long: ${APP_AI_RAG_TOPK_LONG:8}
         min-score-short: ${APP_AI_RAG_MIN_SCORE_SHORT:0.18}
         min-score-default: ${APP_AI_RAG_MIN_SCORE_DEFAULT:0.28}
+      # 混合检索：向量通道 + 关键词通道（pg_trgm），RRF 融合两路排名
+      hybrid:
+        enabled: ${APP_AI_RAG_HYBRID_ENABLED:true}
+        keyword-top-k: ${APP_AI_RAG_HYBRID_KEYWORD_TOPK:20}
+        keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
+        rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
+        fusion-top-k: ${APP_AI_RAG_HYBRID_FUSION_TOPK:12}
+      # 重排：调用 DashScope gte-rerank 对融合候选精排，失败安全降级为融合排序
+      rerank:
+        enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
+        model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
+        top-n: ${APP_AI_RAG_RERANK_TOPN:6}
+        timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
+    # 向量化并行与限流：文档级并行加速批量入库，全局信号量保护 DashScope embedding 配额
+    vectorize:
+      parallelism: ${APP_AI_VECTORIZE_PARALLELISM:3}
+      queue-capacity: ${APP_AI_VECTORIZE_QUEUE_CAPACITY:100}
+      embedding-concurrency: ${APP_AI_VECTORIZE_EMBEDDING_CONCURRENCY:3}
+      permit-wait-seconds: ${APP_AI_VECTORIZE_PERMIT_WAIT_SECONDS:60}
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:

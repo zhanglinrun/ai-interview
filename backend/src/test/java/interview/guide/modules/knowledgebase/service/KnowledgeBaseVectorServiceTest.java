@@ -52,7 +52,13 @@ class KnowledgeBaseVectorServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        vectorService = new KnowledgeBaseVectorService(vectorStore, vectorRepository);
+        // 测试默认关闭混合检索，专注验证向量通道；MeterRegistry 传 null 表示不埋点
+        KnowledgeBaseQueryProperties queryProperties = new KnowledgeBaseQueryProperties();
+        queryProperties.getHybrid().setEnabled(false);
+        // 向量化并行配置用默认值即可，测试场景下信号量不影响串行验证
+        KnowledgeBaseVectorizeProperties vectorizeProperties = new KnowledgeBaseVectorizeProperties();
+        vectorService = new KnowledgeBaseVectorService(
+            vectorStore, vectorRepository, queryProperties, vectorizeProperties, null);
     }
 
     // ==================== 共享辅助方法 ====================

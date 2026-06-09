@@ -102,6 +102,69 @@ public class KnowledgeBaseUploadService {
     }
 
     /**
+     * 批量上传知识库文件。
+     * <p>
+     * 逐个复用单文件上传逻辑，每个文档各自入库并发送一条向量化任务，
+     * 由多线程的向量化消费者并行处理，缓解批量入库时的串行排队。
+     * 单个文件失败不影响其余文件，最后汇总每个文件的结果。
+     *
+     * @param files    多个知识库文件
+     * @param category 统一分类（可选）
+     * @return 汇总结果：总数、成功数、失败数、每个文件的处理明细
+     */
+    public Map<String, Object> uploadKnowledgeBaseBatch(java.util.List<MultipartFile> files, String category) {
+        if (files == null || files.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
+        }
+
+        log.info("收到批量知识库上传请求: 文件数={}, category={}", files.size(), category);
+        long startTime = System.currentTimeMillis();
+
+        java.util.List<Map<String, Object>> items = new java.util.ArrayList<>();
+        int success = 0;
+        int failed = 0;
+        int duplicate = 0;
+
+        for (MultipartFile file : files) {
+            String fileName = file != null ? file.getOriginalFilename() : null;
+            try {
+                Map<String, Object> result = uploadKnowledgeBase(file, null, category);
+                boolean isDuplicate = Boolean.TRUE.equals(result.get("duplicate"));
+                if (isDuplicate) {
+                    duplicate++;
+                }
+                success++;
+                items.add(Map.of(
+                    "filename", fileName != null ? fileName : "",
+                    "status", "success",
+                    "duplicate", isDuplicate,
+                    "detail", result
+                ));
+            } catch (Exception e) {
+                failed++;
+                log.warn("批量上传中单个文件失败: {}, error={}", fileName, e.getMessage());
+                items.add(Map.of(
+                    "filename", fileName != null ? fileName : "",
+                    "status", "failed",
+                    "error", e.getMessage() != null ? e.getMessage() : "未知错误"
+                ));
+            }
+        }
+
+        long totalTime = System.currentTimeMillis() - startTime;
+        log.info("批量知识库上传完成: 总数={}, 成功={}(其中重复={}), 失败={}, 耗时={}ms",
+            files.size(), success, duplicate, failed, totalTime);
+
+        return Map.of(
+            "total", files.size(),
+            "success", success,
+            "failed", failed,
+            "duplicate", duplicate,
+            "items", items
+        );
+    }
+
+    /**
      * 验证文件类型
      */
     private void validateContentType(String contentType, String fileName) {

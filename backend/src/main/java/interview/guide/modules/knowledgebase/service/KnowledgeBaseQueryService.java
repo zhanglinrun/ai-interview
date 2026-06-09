@@ -7,6 +7,9 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
 import interview.guide.modules.knowledgebase.model.RagSourceDTO;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -48,6 +51,7 @@ public class KnowledgeBaseQueryService {
     private final KnowledgeBaseVectorService vectorService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
+    private final RerankService rerankService;
     private final PromptTemplate systemPromptTemplate;
     private final PromptTemplate userPromptTemplate;
     private final PromptTemplate rewritePromptTemplate;
@@ -58,18 +62,28 @@ public class KnowledgeBaseQueryService {
     private final int topkLong;
     private final double minScoreShort;
     private final double minScoreDefault;
+    private final boolean hybridEnabled;
+    private final boolean rerankEnabled;
+    private final MeterRegistry meterRegistry;
+    private final java.util.concurrent.atomic.AtomicInteger activeStreams =
+        new java.util.concurrent.atomic.AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
             LlmProviderRegistry llmProviderRegistry,
             KnowledgeBaseVectorService vectorService,
             KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
+            RerankService rerankService,
             KnowledgeBaseQueryProperties queryProperties,
-            ResourceLoader resourceLoader) throws IOException {
+            ResourceLoader resourceLoader,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
         this.vectorService = vectorService;
         this.listService = listService;
         this.countService = countService;
+        this.rerankService = rerankService;
+        this.meterRegistry = meterRegistry;
         this.systemPromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getSystemPromptPath())
                 .getContentAsString(StandardCharsets.UTF_8)
@@ -89,6 +103,8 @@ public class KnowledgeBaseQueryService {
         this.topkLong = queryProperties.getSearch().getTopkLong();
         this.minScoreShort = queryProperties.getSearch().getMinScoreShort();
         this.minScoreDefault = queryProperties.getSearch().getMinScoreDefault();
+        this.hybridEnabled = queryProperties.getHybrid().isEnabled();
+        this.rerankEnabled = queryProperties.getRerank().isEnabled();
     }
 
     private ChatClient getChatClient() {
@@ -276,7 +292,7 @@ public class KnowledgeBaseQueryService {
                 normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
             }
 
-            return normalizedFlux
+            return instrumentStream(normalizedFlux)
                 .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
                 .onErrorResume(e -> {
                     log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
@@ -287,6 +303,38 @@ public class KnowledgeBaseQueryService {
             log.error("知识库流式问答失败: {}", e.getMessage(), e);
             return Flux.just("【错误】知识库查询失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 为流式输出埋点：并发数 gauge、首字延迟、端到端耗时。
+     * 首字延迟以"订阅到第一个非空 token"为口径，是流式体验的核心指标。
+     */
+    private Flux<String> instrumentStream(Flux<String> source) {
+        if (meterRegistry == null) {
+            return source;
+        }
+        long[] subscribeNanos = new long[1];
+        AtomicBoolean firstTokenSeen = new AtomicBoolean(false);
+        return source
+            .doOnSubscribe(s -> {
+                subscribeNanos[0] = System.nanoTime();
+                int active = activeStreams.incrementAndGet();
+                meterRegistry.gauge("app.ai.rag.stream.active", activeStreams);
+                log.debug("RAG 流式并发数: {}", active);
+            })
+            .doOnNext(token -> {
+                if (token != null && !token.isEmpty() && firstTokenSeen.compareAndSet(false, true)) {
+                    meterRegistry.timer("app.ai.rag.stream.first_token_latency")
+                        .record(System.nanoTime() - subscribeNanos[0],
+                            java.util.concurrent.TimeUnit.NANOSECONDS);
+                }
+            })
+            .doFinally(signal -> {
+                activeStreams.decrementAndGet();
+                meterRegistry.timer("app.ai.rag.stream.total_latency")
+                    .record(System.nanoTime() - subscribeNanos[0],
+                        java.util.concurrent.TimeUnit.NANOSECONDS);
+            });
     }
 
     private QueryContext buildQueryContext(String originalQuestion, List<Message> history) {
@@ -312,24 +360,42 @@ public class KnowledgeBaseQueryService {
         return question == null ? "" : question.trim();
     }
 
-//    向量检索
+//    混合检索（向量 + 关键词 RRF 融合）+ 重排
     private List<Document> retrieveRelevantDocs(QueryContext queryContext, List<Long> knowledgeBaseIds) {
         for (String candidateQuery : queryContext.candidateQueries()) {
             if (candidateQuery.isBlank()) {
                 continue;
             }
-            List<Document> docs = vectorService.similaritySearch(
-                candidateQuery,
-                knowledgeBaseIds,
-                queryContext.searchParams().topK(),
-                queryContext.searchParams().minScore()
-            );
-            log.info("检索候选 query='{}'，命中 {} 条", candidateQuery, docs.size());
+            List<Document> docs = hybridEnabled
+                ? vectorService.hybridSearch(
+                    candidateQuery,
+                    knowledgeBaseIds,
+                    queryContext.searchParams().topK(),
+                    queryContext.searchParams().minScore())
+                : vectorService.similaritySearch(
+                    candidateQuery,
+                    knowledgeBaseIds,
+                    queryContext.searchParams().topK(),
+                    queryContext.searchParams().minScore());
+            log.info("检索候选 query='{}'，混合检索命中 {} 条", candidateQuery, docs.size());
             if (hasEffectiveHit(docs)) {
-                return docs;
+                return rerankIfEnabled(candidateQuery, docs);
             }
         }
         return List.of();
+    }
+
+    /**
+     * 若重排可用，对融合候选做精排取 topN；否则原样返回融合结果。
+     * 任何重排异常都已在 RerankService 内部安全降级。
+     */
+    private List<Document> rerankIfEnabled(String query, List<Document> docs) {
+        if (!rerankEnabled || !rerankService.isEnabled()) {
+            return docs;
+        }
+        List<Document> reranked = rerankService.rerank(query, docs);
+        log.info("重排完成: 融合候选 {} -> 精排保留 {}", docs.size(), reranked.size());
+        return reranked;
     }
 
     private SearchParams resolveSearchParams(String question) {

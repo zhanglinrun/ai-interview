@@ -6,6 +6,7 @@ import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseVectorService;
+import interview.guide.modules.knowledgebase.service.KnowledgeBaseVectorizeProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
 import org.springframework.stereotype.Component;
@@ -22,18 +23,29 @@ public class VectorizeStreamConsumer extends AbstractStreamConsumer<VectorizeStr
 
     private final KnowledgeBaseVectorService vectorService;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final KnowledgeBaseVectorizeProperties vectorizeProperties;
 
     public VectorizeStreamConsumer(
         RedisService redisService,
         KnowledgeBaseVectorService vectorService,
-        KnowledgeBaseRepository knowledgeBaseRepository
+        KnowledgeBaseRepository knowledgeBaseRepository,
+        KnowledgeBaseVectorizeProperties vectorizeProperties
     ) {
         super(redisService);
         this.vectorService = vectorService;
         this.knowledgeBaseRepository = knowledgeBaseRepository;
+        this.vectorizeProperties = vectorizeProperties;
     }
 
     record VectorizePayload(Long kbId, String content) {}
+
+    /**
+     * 文档级并行：多个文档的向量化任务并发处理，缓解批量上传时的串行排队。
+     */
+    @Override
+    protected int workerPoolSize() {
+        return vectorizeProperties.getParallelism();
+    }
 
     @Override
     protected String taskDisplayName() {

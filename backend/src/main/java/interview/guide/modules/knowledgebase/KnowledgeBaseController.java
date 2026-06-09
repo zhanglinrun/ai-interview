@@ -160,6 +160,19 @@ public class KnowledgeBaseController {
     }
 
     /**
+     * 批量上传知识库文件
+     * 一次接收多个文件，每个文档各自入库并发送向量化任务，由多线程消费者并行处理。
+     */
+    @PostMapping(value = "/api/knowledgebase/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    public Result<Map<String, Object>> uploadKnowledgeBaseBatch(
+            @RequestParam("files") List<MultipartFile> files,
+            @RequestParam(value = "category", required = false) String category) {
+        return Result.success(uploadService.uploadKnowledgeBaseBatch(files, category));
+    }
+
+    /**
      * 下载知识库文件
      */
     @GetMapping("/api/knowledgebase/{id}/download")

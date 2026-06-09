@@ -10,10 +10,12 @@ import org.redisson.api.stream.StreamMessageId;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public abstract class AbstractStreamConsumer<T> {
@@ -21,10 +23,20 @@ public abstract class AbstractStreamConsumer<T> {
     private final RedisService redisService;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ExecutorService executorService;
+    private ExecutorService workerPool;
     private String consumerName;
 
     protected AbstractStreamConsumer(RedisService redisService) {
         this.redisService = redisService;
+    }
+
+    /**
+     * 工作线程数。默认 1 表示在消费线程内串行处理（历史行为）。
+     * 子类返回大于 1 时，消费线程只负责拉取，实际业务交给工作线程池并行执行，
+     * 实现文档级并行。
+     */
+    protected int workerPoolSize() {
+        return 1;
     }
 
     @PostConstruct
@@ -44,6 +56,27 @@ public abstract class AbstractStreamConsumer<T> {
             new ThreadPoolExecutor.AbortPolicy()
         );
 
+        int poolSize = Math.max(1, workerPoolSize());
+        if (poolSize > 1) {
+            AtomicInteger seq = new AtomicInteger(0);
+            // 有界队列 + CallerRunsPolicy：队列满时由消费线程兜底执行，形成自然背压，
+            // 避免拉取速度远超处理速度时任务无限堆积。
+            this.workerPool = new ThreadPoolExecutor(
+                poolSize,
+                poolSize,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(poolSize * 4),
+                r -> {
+                    Thread t = new Thread(r, threadName() + "-worker-" + seq.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy()
+            );
+            log.info("{} consumer 启用文档级并行: workers={}", taskDisplayName(), poolSize);
+        }
+
         running.set(true);
         executorService.submit(this::startConsumer);
         log.info("{} consumer started: consumerName={}", taskDisplayName(), consumerName);
@@ -54,6 +87,9 @@ public abstract class AbstractStreamConsumer<T> {
         running.set(false);
         if (executorService != null) {
             executorService.shutdown();
+        }
+        if (workerPool != null) {
+            workerPool.shutdown();
         }
         log.info("{} consumer stopped: consumerName={}", taskDisplayName(), consumerName);
     }
@@ -98,6 +134,16 @@ public abstract class AbstractStreamConsumer<T> {
         }
 
         int retryCount = parseRetryCount(data);
+        // 开启文档级并行时，消费线程只负责分发，业务在工作线程池里并行执行；
+        // 否则保持历史行为，在消费线程内串行处理。
+        if (workerPool != null) {
+            workerPool.submit(() -> handlePayload(messageId, payload, retryCount));
+        } else {
+            handlePayload(messageId, payload, retryCount);
+        }
+    }
+
+    private void handlePayload(StreamMessageId messageId, T payload, int retryCount) {
         log.info("Processing {} task: payload={}, messageId={}, retryCount={}",
             taskDisplayName(), payloadIdentifier(payload), messageId, retryCount);
 
