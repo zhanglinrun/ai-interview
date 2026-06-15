@@ -24,13 +24,17 @@ import java.time.LocalDateTime;
         @UniqueConstraint(name = "uk_interview_answer_session_question", columnNames = {"session_id", "question_index"})
     },
     indexes = {
-        @Index(name = "idx_interview_answer_session_question", columnList = "session_id,question_index")
+        @Index(name = "idx_interview_answer_session_question", columnList = "session_id,question_index"),
+        @Index(name = "idx_interview_answers_user_id", columnList = "userId")
     })
 public class InterviewAnswerEntity {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
+    private Long userId;
     
     // 关联的会话
     @ManyToOne(fetch = FetchType.LAZY)
@@ -83,6 +87,14 @@ public class InterviewAnswerEntity {
     
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
     
     public InterviewSessionEntity getSession() {

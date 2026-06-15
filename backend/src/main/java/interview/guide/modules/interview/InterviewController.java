@@ -181,7 +181,7 @@ public class InterviewController {
     @DeleteMapping("/api/interview/sessions/{sessionId}")
     public Result<Void> deleteInterview(@PathVariable String sessionId) {
         log.info("删除面试会话: {}", sessionId);
-        persistenceService.deleteSessionBySessionId(sessionId);
+        sessionService.deleteSession(sessionId);
         return Result.success(null);
     }
 }

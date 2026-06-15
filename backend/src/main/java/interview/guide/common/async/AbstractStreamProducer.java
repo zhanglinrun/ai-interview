@@ -4,7 +4,9 @@ import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.infrastructure.redis.RedisService;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Redis Stream 生产者模板基类。
@@ -20,14 +22,20 @@ public abstract class AbstractStreamProducer<T> {
     }
 
     protected void sendTask(T payload) {
+        // 为每条任务生成稳定的 taskId 作为幂等去重键：消费侧据此保证"同一任务只真正执行一次"，
+        // 重新入队重试、被认领接管时该 ID 都保持不变。子类的 buildMessage 返回不可变 Map，
+        // 这里复制为可变 Map 后注入，子类无需感知。
+        Map<String, String> message = new HashMap<>(buildMessage(payload));
+        message.putIfAbsent(AsyncTaskStreamConstants.FIELD_TASK_ID, UUID.randomUUID().toString());
         try {
             String messageId = redisService.streamAdd(
                 streamKey(),
-                buildMessage(payload),
+                message,
                 AsyncTaskStreamConstants.STREAM_MAX_LEN
             );
-            log.info("{}任务已发送到Stream: {}, messageId={}",
-                taskDisplayName(), payloadIdentifier(payload), messageId);
+            log.info("{}任务已发送到Stream: {}, messageId={}, taskId={}",
+                taskDisplayName(), payloadIdentifier(payload), messageId,
+                message.get(AsyncTaskStreamConstants.FIELD_TASK_ID));
         } catch (Exception e) {
             log.error("发送{}任务失败: {}, error={}",
                 taskDisplayName(), payloadIdentifier(payload), e.getMessage(), e);

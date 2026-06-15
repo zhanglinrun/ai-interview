@@ -31,6 +31,12 @@ management:
   metrics:
     tags:
       application: ai-interview-platform
+    distribution:
+      # 为延迟类 Timer 导出直方图桶（_bucket 序列），Grafana 看板的
+      # histogram_quantile(P99/P95/P50) 依赖它；只开 http 和 app.ai 前缀，控制时间序列基数。
+      percentiles-histogram:
+        "[http.server.requests]": true
+        "[app.ai]": true
 
 # SpringDoc OpenAPI / Swagger配置
 springdoc:
@@ -67,12 +73,23 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update #首次启动用 create，表创建成功后，改回 update
+      # Flyway 接管 schema 演进，JPA 只做验证：启动时检查 Entity 与库表是否一致，不一致则报错退出。
+      # 新增字段/表需手写 migration SQL（src/main/resources/db/migration/V*.sql），而非依赖 JPA 自动建表。
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+
+  # Flyway 数据库版本迁移配置
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    # V1__baseline.sql 锁定初始 schema；V2 起是正式 migration（如加 user_id 列做多租户隔离）
+    locations: classpath:db/migration
+    validate-on-migrate: true
 
   servlet:
     multipart:
@@ -111,6 +128,13 @@ spring:
 
 # Application custom configuration
 app:
+  security:
+    jwt:
+      # JWT 密钥（至少 32 字节，生产环境必须改为强随机密钥）
+      secret: ${APP_JWT_SECRET:change-this-to-a-strong-random-secret-at-least-32-bytes-long}
+      access-token-validity-ms: 3600000      # 1 小时
+      refresh-token-validity-ms: 2592000000  # 30 天
+
   ai:
     default-provider: dashscope
     default-embedding-provider: dashscope

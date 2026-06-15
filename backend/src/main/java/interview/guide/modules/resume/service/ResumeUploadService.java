@@ -4,6 +4,7 @@ import interview.guide.common.config.AppConfigProperties;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.security.UserContext;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
@@ -171,7 +172,8 @@ public class ResumeUploadService {
      */
     @Transactional
     public void reanalyze(Long resumeId) {
-        ResumeEntity resume = resumeRepository.findById(resumeId)
+        Long userId = UserContext.requireUserId();
+        ResumeEntity resume = resumeRepository.findByUserIdAndId(userId, resumeId)
             .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
 
         log.info("开始重新分析简历: resumeId={}, filename={}", resumeId, resume.getOriginalFilename());

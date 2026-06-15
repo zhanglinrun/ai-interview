@@ -16,7 +16,15 @@
 
 ## 项目介绍
 
-InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音）、面试安排、知识库管理和多模型配置的智能面试辅助平台。系统利用大语言模型（LLM）、向量数据库、Redis Stream 异步任务和实时语音技术，为求职者、HR 和培训机构提供智能化的简历评估、面试练习、知识库问答和面试日程管理能力。
+InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音）、面试安排、知识库管理和多模型配置的智能面试辅助平台。系统利用大语言模型、向量数据库、异步任务队列和实时语音技术，为求职者、HR 和培训机构提供智能化的简历评估、面试练习、知识库问答和日程管理能力。
+
+核心特性：
+- **ReAct Agent 自适应出题**：基于知识库检索和简历分析，动态调整面试题目和难度
+- **10+ 面试方向 Skill**：Java 后端、阿里/字节/腾讯专项、前端、Python、算法、系统设计等，支持 JD 智能解析
+- **统一评估引擎**：文字面试和语音面试使用同一套评估逻辑，结果可对比分析
+- **实时语音面试**：WebSocket 双向通信，支持流式对话、自动断句、回声防护和暂停恢复
+- **多模型管理**：支持 DashScope、Kimi、DeepSeek、GLM 等多个 LLM Provider，运行时可视化切换
+- **RAG 知识库**：混合检索 + 查询改写 + 智能 Rerank，提供专业领域问答能力
 
 ## 系统架构
 
@@ -128,31 +136,6 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 - **语音服务配置**：ASR/TTS 配置可视化管理，支持语音服务连通性测试。
 - **配置安全落盘**：运行时配置默认写入用户目录 `~/.interview-guide/`，支持 API Key 加密配置。
 
-### TODO
-
-- [x] 问答助手的 Markdown 展示优化
-- [x] 知识库管理页面的知识库下载
-- [x] 异步生成模拟面试评估报告
-- [x] Docker 快速部署
-- [x] 添加 API 限流保护
-- [x] 前端性能优化（RAG 聊天 - 虚拟列表）
-- [x] 模拟面试增加追问功能
-- [x] 语音面试功能（基于 Qwen3 实时语音模型）
-- [x] 面试安排管理（智能解析 + 日历视图）
-- [x] Skill 驱动出题（10+ 面试方向 + 参考知识库）
-- [x] 统一面试评估架构（文字/语音共用评估引擎）
-- [x] 面试历史题目去重
-- [x] 面试中心页（整合文字/语音入口）
-- [x] 语音面试 LLM 流式输出 + 句子级并发 TTS
-- [x] 语音面试暂停/恢复 + 手动提交 + 回声防护
-- [x] 多 LLM Provider 管理与默认模型切换
-- [x] RAG 聊天会话管理 + 虚拟列表优化
-- [x] 可重复注解 API 限流（Global/IP/User 维度）
-- [ ] 打通模拟面试和知识库
-- [ ] 语音面试接入 WebRTC 降低延迟
-- [ ] 语音面试支持更多 TTS 音色
-
-
 ## 效果展示
 
 ### 简历与面试
@@ -231,16 +214,37 @@ interview-guide/
 │   │   │   └── redis/                # RedisService、面试会话缓存
 │   │   └── modules/                  # 业务模块
 │   │       ├── interview/            # 模拟面试模块
+│   │       │   ├── agent/            # ReAct Agent 出题（含工具：知识库检索、简历读取）
+│   │       │   ├── skill/            # Skill 管理（10+ 方向 + JD 解析）
+│   │       │   ├── listener/         # 异步评估 Stream 消费者
+│   │       │   └── service/          # 会话管理、出题、追问、评估
 │   │       ├── interviewschedule/    # 面试安排模块
 │   │       ├── knowledgebase/        # 知识库模块
+│   │       │   ├── listener/         # 向量化 Stream 消费者
+│   │       │   └── service/          # 混合检索、查询改写、Rerank、聊天会话
 │   │       ├── llmprovider/          # 多模型 Provider 与语音配置
+│   │       │   └── service/          # API Key 加密、连通性测试、启动加载
 │   │       ├── resume/               # 简历模块
+│   │       │   └── service/          # 上传、解析、评分、去重、历史记录
 │   │       └── voiceinterview/       # 语音面试模块
+│   │           ├── handler/          # WebSocket 处理器（实时字幕、VAD 断句）
+│   │           └── service/          # 语音服务（流式 TTS、并发合成）
 │   └── src/main/resources/
 │       ├── application.yml           # 应用配置
 │       ├── prompts/                  # AI 提示词模板（StringTemplate）
-│       ├── scripts/                  # Redis Lua 脚本
+│       ├── scripts/                  # Redis Lua 脚本（限流）
 │       ├── skills/                   # 面试 Skill 定义和参考题库
+│       │   ├── java-backend/         # Java 后端通用
+│       │   ├── ali-backend/          # 阿里后端专项
+│       │   ├── bytedance-backend/    # 字节后端专项
+│       │   ├── java-backend-tencent/ # 腾讯后端专项
+│       │   ├── frontend/             # 前端通用
+│       │   ├── python-backend/       # Python 后端
+│       │   ├── algorithm/            # 算法
+│       │   ├── system-design/        # 系统设计
+│       │   ├── test-development/     # 测试开发
+│       │   ├── ai-agent-dev/         # AI Agent 开发
+│       │   └── _shared/references/   # 共享参考题库（Java/MySQL/Redis/Spring 等）
 │       └── voice-interview-opening.yml # 语音面试开场白配置
 │
 ├── frontend/                         # 前端应用
@@ -256,7 +260,7 @@ interview-guide/
 │
 ├── docker-compose.yml                # 完整部署：前端 + 后端 + PostgreSQL + Redis + MinIO
 ├── docker-compose.dev.yml            # 本地开发依赖：PostgreSQL + Redis + RustFS
-├── docs/                             # 架构设计与改造记录
+├── AGENTS.md                         # 项目编码规范（分层架构、错误码、限流、异步任务等）
 ├── .env.example                      # 环境变量示例
 └── README.md
 ```

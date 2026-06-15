@@ -52,6 +52,7 @@ qodana.yaml
 
 # AI assistant / local tooling
 .claude/
+.codex/
 .playwright-mcp/
 CLAUDE.md
 GEMINI.md
@@ -66,3 +67,11 @@ Thumbs.db
 
 # Project notes copied from upstream are kept local by default
 study/
+
+# RAG evaluation corpus (third-party PDFs) and extracted text — local only, never commit
+456/
+.rag-eval-tmp/
+
+.trellis/
+.cursor/
+.codegraph/

@@ -53,7 +53,7 @@ public class AnswerEvaluationService {
                 .toList();
 
             String referenceContext = skillService.buildEvaluationReferenceSectionSafe(
-                persistenceService.findBySessionId(sessionId)
+                persistenceService.findBySessionIdInternal(sessionId)
                     .map(s -> s.getSkillId())
                     .orElse(null)
             );

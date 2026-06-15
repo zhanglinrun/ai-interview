@@ -2,6 +2,7 @@ package interview.guide.modules.resume.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.security.UserContext;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.mapper.ResumeMapper;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
@@ -43,9 +44,10 @@ public class ResumePersistenceService {
      * @return 如果存在返回已有的简历实体，否则返回空
      */
     public Optional<ResumeEntity> findExistingResume(MultipartFile file) {
+        Long userId = UserContext.requireUserId();
         try {
             String fileHash = fileHashService.calculateHash(file);
-            Optional<ResumeEntity> existing = resumeRepository.findByFileHash(fileHash);
+            Optional<ResumeEntity> existing = resumeRepository.findByUserIdAndFileHash(userId, fileHash);
             
             if (existing.isPresent()) {
                 log.info("检测到重复简历: hash={}", fileHash);
@@ -67,10 +69,12 @@ public class ResumePersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public ResumeEntity saveResume(MultipartFile file, String resumeText,
                                    String storageKey, String storageUrl) {
+        Long userId = UserContext.requireUserId();
         try {
             String fileHash = fileHashService.calculateHash(file);
             
             ResumeEntity resume = new ResumeEntity();
+            resume.setUserId(userId);
             resume.setFileHash(fileHash);
             resume.setOriginalFilename(file.getOriginalFilename());
             resume.setFileSize(file.getSize());
@@ -97,6 +101,7 @@ public class ResumePersistenceService {
         try {
             // 使用 MapStruct 映射基础字段
             ResumeAnalysisEntity entity = resumeMapper.toAnalysisEntity(analysis);
+            entity.setUserId(resume.getUserId());
             entity.setResume(resume);
 
             // JSON 字段需要手动序列化
@@ -118,7 +123,10 @@ public class ResumePersistenceService {
      * 获取简历的最新评测结果
      */
     public Optional<ResumeAnalysisEntity> getLatestAnalysis(Long resumeId) {
-        return Optional.ofNullable(analysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(resumeId));
+        Long userId = UserContext.requireUserId();
+        return Optional.ofNullable(
+            analysisRepository.findFirstByUserIdAndResumeIdOrderByAnalyzedAtDesc(userId, resumeId)
+        );
     }
     
     /**
@@ -132,14 +140,15 @@ public class ResumePersistenceService {
      * 获取所有简历列表
      */
     public List<ResumeEntity> findAllResumes() {
-        return resumeRepository.findAll();
+        return resumeRepository.findAllByUserIdOrderByUploadedAtDesc(UserContext.requireUserId());
     }
     
     /**
      * 获取简历的所有评测记录
      */
     public List<ResumeAnalysisEntity> findAnalysesByResumeId(Long resumeId) {
-        return analysisRepository.findByResumeIdOrderByAnalyzedAtDesc(resumeId);
+        Long userId = UserContext.requireUserId();
+        return analysisRepository.findByUserIdAndResumeIdOrderByAnalyzedAtDesc(userId, resumeId);
     }
     
     /**
@@ -177,7 +186,7 @@ public class ResumePersistenceService {
      * 根据ID获取简历
      */
     public Optional<ResumeEntity> findById(Long id) {
-        return resumeRepository.findById(id);
+        return resumeRepository.findByUserIdAndId(UserContext.requireUserId(), id);
     }
     
     /**
@@ -186,7 +195,8 @@ public class ResumePersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteResume(Long id) {
-        Optional<ResumeEntity> resumeOpt = resumeRepository.findById(id);
+        Long userId = UserContext.requireUserId();
+        Optional<ResumeEntity> resumeOpt = resumeRepository.findByUserIdAndId(userId, id);
         if (resumeOpt.isEmpty()) {
             throw new BusinessException(ErrorCode.RESUME_NOT_FOUND);
         }
@@ -194,7 +204,8 @@ public class ResumePersistenceService {
         ResumeEntity resume = resumeOpt.get();
         
         // 1. 删除所有简历分析记录
-        List<ResumeAnalysisEntity> analyses = analysisRepository.findByResumeIdOrderByAnalyzedAtDesc(id);
+        List<ResumeAnalysisEntity> analyses =
+            analysisRepository.findByUserIdAndResumeIdOrderByAnalyzedAtDesc(userId, id);
         if (!analyses.isEmpty()) {
             analysisRepository.deleteAll(analyses);
             log.info("已删除 {} 条简历分析记录", analyses.size());

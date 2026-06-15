@@ -22,9 +22,13 @@ public interface ResumeAnalysisRepository extends JpaRepository<ResumeAnalysisEn
      * 根据简历ID查找最新评测记录
      */
     ResumeAnalysisEntity findFirstByResumeIdOrderByAnalyzedAtDesc(Long resumeId);
+
+    ResumeAnalysisEntity findFirstByUserIdAndResumeIdOrderByAnalyzedAtDesc(Long userId, Long resumeId);
     
     /**
      * 根据简历ID查找所有评测记录
      */
     List<ResumeAnalysisEntity> findByResumeIdOrderByAnalyzedAtDesc(Long resumeId);
+
+    List<ResumeAnalysisEntity> findByUserIdAndResumeIdOrderByAnalyzedAtDesc(Long userId, Long resumeId);
 }

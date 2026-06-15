@@ -24,7 +24,8 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "resumes", indexes = {
-    @Index(name = "idx_resume_hash", columnList = "fileHash", unique = true)
+    @Index(name = "idx_resume_user_hash", columnList = "userId,fileHash", unique = true),
+    @Index(name = "idx_resumes_user_id", columnList = "userId")
 })
 @Data
 @Builder
@@ -35,8 +36,11 @@ public class ResumeEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
+    private Long userId;
     
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(nullable = false, length = 64)
     private String fileHash;
     
     @Column(nullable = false)

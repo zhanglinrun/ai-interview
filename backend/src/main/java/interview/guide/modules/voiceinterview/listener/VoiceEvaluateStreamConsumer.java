@@ -97,24 +97,10 @@ public class VoiceEvaluateStreamConsumer extends AbstractStreamConsumer<VoiceEva
     }
 
     @Override
-    protected void retryMessage(VoiceEvaluatePayload payload, int retryCount) {
-        String sessionId = payload.sessionId();
-        try {
-            Map<String, String> message = Map.of(
-                AsyncTaskStreamConstants.FIELD_VOICE_SESSION_ID, sessionId,
-                AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-            );
-
-            redisService().streamAdd(
-                AsyncTaskStreamConstants.VOICE_EVALUATE_STREAM_KEY,
-                message,
-                AsyncTaskStreamConstants.STREAM_MAX_LEN
-            );
-            log.info("语音面试评估任务已重新入队: sessionId={}, retryCount={}", sessionId, retryCount);
-        } catch (Exception e) {
-            log.error("重试入队失败: sessionId={}, error={}", sessionId, e.getMessage(), e);
-            voiceInterviewService.updateEvaluateStatus(
-                    Long.parseLong(sessionId), AsyncTaskStatus.FAILED, truncateError("重试入队失败: " + e.getMessage()));
-        }
+    protected Map<String, String> buildRetryMessage(VoiceEvaluatePayload payload, int retryCount) {
+        return Map.of(
+            AsyncTaskStreamConstants.FIELD_VOICE_SESSION_ID, payload.sessionId(),
+            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
+        );
     }
 }

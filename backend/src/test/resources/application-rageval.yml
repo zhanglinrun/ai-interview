@@ -1,0 +1,81 @@
+# RAG 检索评测专用 profile
+#
+# 与默认 test profile（H2 内存库）不同，评测必须连真实的 pgvector + Redis + DashScope，
+# 才能反映线上真实检索表现。通过 @ActiveProfiles("rageval") + @Tag("rag-eval") 隔离，
+# 默认不随普通 mvn test 运行。
+#
+# 运行前提：
+#   1. docker compose -f docker-compose.dev.yml up -d 起好 pgvector / redis / rustfs
+#   2. 评测语料已入库（见 rag-eval/README.md），知识库 id 通过 ragdataset.kb-* 配置传入
+#   3. .env 里 AI_BAILIAN_API_KEY 就绪（embedding 与 rerank 都要用）
+
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:interview_guide}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:123456}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  redis:
+    redisson:
+      config: |
+        singleServerConfig:
+          address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"
+          database: 0
+
+  ai:
+    retry:
+      max-attempts: 1
+      on-client-errors: false
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1024
+        initialize-schema: false
+        remove-existing-vector-store-table: false
+
+# 评测必须保证三档策略真正生效、互相可区分，所以这里显式打开混合检索与重排开关，
+# 不依赖主配置默认值。测试里分别调用 similaritySearch / hybridSearch / rerank 三个入口，
+# hybridSearch 内部受 app.ai.rag.hybrid.enabled 控制，关闭时会退化成纯向量，失去对比意义。
+#
+# 第二轮要让 rerank 有足够候选可精排，所以把混合检索的候选规模拉大：
+#   keyword-top-k / fusion-top-k 提到 30，rerank top-n 提到 20（从大候选里精排取前若干）。
+#   评测代码再从这批候选截断到评分用的 evalTopK（默认 6），体现「精排把好结果顶到前面」。
+app:
+  ai:
+    rag:
+      hybrid:
+        enabled: true
+        keyword-top-k: 30
+        fusion-top-k: 30
+      rerank:
+        enabled: true
+        top-n: 20
+
+# 评测数据集配置：语料知识库 id + 评测集路径
+# kb-* 的值来自入库后生成的知识库 id（见 rag-eval/README.md）
+ragdataset:
+  dataset-path: classpath:rag-eval/eval-dataset.yaml
+  kb-redis: ${RAGEVAL_KB_REDIS:41}
+  kb-mysql: ${RAGEVAL_KB_MYSQL:42}
+  kb-distributed: ${RAGEVAL_KB_DISTRIBUTED:40}
+  # 评分用 topK（截断到前 evalTopK 个算 Hit/MRR/NDCG）
+  top-k: ${RAGEVAL_TOPK:6}
+  # 候选 topK（向量/混合先取这么多候选，rerank 从中精排）
+  candidate-top-k: ${RAGEVAL_CANDIDATE_TOPK:20}
+  # 输出报告路径
+  report-path: ${RAGEVAL_REPORT_PATH:target/rag-eval-report.md}

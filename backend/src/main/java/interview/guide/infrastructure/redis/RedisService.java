@@ -1,5 +1,6 @@
 package interview.guide.infrastructure.redis;
 
+import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.redisson.api.RMap;
 import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.options.KeysScanOptions;
+import org.redisson.api.stream.AutoClaimResult;
 import org.redisson.api.stream.StreamAddArgs;
 import org.redisson.api.stream.StreamCreateGroupArgs;
 import org.redisson.api.stream.StreamMessageId;
@@ -334,6 +336,112 @@ public class RedisService {
     public long streamLen(String streamKey) {
         RStream<String, String> stream = redissonClient.getStream(streamKey, StringCodec.INSTANCE);
         return stream.size();
+    }
+
+    /**
+     * 获取某消费者组的待确认消息数（PEL 总量）。
+     * 待确认数持续偏高，意味着消息被读取后迟迟没有 ACK，是消费滞后或处理失败的早期信号。
+     * 流或组尚未创建时返回 0。
+     */
+    public long streamPendingCount(String streamKey, String groupName) {
+        RStream<String, String> stream = redissonClient.getStream(streamKey, StringCodec.INSTANCE);
+        try {
+            return stream.getPendingInfo(groupName).getTotal();
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * 认领空闲超时的待确认消息（XAUTOCLAIM）。
+     * <p>
+     * 消费者崩溃后，它已读取但未 ACK 的消息会一直滞留在消费者组的待确认列表（PEL）里。
+     * 本方法把空闲时间超过 {@code minIdleTime} 的这类消息转移给当前消费者，使其能够被重新处理，
+     * 避免消息因原消费者下线而永久卡住。
+     *
+     * @param streamKey    Stream 键
+     * @param groupName    消费者组名
+     * @param consumerName 认领后归属的消费者名（当前存活消费者）
+     * @param minIdleTime  最小空闲时间，只认领空闲超过该时长的消息
+     * @param count        单次认领上限
+     * @return 被认领的消息（messageId -> 字段表），无则返回空 Map
+     */
+    public Map<StreamMessageId, Map<String, String>> streamAutoClaim(
+            String streamKey,
+            String groupName,
+            String consumerName,
+            Duration minIdleTime,
+            int count) {
+        RStream<String, String> stream = redissonClient.getStream(streamKey, StringCodec.INSTANCE);
+        try {
+            AutoClaimResult<String, String> result = stream.autoClaim(
+                groupName,
+                consumerName,
+                minIdleTime.toMillis(),
+                TimeUnit.MILLISECONDS,
+                StreamMessageId.MIN,
+                count
+            );
+            Map<StreamMessageId, Map<String, String>> messages = result.getMessages();
+            return messages != null ? messages : Map.of();
+        } catch (Exception e) {
+            // 组/流尚未创建或 Redis 临时异常时，认领是尽力而为的补偿动作，失败不应中断主消费循环。
+            log.warn("autoClaim 失败: stream={}, group={}, error={}", streamKey, groupName, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * 投递消息到死信队列（一个独立的 Stream）。
+     * 重试耗尽的消息转入此处，保留原始字段与失败原因，便于事后排查或重放。
+     */
+    public void streamAddDlq(String dlqStreamKey, Map<String, String> message) {
+        try {
+            streamAdd(dlqStreamKey, message, AsyncTaskStreamConstants.STREAM_MAX_LEN);
+        } catch (Exception e) {
+            log.error("写入死信队列失败: dlq={}, error={}", dlqStreamKey, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 幂等去重：尝试将任务标记为"处理中"。
+     * <p>
+     * 基于 {@code setIfAbsent} 的占位语义：只有首次设置成功的消费者才真正执行业务。
+     * 若键已存在且为 DONE，说明该任务已完成，应直接跳过；若为 PROCESSING，说明有其他消费者
+     * 正在处理或上一次处理中途崩溃（PROCESSING 带较短 TTL，过期后可被重新占用）。
+     *
+     * @return true 表示占位成功（本消费者应执行业务）；false 表示已被占位或已完成（应跳过）
+     */
+    public boolean tryAcquireIdempotency(String dedupKey, Duration processingTtl) {
+        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
+        return bucket.setIfAbsent(AsyncTaskStreamConstants.DEDUP_STATE_PROCESSING, processingTtl);
+    }
+
+    /**
+     * 查询幂等键当前状态，可能为 PROCESSING / DONE / null（不存在）。
+     */
+    public String getIdempotencyState(String dedupKey) {
+        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
+        return bucket.get();
+    }
+
+    /**
+     * 标记任务已完成：写入 DONE 并附带较长 TTL，使后续重复投递可被快速识别并跳过。
+     */
+    public void markIdempotencyDone(String dedupKey, Duration doneTtl) {
+        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
+        bucket.set(AsyncTaskStreamConstants.DEDUP_STATE_DONE, doneTtl);
+    }
+
+    /**
+     * 释放处理中占位（业务失败需要重试时调用），让消息重新入队后能再次被占用执行。
+     * 用 compareAndSet 原子地"当前值为 PROCESSING 才删除"，避免读取与删除之间
+     * 占位过期、被其他消费者重新抢占后误删他人的占位或已完成标记。
+     */
+    public void releaseIdempotencyIfProcessing(String dedupKey) {
+        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
+        // update 传 null 表示匹配时删除键，Redisson 在服务端以 Lua 原子执行
+        bucket.compareAndSet(AsyncTaskStreamConstants.DEDUP_STATE_PROCESSING, null);
     }
 
     // ==================== 原子计数器 ====================

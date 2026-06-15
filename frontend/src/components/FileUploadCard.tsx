@@ -1,6 +1,6 @@
-import {ChangeEvent, DragEvent, useCallback, useState} from 'react';
+import {ChangeEvent, DragEvent, MouseEvent, useCallback, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
-import {AlertCircle, FileText, Loader2, Upload, X} from 'lucide-react';
+import {AlertCircle, FileText, Info, Loader2, Upload, X} from 'lucide-react';
 
 export interface FileUploadCardProps {
   /** 标题 */
@@ -27,6 +27,8 @@ export interface FileUploadCardProps {
   nameLabel?: string;
   /** 错误信息 */
   error?: string;
+  /** 提示信息 */
+  notice?: string;
   /** 文件选择回调 */
   onFileSelect?: (file: File) => void;
   /** 上传回调 */
@@ -48,6 +50,7 @@ export default function FileUploadCard({
   namePlaceholder = '留空则使用文件名',
   nameLabel = '名称（可选）',
   error,
+  notice,
   onFileSelect,
   onUpload,
   onBack,
@@ -84,7 +87,9 @@ export default function FileUploadCard({
     }
   }, [onFileSelect]);
 
-  const handleUpload = () => {
+  const handleUpload = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
     if (!selectedFile) return;
     onUpload(selectedFile, name.trim() || undefined);
   };
@@ -172,8 +177,10 @@ export default function FileUploadCard({
                     <p className="text-sm text-slate-500 dark:text-slate-400">{formatFileSize(selectedFile.size)}</p>
                   </div>
                   <button
+                    type="button"
                       className="w-8 h-8 bg-red-100 dark:bg-red-900/50 text-red-500 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors flex items-center justify-center"
                     onClick={(e) => {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedFile(null);
                     }}
@@ -204,10 +211,12 @@ export default function FileUploadCard({
                   </p>
                 </div>
                 <motion.button
+                  type="button"
                   className="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 transition-all"
                   whileHover={{ scale: 1.02, y: -2 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     document.getElementById('file-upload-input')?.click();
                   }}
@@ -255,10 +264,26 @@ export default function FileUploadCard({
         )}
       </AnimatePresence>
 
+      {/* 提示信息 */}
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-300 text-center flex items-center justify-center gap-2"
+          >
+            <Info className="w-5 h-5" />
+            {notice}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 操作按钮 */}
       <div className="mt-8 flex gap-4 justify-center">
         {onBack && (
           <motion.button
+            type="button"
             onClick={onBack}
             className="px-6 py-3 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
             whileHover={{ scale: 1.02 }}
@@ -269,6 +294,7 @@ export default function FileUploadCard({
         )}
         {selectedFile && (
           <motion.button
+            type="button"
             onClick={handleUpload}
             disabled={uploading}
             className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-semibold shadow-lg shadow-emerald-500/30 hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"

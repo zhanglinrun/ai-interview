@@ -5,6 +5,8 @@ import interview.guide.common.constant.CommonConstants.InterviewDefaults;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.security.UserContext;
+import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
@@ -52,10 +54,10 @@ public class VoiceInterviewService {
     private final VoiceInterviewProperties properties;
     private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final ResumeRepository resumeRepository;
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
     private static final int CACHE_TTL_HOURS = 1;
-    private static final String DEFAULT_USER_ID = "default";
 
     /**
      * Create a new voice interview session
@@ -66,13 +68,18 @@ public class VoiceInterviewService {
      */
     @Transactional
     public SessionResponseDTO createSession(CreateSessionRequest request) {
+        Long userId = UserContext.requireUserId();
+        if (request.getResumeId() != null
+                && !resumeRepository.existsByUserIdAndId(userId, request.getResumeId())) {
+            throw new BusinessException(ErrorCode.RESUME_NOT_FOUND);
+        }
         String effectiveSkillId = request.getSkillId() != null ? request.getSkillId() : InterviewDefaults.SKILL_ID;
         String effectiveLlmProvider = (request.getLlmProvider() != null && !request.getLlmProvider().isBlank())
             ? request.getLlmProvider()
             : null;
 
         VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
-                .userId(DEFAULT_USER_ID)
+                .userId(userId)
                 .roleType(effectiveSkillId)
                 .skillId(effectiveSkillId)
                 .difficulty(request.getDifficulty() != null ? request.getDifficulty() : InterviewDefaults.DIFFICULTY)
@@ -131,6 +138,13 @@ public class VoiceInterviewService {
         voiceEvaluateStreamProducer.sendEvaluateTask(sessionId);
     }
 
+    @Transactional
+    public void endSessionForCurrentUser(Long sessionId) {
+        VoiceInterviewSessionEntity session = getSessionForCurrentUserOrThrow(sessionId);
+        endSession(session);
+        voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
+    }
+
     private void endSession(VoiceInterviewSessionEntity session) {
         session.setEndTime(LocalDateTime.now());
         session.setCurrentPhase(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED);
@@ -180,6 +194,23 @@ public class VoiceInterviewService {
 
         // Fallback to database
         return sessionRepository.findById(sessionId).orElse(null);
+    }
+
+    public VoiceInterviewSessionEntity getSessionForCurrentUser(Long sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return sessionRepository.findByUserIdAndId(UserContext.requireUserId(), sessionId)
+            .orElse(null);
+    }
+
+    private VoiceInterviewSessionEntity getSessionForCurrentUserOrThrow(Long sessionId) {
+        if (sessionId == null) {
+            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在");
+        }
+        return sessionRepository.findByUserIdAndId(UserContext.requireUserId(), sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
+                "会话不存在: " + sessionId));
     }
 
     /**
@@ -300,6 +331,7 @@ public class VoiceInterviewService {
      * Get conversation history as DTOs (for frontend)
      */
     public List<VoiceInterviewMessageDTO> getConversationHistoryDTO(String sessionId) {
+        getSessionForCurrentUserOrThrow(parseSessionId(sessionId));
         return getConversationHistory(sessionId).stream()
             .map(msg -> VoiceInterviewMessageDTO.builder()
                 .id(msg.getId())
@@ -325,7 +357,8 @@ public class VoiceInterviewService {
     public void pauseSession(String sessionId, String reason) {
         Long sessionIdLong = parseSessionId(sessionId);
 
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong)
+        VoiceInterviewSessionEntity session = sessionRepository.findByUserIdAndId(
+                UserContext.requireUserId(), sessionIdLong)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
 
         if (session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
@@ -354,7 +387,8 @@ public class VoiceInterviewService {
     public SessionResponseDTO resumeSession(String sessionId) {
         Long sessionIdLong = parseSessionId(sessionId);
 
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong)
+        VoiceInterviewSessionEntity session = sessionRepository.findByUserIdAndId(
+                UserContext.requireUserId(), sessionIdLong)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
 
         if (session.getStatus() != VoiceInterviewSessionStatus.PAUSED) {
@@ -384,15 +418,15 @@ public class VoiceInterviewService {
      * @return List of session metadata
      */
     public List<SessionMetaDTO> getAllSessions(String userId, String status) {
-        userId = userId != null ? userId : DEFAULT_USER_ID;
+        Long userIdLong = UserContext.requireUserId();
 
         List<VoiceInterviewSessionEntity> sessions;
         if (status != null && !status.isEmpty()) {
             VoiceInterviewSessionStatus statusEnum =
                 VoiceInterviewSessionStatus.valueOf(status.toUpperCase());
-            sessions = sessionRepository.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, statusEnum);
+            sessions = sessionRepository.findByUserIdAndStatusOrderByUpdatedAtDesc(userIdLong, statusEnum);
         } else {
-            sessions = sessionRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+            sessions = sessionRepository.findByUserIdOrderByUpdatedAtDesc(userIdLong);
         }
 
         return sessions.stream()
@@ -419,7 +453,7 @@ public class VoiceInterviewService {
      * @return SessionResponseDTO with session details or null if not found
      */
     public SessionResponseDTO getSessionDTO(Long sessionId) {
-        VoiceInterviewSessionEntity session = getSession(sessionId);
+        VoiceInterviewSessionEntity session = getSessionForCurrentUser(sessionId);
 
         if (session == null) {
             return null;
@@ -580,6 +614,7 @@ public class VoiceInterviewService {
      */
     @Transactional
     public void triggerEvaluation(Long sessionId) {
+        getSessionForCurrentUserOrThrow(sessionId);
         updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
         voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
     }
@@ -589,12 +624,11 @@ public class VoiceInterviewService {
      */
     @Transactional
     public void deleteSession(Long sessionId) {
-        if (!sessionRepository.existsById(sessionId)) {
-            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在: " + sessionId);
-        }
+        getSessionForCurrentUserOrThrow(sessionId);
         evaluationRepository.findBySessionId(sessionId).ifPresent(evaluationRepository::delete);
         messageRepository.deleteBySessionId(sessionId);
         sessionRepository.deleteById(sessionId);
+        invalidateSessionCache(sessionId);
         log.info("Deleted voice interview session: {}", sessionId);
     }
 

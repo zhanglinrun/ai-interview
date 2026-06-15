@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import { clearAuthSession, getAccessToken } from './authStorage';
 
 /**
  * 后端统一响应结构
@@ -15,6 +16,26 @@ const instance: AxiosInstance = axios.create({
   baseURL,
   timeout: 60000,
 });
+
+instance.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+function handleUnauthorized(code?: number, message?: string) {
+  if (code !== 401 && !message?.includes('token')) {
+    return;
+  }
+  clearAuthSession();
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    const from = `${window.location.pathname}${window.location.search}`;
+    window.location.href = `/login?from=${encodeURIComponent(from)}`;
+  }
+}
 
 /**
  * 响应拦截器
@@ -34,6 +55,7 @@ instance.interceptors.response.use(
         response.data = result.data;
         return response;
       }
+      handleUnauthorized(result.code, result.message);
       // 失败：直接抛出 message
       return Promise.reject(new Error(result.message || '请求失败'));
     }
@@ -48,6 +70,7 @@ instance.interceptors.response.use(
       // 尝试解析 Result 格式
       if (data && typeof data === 'object' && 'code' in data && 'message' in data) {
         const result = data as Result;
+        handleUnauthorized(result.code, result.message);
         return Promise.reject(new Error(result.message || '请求失败'));
       }
       // 响应格式不对

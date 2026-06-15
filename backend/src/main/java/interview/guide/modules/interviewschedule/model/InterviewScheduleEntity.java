@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -14,12 +15,17 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "interview_schedule")
+@Table(name = "interview_schedule", indexes = {
+    @Index(name = "idx_interview_schedule_user_id", columnList = "userId")
+})
 @Data
 public class InterviewScheduleEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
+    private Long userId;
 
     @Column(name = "company_name", nullable = false)
     private String companyName;

@@ -1,5 +1,6 @@
 package interview.guide.modules.interview.agent.tool;
 
+import interview.guide.common.security.UserContext;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +42,8 @@ public class ResumeReadTool implements AgentTool {
         }
 
         try {
-            Optional<ResumeEntity> resume = resumeRepository.findById(context.resumeId());
+            Optional<ResumeEntity> resume = resumeRepository.findByUserIdAndId(
+                UserContext.requireUserId(), context.resumeId());
             if (resume.isEmpty() || resume.get().getResumeText() == null
                 || resume.get().getResumeText().isBlank()) {
                 return "未找到候选人简历正文，请基于该方向出通用题。";

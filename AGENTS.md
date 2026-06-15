@@ -1,6 +1,6 @@
 # AI Interview Platform 编码规范
 
-Spring Boot 4.0 + Java 21 + Spring AI + React 面试平台。写代码时必须遵守以下规则。
+Spring Boot 4.0 + Java 21 + Spring AI + React 面试平台。写代码时遵守以下规则。
 
 ---
 
@@ -17,11 +17,15 @@ interview.guide/
 │   ├── aspect/                       #   RateLimitAspect（AOP + Redis Lua 限流）
 │   ├── ai/                           #   StructuredOutputInvoker（结构化输出重试）
 │   │                                 #   LlmProviderRegistry（多 LLM Provider 注册与缓存）
+│   │                                 #   PromptSanitizer（Prompt 注入防御）
+│   │                                 #   ApiPathResolver（多 Provider API 路径适配）
 │   ├── async/                        #   AbstractStreamConsumer/Producer（Redis Stream 模板）
-│   ├── config/                       #   配置类（CORS、S3、ObjectMapper、OpenAPI、LlmProvider）
+│   ├── config/                       #   配置类（CORS、S3、ObjectMapper、OpenAPI、LlmEmbedding）
 │   ├── constant/                     #   CommonConstants、AsyncTaskStreamConstants
+│   ├── evaluation/                   #   UnifiedEvaluationService（统一评估引擎）
+│   │                                 #   QaRecord、EvaluationReport（文字/语音共用）
 │   ├── exception/                    #   ErrorCode（10 个错误域 1xxx-10xxx）
-│   │                                 #   BusinessException、RateLimitExceededException
+│   │                                 #   BusinessException、GlobalExceptionHandler
 │   ├── model/                        #   AsyncTaskStatus
 │   └── result/                       #   Result<T>（统一响应包装）
 │
@@ -32,16 +36,25 @@ interview.guide/
 │   └── redis/                        #   RedisService、InterviewSessionCache
 │
 └── modules/                          # 业务模块（每个模块自包含 MVC 分层）
-    ├── resume/                       #   简历管理：上传、解析、AI 评分、去重
-    ├── interview/                    #   模拟面试：会话、AI 出题、答题评估、报告导出
-    ├── knowledgebase/                #   知识库：文档上传、向量化（pgvector）、RAG 查询、聊天会话
-    ├── interviewschedule/            #   面试日程：日历管理、AI 解析面试邀请
-    └── voiceinterview/               #   语音面试：WebSocket 实时通话、ASR/TTS、多轮评估
+    ├── resume/                       #   简历管理：上传、解析、AI 评分、去重、历史记录
+    ├── interview/                    #   模拟面试：会话管理、Skill 出题、追问、评估
+    │   ├── agent/                    #   ReAct Agent：自适应出题（知识库检索、简历读取）
+    │   ├── skill/                    #   Skill 管理：10+ 方向、JD 解析、分类匹配
+    │   └── listener/                 #   异步评估（Redis Stream 消费者）
+    ├── knowledgebase/                #   知识库：文档上传、向量化（pgvector）、RAG 查询
+    │   ├── listener/                 #   向量化 Stream 消费者
+    │   └── service/                  #   混合检索、查询改写、Rerank、聊天会话
+    ├── interviewschedule/            #   面试安排：日历管理、AI 解析面试邀请、提醒
+    ├── voiceinterview/               #   语音面试：WebSocket 实时通话、Qwen3 ASR/TTS
+    │   ├── handler/                  #   WebSocket 处理器（实时字幕、VAD 断句）
+    │   └── service/                  #   语音服务（流式 TTS、并发合成）
+    └── llmprovider/                  #   多模型管理：Provider 配置、默认模型切换
+        └── service/                  #   API Key 加密、连通性测试、启动加载
 ```
 
-**技术栈**：Spring Boot 4.0 / Java 21（虚拟线程）/ Spring AI 2.0 / JPA + PostgreSQL + pgvector / Redisson / Redis Stream / MapStruct / iText 8 / Apache Tika
+**技术栈**：Spring Boot 4.0.1 / Java 21（虚拟线程）/ Spring AI 2.0.0-M4 / Spring AI Agent Utils 0.7.0 / JPA + PostgreSQL + pgvector / Redisson 4.0.0 / Redis Stream / MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 / DashScope SDK 2.22.7（ASR/TTS）
 
-**前端**：React 18 + TypeScript + Vite + TailwindCSS 4（`frontend/` 目录）
+**前端**：React 18.3 + TypeScript 5.6 + Vite 5.4 + Tailwind CSS 4.1 + React Router 7.11 + Framer Motion 12.23（`frontend/` 目录）
 
 ---
 

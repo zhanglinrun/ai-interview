@@ -2,6 +2,7 @@ package interview.guide.modules.interviewschedule.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.security.UserContext;
 import interview.guide.modules.interviewschedule.model.CreateInterviewRequest;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleDTO;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleEntity;
@@ -31,6 +32,7 @@ public class InterviewScheduleService {
     public InterviewScheduleDTO create(CreateInterviewRequest request) {
         InterviewScheduleEntity entity = new InterviewScheduleEntity();
         BeanUtils.copyProperties(request, entity);
+        entity.setUserId(UserContext.requireUserId());
         entity.setStatus(InterviewStatus.PENDING);
 
         return toDTO(repository.save(entity));
@@ -45,7 +47,7 @@ public class InterviewScheduleService {
 
     @Transactional
     public void delete(Long id) {
-        repository.deleteById(id);
+        repository.delete(getByIdOrThrow(id));
     }
 
     @Transactional
@@ -57,13 +59,14 @@ public class InterviewScheduleService {
 
     public List<InterviewScheduleDTO> getAll(String status, LocalDateTime start, LocalDateTime end) {
         List<InterviewScheduleEntity> entities;
+        Long userId = UserContext.requireUserId();
 
         if (start != null && end != null) {
-            entities = repository.findByInterviewTimeBetween(start, end);
+            entities = repository.findByUserIdAndInterviewTimeBetween(userId, start, end);
         } else if (status != null) {
-            entities = repository.findByStatus(InterviewStatus.valueOf(status));
+            entities = repository.findByUserIdAndStatus(userId, InterviewStatus.valueOf(status));
         } else {
-            entities = repository.findAll();
+            entities = repository.findByUserIdOrderByInterviewTimeAsc(userId);
         }
 
         return entities.stream()
@@ -76,7 +79,7 @@ public class InterviewScheduleService {
     }
 
     private InterviewScheduleEntity getByIdOrThrow(Long id) {
-        return repository.findById(id)
+        return repository.findByUserIdAndId(UserContext.requireUserId(), id)
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SCHEDULE_NOT_FOUND, "面试日程不存在: " + id));
     }
 

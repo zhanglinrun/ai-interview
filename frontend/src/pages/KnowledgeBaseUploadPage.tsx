@@ -11,13 +11,20 @@ interface KnowledgeBaseUploadPageProps {
 export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: KnowledgeBaseUploadPageProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const handleUpload = async (file: File, name?: string) => {
     setUploading(true);
     setError('');
+    setNotice('');
 
     try {
       const data = await knowledgeBaseApi.uploadKnowledgeBase(file, name);
+      if (data.duplicate) {
+        setNotice(`该文件已存在，对应知识库「${data.knowledgeBase.name}」，无需重复上传。`);
+        setUploading(false);
+        return;
+      }
       onUploadComplete(data);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : '上传失败，请重试';
@@ -40,6 +47,7 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
       nameLabel="知识库名称（可选）"
       namePlaceholder="留空则使用文件名"
       error={error}
+      notice={notice}
       onUpload={handleUpload}
       onBack={onBack}
     />

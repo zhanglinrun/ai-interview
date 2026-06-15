@@ -6,6 +6,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
@@ -18,12 +19,17 @@ import java.time.LocalDateTime;
  * Resume Analysis Entity
  */
 @Entity
-@Table(name = "resume_analyses")
+@Table(name = "resume_analyses", indexes = {
+    @Index(name = "idx_resume_analyses_user_id", columnList = "userId")
+})
 public class ResumeAnalysisEntity {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
+    private Long userId;
     
     // 关联的简历
     @ManyToOne(fetch = FetchType.LAZY)
@@ -68,6 +74,14 @@ public class ResumeAnalysisEntity {
     
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
     
     public ResumeEntity getResume() {

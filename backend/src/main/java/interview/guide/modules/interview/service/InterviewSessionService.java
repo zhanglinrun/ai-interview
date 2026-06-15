@@ -5,6 +5,7 @@ import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.security.UserContext;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
 import interview.guide.modules.interview.listener.EvaluateStreamProducer;
@@ -53,6 +54,8 @@ public class InterviewSessionService {
      * 前端应该先调用 findUnfinishedSession 检查，或者使用 forceCreate 参数强制创建
      */
     public InterviewSessionDTO createSession(CreateInterviewRequest request) {
+        Long userId = UserContext.requireUserId();
+        persistenceService.ensureResumeAccessible(request.resumeId());
         // 如果指定了resumeId且未强制创建，检查是否有未完成的会话
         if (request.resumeId() != null && !Boolean.TRUE.equals(request.forceCreate())) {
             Optional<InterviewSessionDTO> unfinishedOpt = findUnfinishedSession(request.resumeId());
@@ -89,6 +92,7 @@ public class InterviewSessionService {
         // 保存到 Redis 缓存
         sessionCache.saveSession(
             sessionId,
+            userId,
             request.resumeText() != null ? request.resumeText() : "",
             request.resumeId(),
             questions,
@@ -119,7 +123,7 @@ public class InterviewSessionService {
      */
     public InterviewSessionDTO getSession(String sessionId) {
         // 1. 尝试从 Redis 缓存获取
-        Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
+        Optional<CachedSession> cachedOpt = getCurrentUserCachedSession(sessionId);
         if (cachedOpt.isPresent()) {
             return toDTO(cachedOpt.get());
         }
@@ -139,10 +143,11 @@ public class InterviewSessionService {
     public Optional<InterviewSessionDTO> findUnfinishedSession(Long resumeId) {
         try {
             // 1. 先从 Redis 缓存查找
-            Optional<String> cachedSessionIdOpt = sessionCache.findUnfinishedSessionId(resumeId);
+            Long userId = UserContext.requireUserId();
+            Optional<String> cachedSessionIdOpt = sessionCache.findUnfinishedSessionId(userId, resumeId);
             if (cachedSessionIdOpt.isPresent()) {
                 String sessionId = cachedSessionIdOpt.get();
-                Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
+                Optional<CachedSession> cachedOpt = getCurrentUserCachedSession(sessionId);
                 if (cachedOpt.isPresent()) {
                     log.debug("从 Redis 缓存找到未完成会话: resumeId={}, sessionId={}", resumeId, sessionId);
                     return Optional.of(toDTO(cachedOpt.get()));
@@ -213,6 +218,7 @@ public class InterviewSessionService {
             // 保存到 Redis 缓存
             sessionCache.saveSession(
                 entity.getSessionId(),
+                entity.getUserId(),
                 entity.getResume() != null ? entity.getResume().getResumeText() : "",
                 entity.getResume() != null ? entity.getResume().getId() : null,
                 questions,
@@ -428,7 +434,7 @@ public class InterviewSessionService {
      */
     private CachedSession getOrRestoreSession(String sessionId) {
         // 1. 尝试从 Redis 缓存获取
-        Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
+        Optional<CachedSession> cachedOpt = getCurrentUserCachedSession(sessionId);
         if (cachedOpt.isPresent()) {
             // 刷新 TTL
             sessionCache.refreshSessionTTL(sessionId);
@@ -486,6 +492,12 @@ public class InterviewSessionService {
         return report;
     }
 
+    public void deleteSession(String sessionId) {
+        getOrRestoreSession(sessionId);
+        persistenceService.deleteSessionBySessionId(sessionId);
+        sessionCache.deleteSession(sessionId);
+    }
+
     /**
      * 将缓存会话转换为 DTO
      */
@@ -499,5 +511,11 @@ public class InterviewSessionService {
             questions,
             session.getStatus()
         );
+    }
+
+    private Optional<CachedSession> getCurrentUserCachedSession(String sessionId) {
+        Long userId = UserContext.requireUserId();
+        return sessionCache.getSession(sessionId)
+            .filter(session -> userId.equals(session.getUserId()));
     }
 }

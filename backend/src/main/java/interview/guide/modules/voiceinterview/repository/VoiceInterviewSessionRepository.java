@@ -19,7 +19,11 @@ public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInte
     /**
      * 根据用户ID查找所有会话，按开始时间倒序
      */
-    List<VoiceInterviewSessionEntity> findByUserIdOrderByStartTimeDesc(String userId);
+    List<VoiceInterviewSessionEntity> findByUserIdOrderByStartTimeDesc(Long userId);
+
+    Optional<VoiceInterviewSessionEntity> findByUserIdAndId(Long userId, Long id);
+
+    boolean existsByUserIdAndId(Long userId, Long id);
 
     /**
      * 查找指定状态且结束时间早于给定时间的会话
@@ -33,13 +37,13 @@ public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInte
     /**
      * Find all sessions for a user, ordered by update time
      */
-    List<VoiceInterviewSessionEntity> findByUserIdOrderByUpdatedAtDesc(String userId);
+    List<VoiceInterviewSessionEntity> findByUserIdOrderByUpdatedAtDesc(Long userId);
 
     /**
      * Find sessions by user and status, ordered by update time
      */
     List<VoiceInterviewSessionEntity> findByUserIdAndStatusOrderByUpdatedAtDesc(
-        String userId,
+        Long userId,
         VoiceInterviewSessionStatus status
     );
 

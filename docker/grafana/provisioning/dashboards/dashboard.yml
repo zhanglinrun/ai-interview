@@ -1,0 +1,14 @@
+# Grafana 仪表盘自动加载：把 /var/lib/grafana/dashboards 下的 JSON 注册为仪表盘。
+apiVersion: 1
+
+providers:
+  - name: ai-interview
+    orgId: 1
+    folder: AI Interview
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -32,11 +32,22 @@ public interface RagChatSessionRepository extends JpaRepository<RagChatSessionEn
     @Query("SELECT s FROM RagChatSessionEntity s ORDER BY s.isPinned DESC, s.updatedAt DESC")
     List<RagChatSessionEntity> findAllOrderByPinnedAndUpdatedAtDesc();
 
+    @Query("SELECT s FROM RagChatSessionEntity s WHERE s.userId = :userId ORDER BY s.isPinned DESC, s.updatedAt DESC")
+    List<RagChatSessionEntity> findAllByUserIdOrderByPinnedAndUpdatedAtDesc(@Param("userId") Long userId);
+
+    Optional<RagChatSessionEntity> findByUserIdAndId(Long userId, Long id);
+
+    boolean existsByUserIdAndId(Long userId, Long id);
+
     /**
      * 根据知识库ID查找相关会话
      */
     @Query("SELECT DISTINCT s FROM RagChatSessionEntity s JOIN s.knowledgeBases kb WHERE kb.id IN :kbIds ORDER BY s.updatedAt DESC")
     List<RagChatSessionEntity> findByKnowledgeBaseIds(@Param("kbIds") List<Long> knowledgeBaseIds);
+
+    @Query("SELECT DISTINCT s FROM RagChatSessionEntity s JOIN s.knowledgeBases kb WHERE s.userId = :userId AND kb.id IN :kbIds ORDER BY s.updatedAt DESC")
+    List<RagChatSessionEntity> findByUserIdAndKnowledgeBaseIds(@Param("userId") Long userId,
+                                                               @Param("kbIds") List<Long> knowledgeBaseIds);
 
     /**
      * 获取会话详情（带消息列表和知识库）
@@ -50,4 +61,8 @@ public interface RagChatSessionRepository extends JpaRepository<RagChatSessionEn
      */
     @Query("SELECT s FROM RagChatSessionEntity s LEFT JOIN FETCH s.knowledgeBases WHERE s.id = :id")
     Optional<RagChatSessionEntity> findByIdWithKnowledgeBases(@Param("id") Long id);
+
+    @Query("SELECT s FROM RagChatSessionEntity s LEFT JOIN FETCH s.knowledgeBases WHERE s.userId = :userId AND s.id = :id")
+    Optional<RagChatSessionEntity> findByUserIdAndIdWithKnowledgeBases(@Param("userId") Long userId,
+                                                                       @Param("id") Long id);
 }

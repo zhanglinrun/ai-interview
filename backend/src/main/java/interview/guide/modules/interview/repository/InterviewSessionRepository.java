@@ -22,11 +22,17 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      */
     Optional<InterviewSessionEntity> findBySessionId(String sessionId);
 
+    Optional<InterviewSessionEntity> findByUserIdAndSessionId(Long userId, String sessionId);
+
     /**
      * 根据会话ID查找（同时加载关联的简历）
      */
     @Query("SELECT s FROM InterviewSessionEntity s LEFT JOIN FETCH s.resume WHERE s.sessionId = :sessionId")
     Optional<InterviewSessionEntity> findBySessionIdWithResume(@Param("sessionId") String sessionId);
+
+    @Query("SELECT s FROM InterviewSessionEntity s LEFT JOIN FETCH s.resume WHERE s.userId = :userId AND s.sessionId = :sessionId")
+    Optional<InterviewSessionEntity> findByUserIdAndSessionIdWithResume(@Param("userId") Long userId,
+                                                                        @Param("sessionId") String sessionId);
     
     /**
      * 根据简历查找所有面试记录
@@ -38,16 +44,26 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      */
     List<InterviewSessionEntity> findByResumeIdOrderByCreatedAtDesc(Long resumeId);
 
+    List<InterviewSessionEntity> findByUserIdAndResumeIdOrderByCreatedAtDesc(Long userId, Long resumeId);
+
     /**
      * 根据简历ID查找最近的面试记录（用于历史题去重）
      */
     List<InterviewSessionEntity> findTop10ByResumeIdOrderByCreatedAtDesc(Long resumeId);
+
+    List<InterviewSessionEntity> findTop10ByUserIdAndResumeIdOrderByCreatedAtDesc(Long userId, Long resumeId);
     
     /**
      * 查找简历的未完成面试（CREATED或IN_PROGRESS状态）
      */
     Optional<InterviewSessionEntity> findFirstByResumeIdAndStatusInOrderByCreatedAtDesc(
         Long resumeId, 
+        List<SessionStatus> statuses
+    );
+
+    Optional<InterviewSessionEntity> findFirstByUserIdAndResumeIdAndStatusInOrderByCreatedAtDesc(
+        Long userId,
+        Long resumeId,
         List<SessionStatus> statuses
     );
     
@@ -64,13 +80,23 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      */
     List<InterviewSessionEntity> findAllByOrderByCreatedAtDesc();
 
+    List<InterviewSessionEntity> findAllByUserIdOrderByCreatedAtDesc(Long userId);
+
     /**
      * 根据 skillId 查找最近的面试记录（用于通用模式历史题去重）
      */
     List<InterviewSessionEntity> findTop10BySkillIdOrderByCreatedAtDesc(String skillId);
 
+    List<InterviewSessionEntity> findTop10ByUserIdAndSkillIdOrderByCreatedAtDesc(Long userId, String skillId);
+
     /**
      * 根据 resumeId + skillId 查找最近的面试记录（精确匹配）
      */
     List<InterviewSessionEntity> findTop10ByResumeIdAndSkillIdOrderByCreatedAtDesc(Long resumeId, String skillId);
+
+    List<InterviewSessionEntity> findTop10ByUserIdAndResumeIdAndSkillIdOrderByCreatedAtDesc(
+        Long userId,
+        Long resumeId,
+        String skillId
+    );
 }

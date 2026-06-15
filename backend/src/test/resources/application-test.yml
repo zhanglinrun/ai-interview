@@ -8,6 +8,11 @@ spring:
     password:
     driver-class-name: org.h2.Driver
 
+  # 测试用 H2 内存库，schema 由 JPA create-drop 生成；
+  # V1 基线是 PostgreSQL 方言（CREATE EXTENSION vector 等），在 H2 上执行会直接报错，必须关闭 Flyway。
+  flyway:
+    enabled: false
+
   jpa:
     hibernate:
       ddl-auto: create-drop

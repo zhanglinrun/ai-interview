@@ -2,6 +2,7 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.security.UserContext;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
@@ -34,12 +35,14 @@ public class KnowledgeBaseDeleteService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteKnowledgeBase(Long id) {
+        Long userId = UserContext.requireUserId();
         // 1. 获取知识库信息
-        KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(id)
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.findByUserIdAndId(userId, id)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
         
         // 2. 删除所有RAG会话中的知识库关联（必须先删除关联，否则外键约束会阻止删除）
-        List<RagChatSessionEntity> sessions = sessionRepository.findByKnowledgeBaseIds(List.of(id));
+        List<RagChatSessionEntity> sessions =
+            sessionRepository.findByUserIdAndKnowledgeBaseIds(userId, List.of(id));
         for (RagChatSessionEntity session : sessions) {
             session.getKnowledgeBases().removeIf(kbEntity -> kbEntity.getId().equals(id));
             sessionRepository.save(session);

@@ -23,6 +23,7 @@ const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage')
 const InterviewHubPage = lazy(() => import('./pages/InterviewHubPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 
 // Loading component
 const Loading = () => (
@@ -216,6 +217,7 @@ function App() {
 
             {/* 问答助手（知识库聊天） */}
             <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
+            <Route path="login" element={<LoginPage />} />
           </Route>
 
         </Routes>
