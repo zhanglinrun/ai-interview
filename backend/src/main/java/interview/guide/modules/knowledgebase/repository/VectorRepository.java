@@ -8,7 +8,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -28,8 +30,13 @@ public class VectorRepository {
      * @param content 文档正文
      * @param kbId    所属知识库ID（来自 metadata->>'kb_id'，可能为 null）
      * @param score   pg_trgm word_similarity 得分，范围 0~1
+     * @param metadata 文档元数据，用于来源展示和后续过滤
      */
-    public record KeywordHit(String content, Long kbId, double score) {}
+    public record KeywordHit(String content, Long kbId, double score, Map<String, Object> metadata) {
+        public KeywordHit(String content, Long kbId, double score) {
+            this(content, kbId, score, Map.of());
+        }
+    }
 
     /**
      * 确保 vector_store 上存在用于关键词检索的 pg_trgm GIN 索引。
@@ -79,6 +86,14 @@ public class VectorRepository {
         StringBuilder sql = new StringBuilder("""
             SELECT content,
                    metadata->>'kb_id' AS kb_id,
+                   metadata->>'source_name' AS source_name,
+                   metadata->>'document_title' AS document_title,
+                   metadata->>'category' AS category,
+                   metadata->>'section_title' AS section_title,
+                   metadata->>'section_level' AS section_level,
+                   metadata->>'section_index' AS section_index,
+                   metadata->>'chunk_index' AS chunk_index,
+                   metadata->>'chunk_count' AS chunk_count,
                    word_similarity(?, content) AS score
             FROM vector_store
             WHERE word_similarity(?, content) >= ?
@@ -104,13 +119,29 @@ public class VectorRepository {
                 String kbIdStr = rs.getString("kb_id");
                 double score = rs.getDouble("score");
                 Long kbId = parseKbId(kbIdStr);
-                return new KeywordHit(content, kbId, score);
+                Map<String, Object> metadata = new HashMap<>();
+                putIfNotBlank(metadata, "kb_id", kbIdStr);
+                putIfNotBlank(metadata, "source_name", rs.getString("source_name"));
+                putIfNotBlank(metadata, "document_title", rs.getString("document_title"));
+                putIfNotBlank(metadata, "category", rs.getString("category"));
+                putIfNotBlank(metadata, "section_title", rs.getString("section_title"));
+                putIfNotBlank(metadata, "section_level", rs.getString("section_level"));
+                putIfNotBlank(metadata, "section_index", rs.getString("section_index"));
+                putIfNotBlank(metadata, "chunk_index", rs.getString("chunk_index"));
+                putIfNotBlank(metadata, "chunk_count", rs.getString("chunk_count"));
+                return new KeywordHit(content, kbId, score, metadata);
             });
             log.info("关键词检索完成: query='{}', 命中 {} 条", query, hits.size());
             return hits;
         } catch (Exception e) {
             log.warn("关键词检索失败，本次仅依赖向量通道: {}", e.getMessage());
             return List.of();
+        }
+    }
+
+    private void putIfNotBlank(Map<String, Object> metadata, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            metadata.put(key, value);
         }
     }
 

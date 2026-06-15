@@ -56,6 +56,11 @@ export interface QueryRequest {
 export interface RagSource {
   knowledgeBaseId: number | null;
   documentTitle: string;
+  sourceName: string | null;
+  category: string | null;
+  sectionTitle: string | null;
+  chunkIndex: number | null;
+  chunkCount: number | null;
   snippet: string;
   similarity: number | null;
 }

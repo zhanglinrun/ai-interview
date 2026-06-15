@@ -1,6 +1,7 @@
 package interview.guide.modules.knowledgebase.eval;
 
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseVectorService;
+import interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import interview.guide.modules.knowledgebase.service.RerankService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -21,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -55,6 +57,9 @@ class RagRetrievalEvalTest {
   private KnowledgeBaseVectorService vectorService;
 
   @Autowired
+  private KnowledgeBaseQueryService queryService;
+
+  @Autowired
   private RerankService rerankService;
 
   @Autowired
@@ -81,6 +86,9 @@ class RagRetrievalEvalTest {
   @Value("${ragdataset.report-path:target/rag-eval-report.md}")
   private String reportPath;
 
+  @Value("${ragdataset.answer-eval-enabled:true}")
+  private boolean answerEvalEnabled;
+
   @Test
   @DisplayName("跑全量评测集（简单+困难查询）并输出三档排序指标对比报告")
   void runRetrievalEvaluation() throws Exception {
@@ -97,8 +105,11 @@ class RagRetrievalEvalTest {
     QuerySetResult easy = evaluateQuerySet(questions, allKbIds, sourceToKb, false);
     // 困难查询组
     QuerySetResult hard = evaluateQuerySet(questions, allKbIds, sourceToKb, true);
+    AnswerEvalResult answerEval = answerEvalEnabled
+        ? evaluateAnswers(questions, allKbIds, true)
+        : AnswerEvalResult.disabled();
 
-    String report = buildReport(questions.size(), easy, hard);
+    String report = buildReport(questions.size(), easy, hard, answerEval);
     writeReport(report);
     log.info("\n{}", report);
   }
@@ -129,6 +140,37 @@ class RagRetrievalEvalTest {
       hybridRerank.add(q, score(q, rerankHits));
     }
     return new QuerySetResult(pureVector, hybrid, hybridRerank);
+  }
+
+  private AnswerEvalResult evaluateAnswers(List<EvalQuestion> questions, List<Long> allKbIds,
+                                           boolean useHard) {
+    AnswerEvalResult result = new AnswerEvalResult(true);
+    for (EvalQuestion q : questions) {
+      String query = useHard && q.queryHard != null && !q.queryHard.isBlank()
+          ? q.queryHard
+          : q.question;
+      List<Document> contexts = cap(
+          rerankService.rerank(query, vectorService.hybridSearch(query, allKbIds, candidateTopK, 0.0)),
+          evalTopK
+      );
+      String contextText = contexts.stream()
+          .map(Document::getText)
+          .filter(text -> text != null && !text.isBlank())
+          .reduce("", (left, right) -> left + "\n" + right);
+      try {
+        String answer = queryService.answerQuestionForEvaluation(allKbIds, query);
+        AnswerScore score = scoreAnswer(q, answer, contextText);
+        result.add(new AnswerCase(q.id, query, answer, score));
+      } catch (Exception e) {
+        result.add(new AnswerCase(
+            q.id,
+            query,
+            "【生成失败】" + e.getMessage(),
+            new AnswerScore(0.0, 0.0, false)
+        ));
+      }
+    }
+    return result;
   }
 
   // ==================== 评分 ====================
@@ -206,9 +248,44 @@ class RagRetrievalEvalTest {
     return docs.size() <= topK ? docs : new ArrayList<>(docs.subList(0, topK));
   }
 
+  private AnswerScore scoreAnswer(EvalQuestion q, String answer, String contextText) {
+    if (answer == null || answer.isBlank()) {
+      return new AnswerScore(0.0, 0.0, true);
+    }
+    String answerLower = answer.toLowerCase(Locale.ROOT);
+    String contextLower = contextText == null ? "" : contextText.toLowerCase(Locale.ROOT);
+    int answerCovered = 0;
+    int faithfulCovered = 0;
+    for (List<String> synonyms : q.keyPoints) {
+      boolean inAnswer = synonyms.stream()
+          .anyMatch(s -> answerLower.contains(s.toLowerCase(Locale.ROOT)));
+      if (!inAnswer) {
+        continue;
+      }
+      answerCovered++;
+      boolean inContext = synonyms.stream()
+          .anyMatch(s -> contextLower.contains(s.toLowerCase(Locale.ROOT)));
+      if (inContext) {
+        faithfulCovered++;
+      }
+    }
+    double answerCoverage = q.keyPoints.isEmpty() ? 0.0 : (double) answerCovered / q.keyPoints.size();
+    double faithfulness = answerCovered == 0 ? 0.0 : (double) faithfulCovered / answerCovered;
+    return new AnswerScore(answerCoverage, faithfulness, isNoResult(answer));
+  }
+
+  private boolean isNoResult(String answer) {
+    String text = answer == null ? "" : answer;
+    return text.contains("未检索到相关信息")
+        || text.contains("没有找到足够信息")
+        || text.contains("无法根据提供内容回答")
+        || text.contains("信息不足");
+  }
+
   // ==================== 报告 ====================
 
-  private String buildReport(int total, QuerySetResult easy, QuerySetResult hard) {
+  private String buildReport(int total, QuerySetResult easy, QuerySetResult hard,
+                             AnswerEvalResult answerEval) {
     StringBuilder sb = new StringBuilder();
     sb.append("# RAG 检索侧评测报告（第二轮）\n\n");
     sb.append("- 评测集规模：").append(total).append(" 题\n");
@@ -222,12 +299,52 @@ class RagRetrievalEvalTest {
 
     appendQuerySetTable(sb, "## 简单查询（含原文关键词）", easy, total);
     appendQuerySetTable(sb, "## 困难查询（口语化、避开术语）", hard, total);
+    appendAnswerEval(sb, answerEval);
 
     sb.append("## 解读\n\n");
     sb.append("- 简单查询下三档接近，是因为查询词与原文高度重合，纯向量已足够；\n");
     sb.append("- 困难查询更能体现混合检索（关键词通道兜底）与 rerank（精排）的增益，");
     sb.append("对比同组内三行的 MRR / NDCG 变化即为各策略的相对提升。\n");
     return sb.toString();
+  }
+
+  private void appendAnswerEval(StringBuilder sb, AnswerEvalResult result) {
+    sb.append("## 答案质量评测（困难查询）\n\n");
+    if (!result.enabled()) {
+      sb.append("- 未启用答案质量评测。\n\n");
+      return;
+    }
+    sb.append("- 答案相关性：").append(pct(result.avgAnswerCoverage())).append("\n");
+    sb.append("- 资料忠实度：").append(pct(result.avgFaithfulness())).append("\n");
+    sb.append("- 拒答次数：").append(result.noResultCount()).append("\n\n");
+
+    List<AnswerCase> failures = result.cases().stream()
+        .sorted(Comparator.comparingDouble(c -> c.score().overall()))
+        .limit(3)
+        .toList();
+    if (failures.isEmpty()) {
+      return;
+    }
+    sb.append("### 低分样例\n\n");
+    for (AnswerCase item : failures) {
+      sb.append("- **").append(item.id()).append("**：")
+          .append(item.query()).append("\n\n")
+          .append("  - 相关性：").append(pct(item.score().answerCoverage()))
+          .append("，忠实度：").append(pct(item.score().faithfulness()))
+          .append("，是否拒答：").append(item.score().noResult() ? "是" : "否")
+          .append("\n")
+          .append("  - 回答摘要：").append(clip(item.answer(), 160)).append("\n\n");
+    }
+  }
+
+  private String clip(String text, int maxChars) {
+    if (text == null || text.isBlank()) {
+      return "";
+    }
+    String normalized = text.replaceAll("\\s+", " ").trim();
+    return normalized.length() <= maxChars
+        ? normalized
+        : normalized.substring(0, maxChars) + "...";
   }
 
   private void appendQuerySetTable(StringBuilder sb, String title, QuerySetResult r, int total) {
@@ -311,6 +428,58 @@ class RagRetrievalEvalTest {
   private record QuerySetResult(StrategyAccumulator pureVector,
                                 StrategyAccumulator hybrid,
                                 StrategyAccumulator hybridRerank) {
+  }
+
+  private record AnswerScore(double answerCoverage, double faithfulness, boolean noResult) {
+    double overall() {
+      return (answerCoverage + faithfulness) / 2.0;
+    }
+  }
+
+  private record AnswerCase(String id, String query, String answer, AnswerScore score) {
+  }
+
+  private static class AnswerEvalResult {
+    private final boolean enabled;
+    private final List<AnswerCase> cases = new ArrayList<>();
+
+    AnswerEvalResult(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    static AnswerEvalResult disabled() {
+      return new AnswerEvalResult(false);
+    }
+
+    void add(AnswerCase answerCase) {
+      cases.add(answerCase);
+    }
+
+    boolean enabled() {
+      return enabled;
+    }
+
+    List<AnswerCase> cases() {
+      return cases;
+    }
+
+    double avgAnswerCoverage() {
+      return cases.stream()
+          .mapToDouble(c -> c.score().answerCoverage())
+          .average()
+          .orElse(0.0);
+    }
+
+    double avgFaithfulness() {
+      return cases.stream()
+          .mapToDouble(c -> c.score().faithfulness())
+          .average()
+          .orElse(0.0);
+    }
+
+    long noResultCount() {
+      return cases.stream().filter(c -> c.score().noResult()).count();
+    }
   }
 
   private static class StrategyAccumulator {

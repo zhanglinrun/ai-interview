@@ -6,6 +6,11 @@ package interview.guide.modules.knowledgebase.model;
 public record RagSourceDTO(
     Long knowledgeBaseId,
     String documentTitle,
+    String sourceName,
+    String category,
+    String sectionTitle,
+    Integer chunkIndex,
+    Integer chunkCount,
     String snippet,
     Double similarity
 ) {}

@@ -147,6 +147,22 @@ public class KnowledgeBaseQueryService {
         return generateAnswer(knowledgeBaseIds, question, relevantDocs);
     }
 
+    /**
+     * RAG 评测专用问答入口：复用真实检索和生成链路，但不更新业务计数。
+     */
+    public String answerQuestionForEvaluation(List<Long> knowledgeBaseIds, String question) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
+            return NO_RESULT_RESPONSE;
+        }
+
+        QueryContext queryContext = buildQueryContext(question, List.of());
+        List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
+        if (!hasEffectiveHit(relevantDocs)) {
+            return NO_RESULT_RESPONSE;
+        }
+        return generateAnswer(knowledgeBaseIds, question, relevantDocs);
+    }
+
     private String generateAnswer(List<Long> knowledgeBaseIds, String question, List<Document> relevantDocs) {
         String context = relevantDocs.stream()
                 .map(Document::getText)
@@ -478,12 +494,25 @@ public class KnowledgeBaseQueryService {
         return docs.stream()
             .map(doc -> {
                 Long knowledgeBaseId = extractKnowledgeBaseId(doc);
-                String title = knowledgeBaseId == null
+                Map<String, Object> metadata = doc.getMetadata();
+                String fallbackTitle = knowledgeBaseId == null
                     ? "未知知识库"
                     : nameMap.getOrDefault(knowledgeBaseId, "未知知识库");
+                String documentTitle = firstNonBlank(
+                    metadataValue(metadata, "document_title"),
+                    fallbackTitle
+                );
+                String sourceName = metadataValue(metadata, "source_name");
+                String category = metadataValue(metadata, "category");
+                String sectionTitle = metadataValue(metadata, "section_title");
                 return new RagSourceDTO(
                     knowledgeBaseId,
-                    title,
+                    documentTitle,
+                    sourceName,
+                    category,
+                    sectionTitle,
+                    parseInteger(metadataValue(metadata, "chunk_index")),
+                    parseInteger(metadataValue(metadata, "chunk_count")),
                     buildSourceSnippet(doc.getText()),
                     extractSimilarity(doc)
                 );
@@ -502,7 +531,7 @@ public class KnowledgeBaseQueryService {
             RagSourceDTO source = sources.get(i);
             sb.append(i + 1)
                 .append(". **")
-                .append(source.documentTitle())
+                .append(buildSourceDisplayTitle(source))
                 .append("**");
             if (source.similarity() != null) {
                 sb.append("（相似度：")
@@ -515,6 +544,17 @@ public class KnowledgeBaseQueryService {
                 .append("\n\n");
         }
         return sb.toString();
+    }
+
+    private String buildSourceDisplayTitle(RagSourceDTO source) {
+        String title = firstNonBlank(source.sourceName(), source.documentTitle(), "未知知识库");
+        if (source.sectionTitle() != null && !source.sectionTitle().isBlank()) {
+            title += " / " + source.sectionTitle();
+        }
+        if (source.chunkIndex() != null && source.chunkCount() != null) {
+            title += " #" + (source.chunkIndex() + 1) + "/" + source.chunkCount();
+        }
+        return title;
     }
 
     private Long extractKnowledgeBaseId(Document doc) {
@@ -550,6 +590,40 @@ public class KnowledgeBaseQueryService {
             return snippet;
         }
         return snippet.substring(0, SOURCE_SNIPPET_MAX_CHARS) + "...";
+    }
+
+    private String metadataValue(Map<String, Object> metadata, String key) {
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+        Object value = metadata.get(key);
+        if (value == null || value.toString().isBlank()) {
+            return null;
+        }
+        return value.toString().trim();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Integer parseInteger(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Double extractSimilarity(Document doc) {

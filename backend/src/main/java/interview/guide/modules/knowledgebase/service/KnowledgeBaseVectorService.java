@@ -2,6 +2,8 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository.KeywordHit;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -10,8 +12,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.transformer.splitter.TextSplitter;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,8 +45,9 @@ public class KnowledgeBaseVectorService {
      */
     private static final int MAX_BATCH_SIZE = 10;
     private final VectorStore vectorStore;
-    private final TextSplitter textSplitter;
+    private final KnowledgeBaseChunkingService chunkingService;
     private final VectorRepository vectorRepository;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final KnowledgeBaseQueryProperties queryProperties;
     private final KnowledgeBaseVectorizeProperties vectorizeProperties;
     private final MeterRegistry meterRegistry;
@@ -66,17 +68,19 @@ public class KnowledgeBaseVectorService {
     private final ExecutorService chunkExecutor;
 
     public KnowledgeBaseVectorService(VectorStore vectorStore,
+                                      KnowledgeBaseChunkingService chunkingService,
                                       VectorRepository vectorRepository,
+                                      KnowledgeBaseRepository knowledgeBaseRepository,
                                       KnowledgeBaseQueryProperties queryProperties,
                                       KnowledgeBaseVectorizeProperties vectorizeProperties,
                                       @Autowired(required = false) MeterRegistry meterRegistry) {
         this.vectorStore = vectorStore;
+        this.chunkingService = chunkingService;
         this.vectorRepository = vectorRepository;
+        this.knowledgeBaseRepository = knowledgeBaseRepository;
         this.queryProperties = queryProperties;
         this.vectorizeProperties = vectorizeProperties;
         this.meterRegistry = meterRegistry;
-        // 使用 TokenTextSplitter 默认配置，每个 chunk 约 800 tokens，基于标点边界切分（无重叠）
-        this.textSplitter = TokenTextSplitter.builder().build();
         this.embeddingPermits = new Semaphore(Math.max(1, vectorizeProperties.getEmbeddingConcurrency()), true);
         if (meterRegistry != null) {
             meterRegistry.gauge("app.ai.vectorize.embedding_inflight", inFlightEmbeddings);
@@ -139,14 +143,13 @@ public class KnowledgeBaseVectorService {
             deleteByKnowledgeBaseId(knowledgeBaseId);
             
             // 2. 将文本分块（本地操作，无需事务）
-            List<Document> chunks = textSplitter.apply(
-                List.of(new Document(content))
-            );
+            KnowledgeBaseEntity knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId).orElse(null);
+            List<Document> chunks = chunkingService.split(content);
             
             log.info("文本分块完成: {} 个chunks", chunks.size());
             
-            // 3. 为每个chunk添加metadata（知识库ID）
-            chunks.forEach(chunk -> chunk.getMetadata().put("kb_id", knowledgeBaseId.toString()));
+            // 3. 为每个 chunk 添加检索、过滤和来源展示所需 metadata
+            enrichChunkMetadata(chunks, knowledgeBaseId, knowledgeBase);
             
             // 4. 分批向量化并存储（外部 API 调用，不在事务内）
             int totalChunks = chunks.size();
@@ -172,12 +175,55 @@ public class KnowledgeBaseVectorService {
 
             log.info("知识库向量化完成: kbId={}, chunks={}, batches={}",
                     knowledgeBaseId, totalChunks, batchCount);
+            updateChunkCount(knowledgeBase, knowledgeBaseId, totalChunks);
             recordVectorizeMetrics(true, startNanos);
         } catch (Exception e) {
             recordVectorizeMetrics(false, startNanos);
             log.error("向量化知识库失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
                 "向量化知识库失败: " + e.getMessage());
+        }
+    }
+
+    private void enrichChunkMetadata(List<Document> chunks, Long knowledgeBaseId,
+                                     KnowledgeBaseEntity knowledgeBase) {
+        int total = chunks.size();
+        for (int i = 0; i < total; i++) {
+            Document chunk = chunks.get(i);
+            Map<String, Object> metadata = chunk.getMetadata();
+            metadata.put("kb_id", knowledgeBaseId.toString());
+            metadata.put("chunk_index", String.valueOf(i));
+            metadata.put("chunk_count", String.valueOf(total));
+            if (knowledgeBase != null) {
+                putIfNotBlank(metadata, "source_name", knowledgeBase.getOriginalFilename());
+                putIfNotBlank(metadata, "document_title", knowledgeBase.getName());
+                putIfNotBlank(metadata, "category", knowledgeBase.getCategory());
+                if (knowledgeBase.getUserId() != null) {
+                    metadata.put("user_id", knowledgeBase.getUserId().toString());
+                }
+            }
+        }
+    }
+
+    private void putIfNotBlank(Map<String, Object> metadata, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            metadata.put(key, value);
+        }
+    }
+
+    private void updateChunkCount(KnowledgeBaseEntity knowledgeBase, Long knowledgeBaseId, int chunkCount) {
+        try {
+            KnowledgeBaseEntity target = knowledgeBase != null
+                ? knowledgeBase
+                : knowledgeBaseRepository.findById(knowledgeBaseId).orElse(null);
+            if (target == null) {
+                return;
+            }
+            target.setChunkCount(chunkCount);
+            knowledgeBaseRepository.save(target);
+        } catch (Exception e) {
+            log.warn("更新知识库分片数量失败: kbId={}, chunks={}, error={}",
+                knowledgeBaseId, chunkCount, e.getMessage());
         }
     }
 
@@ -391,10 +437,8 @@ public class KnowledgeBaseVectorService {
     }
 
     private Document keywordHitToDocument(KeywordHit hit) {
-        Map<String, Object> metadata = new java.util.HashMap<>();
-        if (hit.kbId() != null) {
-            metadata.put("kb_id", hit.kbId().toString());
-        }
+        Map<String, Object> metadata = new HashMap<>(hit.metadata());
+        putIfNotBlank(metadata, "kb_id", hit.kbId() != null ? hit.kbId().toString() : null);
         return Document.builder()
             .text(hit.content())
             .metadata(metadata)
