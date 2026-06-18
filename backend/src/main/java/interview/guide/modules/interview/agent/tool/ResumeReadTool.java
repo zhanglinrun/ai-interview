@@ -54,7 +54,7 @@ public class ResumeReadTool implements AgentTool {
             }
             return "候选人简历正文：\n" + text;
         } catch (Exception e) {
-            log.warn("[ResumeReadTool] 读取简历失败: {}", e.getMessage());
+            log.warn("[ResumeReadTool] 读取简历失败: {}", e.getMessage(), e);
             return "读取简历出错，请基于该方向出通用题。";
         }
     }

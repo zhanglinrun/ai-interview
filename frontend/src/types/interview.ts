@@ -21,6 +21,12 @@ export interface InterviewQuestion {
   feedback: string | null;
 }
 
+export interface InterviewMessage {
+  type: 'interviewer' | 'user';
+  content: string;
+  category?: string;
+}
+
 export interface CreateInterviewRequest {
   resumeText: string;
   questionCount: number;

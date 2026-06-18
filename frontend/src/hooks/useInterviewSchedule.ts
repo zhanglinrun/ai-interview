@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { interviewScheduleApi } from '../api/interviewSchedule';
+import { getErrorMessage } from '../api/request';
 import type {
   InterviewSchedule,
   CreateInterviewRequest,
@@ -23,8 +24,8 @@ export function useInterviewSchedule() {
     try {
       const data = await interviewScheduleApi.getAll(params);
       setInterviews(data);
-    } catch (err: any) {
-      setError(err.message || '获取面试列表失败');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '获取面试列表失败'));
       console.error('Failed to fetch interviews:', err);
     } finally {
       setLoading(false);
@@ -45,7 +46,7 @@ export function useInterviewSchedule() {
 
   const deleteInterview = async (id: number): Promise<void> => {
     await interviewScheduleApi.delete(id);
-    setInterviews(interviews.filter(i => i.id !== id));
+    setInterviews(prev => prev.filter(i => i.id !== id));
   };
 
   const updateStatus = async (id: number, status: InterviewStatus): Promise<InterviewSchedule> => {

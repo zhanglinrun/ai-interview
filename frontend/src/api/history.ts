@@ -1,4 +1,5 @@
 import { request } from './request';
+import type { Suggestion } from '../types/resume';
 
 export type AnalyzeStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export type EvaluateStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -34,7 +35,7 @@ export interface AnalysisItem {
   summary: string;
   analyzedAt: string;
   strengths: string[];
-  suggestions: unknown[];
+  suggestions: Suggestion[];
 }
 
 export interface InterviewItem {
@@ -113,22 +114,14 @@ export const historyApi = {
    * 导出简历分析报告PDF
    */
   async exportAnalysisPdf(resumeId: number): Promise<Blob> {
-    const response = await request.getInstance().get(`/api/resumes/${resumeId}/export`, {
-      responseType: 'blob',
-      skipResultTransform: true,
-    } as never);
-    return response.data;
+    return request.getBlob(`/api/resumes/${resumeId}/export`);
   },
 
   /**
    * 导出面试报告PDF
    */
   async exportInterviewPdf(sessionId: string): Promise<Blob> {
-    const response = await request.getInstance().get(`/api/interview/sessions/${sessionId}/export`, {
-      responseType: 'blob',
-      skipResultTransform: true,
-    } as never);
-    return response.data;
+    return request.getBlob(`/api/interview/sessions/${sessionId}/export`);
   },
 
   /**

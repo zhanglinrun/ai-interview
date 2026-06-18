@@ -3,16 +3,96 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { EvaluationStatusResponse, VoiceEvaluationDetail, voiceInterviewApi } from '../api/voiceInterview';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
-import type { InterviewDetail } from '../api/history';
+import { EmptyState, LoadingState } from '../components/PageState';
+import {getErrorMessage} from '../api/request';
+import type { EvaluateStatus, InterviewDetail } from '../api/history';
+import {
+  isEvaluationCompleted,
+  isEvaluationFailed,
+  isEvaluationProcessing,
+} from '../utils/interviewStatus';
 
 export default function VoiceInterviewEvaluationPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const sessionNumericId = useMemo(() => {
+    if (!sessionId) return null;
+    const id = Number(sessionId);
+    return Number.isInteger(id) ? id : null;
+  }, [sessionId]);
   const [evaluation, setEvaluation] = useState<VoiceEvaluationDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [evaluateStatus, setEvaluateStatus] = useState<string | null>(null);
+  const [evaluateStatus, setEvaluateStatus] = useState<EvaluateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyFinalStatus = useCallback((response: EvaluationStatusResponse): boolean => {
+    const status = response.evaluateStatus;
+    setEvaluateStatus(status);
+
+    if (isEvaluationCompleted(status) && response.evaluation) {
+      setEvaluation(response.evaluation);
+      setLoading(false);
+      return true;
+    } else if (isEvaluationFailed(status)) {
+      setError(response.evaluateError || '评估生成失败');
+      setLoading(false);
+      return true;
+    }
+
+    return false;
+  }, []);
+
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearTimeout(pollingRef.current);
+    }
+
+    pollingRef.current = setTimeout(async () => {
+      if (sessionNumericId === null) return;
+
+      try {
+        const response = await voiceInterviewApi.getEvaluation(sessionNumericId);
+        if (!applyFinalStatus(response)) {
+          startPolling();
+        }
+      } catch (err) {
+        setError(getErrorMessage(err, '获取评估状态失败'));
+        setLoading(false);
+      }
+    }, 3000);
+  }, [applyFinalStatus, sessionNumericId]);
+
+  const handleStatusResponse = useCallback((response: EvaluationStatusResponse) => {
+    if (!applyFinalStatus(response)) {
+      startPolling();
+    }
+  }, [applyFinalStatus, startPolling]);
+
+  const loadEvaluation = useCallback(async () => {
+    if (sessionNumericId === null) {
+      setError('无效的语音会话 ID');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const status = await voiceInterviewApi.getEvaluation(sessionNumericId);
+      handleStatusResponse(status);
+    } catch {
+      try {
+        const status = await voiceInterviewApi.generateEvaluation(sessionNumericId);
+        handleStatusResponse(status);
+      } catch (err) {
+        console.error('Failed to trigger evaluation:', err);
+        setError(getErrorMessage(err, '触发评估失败，请重试'));
+        setLoading(false);
+      }
+    }
+  }, [handleStatusResponse, sessionNumericId]);
 
   useEffect(() => {
     loadEvaluation();
@@ -21,94 +101,29 @@ export default function VoiceInterviewEvaluationPage() {
         clearTimeout(pollingRef.current);
       }
     };
-  }, [sessionId]);
-
-  const loadEvaluation = async () => {
-    if (!sessionId) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const status = await voiceInterviewApi.getEvaluation(parseInt(sessionId));
-      handleStatusResponse(status);
-    } catch {
-      try {
-        const status = await voiceInterviewApi.generateEvaluation(parseInt(sessionId));
-        handleStatusResponse(status);
-      } catch (err) {
-        console.error('Failed to trigger evaluation:', err);
-        setError('触发评估失败，请重试');
-        setLoading(false);
-      }
-    }
-  };
-
-  const handleStatusResponse = (response: EvaluationStatusResponse) => {
-    const status = response.evaluateStatus;
-    setEvaluateStatus(status);
-
-    if (status === 'COMPLETED' && response.evaluation) {
-      setEvaluation(response.evaluation);
-      setLoading(false);
-    } else if (status === 'FAILED') {
-      setError(response.evaluateError || '评估生成失败');
-      setLoading(false);
-    } else {
-      startPolling();
-    }
-  };
-
-  const startPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearTimeout(pollingRef.current);
-    }
-
-    pollingRef.current = setTimeout(async () => {
-      if (!sessionId) return;
-
-      try {
-        const response = await voiceInterviewApi.getEvaluation(parseInt(sessionId));
-        const status = response.evaluateStatus;
-        setEvaluateStatus(status);
-
-        if (status === 'COMPLETED' && response.evaluation) {
-          setEvaluation(response.evaluation);
-          setLoading(false);
-        } else if (status === 'FAILED') {
-          setError(response.evaluateError || '评估生成失败');
-          setLoading(false);
-        } else {
-          startPolling();
-        }
-      } catch {
-        setError('获取评估状态失败');
-        setLoading(false);
-      }
-    }, 3000);
-  }, [sessionId]);
+  }, [loadEvaluation]);
 
   const handleRetry = async () => {
-    if (!sessionId) return;
+    if (sessionNumericId === null) return;
     setLoading(true);
     setError(null);
     setEvaluateStatus(null);
 
     try {
-      const status = await voiceInterviewApi.generateEvaluation(parseInt(sessionId));
+      const status = await voiceInterviewApi.generateEvaluation(sessionNumericId);
       handleStatusResponse(status);
     } catch (err) {
       console.error('Failed to retry evaluation:', err);
-      setError('重试失败，请稍后再试');
+      setError(getErrorMessage(err, '重试失败，请稍后再试'));
       setLoading(false);
     }
   };
 
   const interviewDetail = useMemo<InterviewDetail | null>(() => {
-    if (!evaluation) return null;
+    if (!evaluation || !sessionId) return null;
     return {
       id: 0,
-      sessionId: sessionId!,
+      sessionId,
       totalQuestions: evaluation.totalQuestions,
       status: 'COMPLETED',
       overallScore: evaluation.overallScore,
@@ -134,25 +149,27 @@ export default function VoiceInterviewEvaluationPage() {
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="w-10 h-10 border-3 border-slate-200 dark:border-slate-700 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-300">
-            {evaluateStatus === 'PROCESSING' ? 'AI 正在分析面试表现...' : '正在生成评估报告...'}
-          </p>
-          <p className="text-slate-400 text-sm mt-2">预计需要 10-30 秒</p>
-        </div>
-      </div>
+      <LoadingState
+        label={isEvaluationProcessing(evaluateStatus) ? 'AI 正在分析面试表现...' : '正在生成评估报告...'}
+        description="预计需要 10-30 秒"
+        className="flex flex-col items-center justify-center min-h-[50vh] gap-3"
+        spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+        textClassName="text-slate-600 dark:text-slate-300"
+      />
     );
   }
 
   // Error state
   if (error && !evaluation) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <p className="text-slate-600 dark:text-slate-300 text-lg mb-2">评估报告生成失败</p>
-          <p className="text-slate-400 text-sm mb-6">{error}</p>
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <EmptyState
+          title="评估报告生成失败"
+          description={error}
+          className="text-center"
+          titleClassName="text-slate-600 dark:text-slate-300 text-lg mb-2"
+          descriptionClassName="text-slate-400 text-sm mb-6"
+          action={
           <div className="flex items-center gap-3 justify-center">
             <button
               onClick={handleRetry}
@@ -168,7 +185,8 @@ export default function VoiceInterviewEvaluationPage() {
               返回列表
             </button>
           </div>
-        </div>
+          }
+        />
       </div>
     );
   }

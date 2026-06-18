@@ -56,14 +56,14 @@ public class KnowledgeBaseDeleteService {
         try {
             vectorService.deleteByKnowledgeBaseId(id);
         } catch (Exception e) {
-            log.warn("删除向量数据失败，继续删除知识库: kbId={}, error={}", id, e.getMessage());
+            log.warn("删除向量数据失败，继续删除知识库: kbId={}, error={}", id, e.getMessage(), e);
         }
         
         // 4. 删除RustFS中的文件（FileStorageService 已内置存在性检查）
         try {
             storageService.deleteKnowledgeBase(kb.getStorageKey());
         } catch (Exception e) {
-            log.warn("删除RustFS文件失败，继续删除知识库记录: kbId={}, error={}", id, e.getMessage());
+            log.warn("删除RustFS文件失败，继续删除知识库记录: kbId={}, error={}", id, e.getMessage(), e);
         }
         
         // 5. 删除知识库记录（在事务中）

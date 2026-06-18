@@ -16,7 +16,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * 面试历史服务
@@ -87,8 +89,8 @@ public class InterviewHistoryService {
         }
 
         // 将答案按 questionIndex 索引
-        java.util.Map<Integer, InterviewAnswerEntity> answerMap = answers.stream()
-            .collect(java.util.stream.Collectors.toMap(
+        Map<Integer, InterviewAnswerEntity> answerMap = answers.stream()
+            .collect(Collectors.toMap(
                 InterviewAnswerEntity::getQuestionIndex,
                 a -> a,
                 (a1, a2) -> a1  // 如果有重复，取第一个
@@ -155,7 +157,7 @@ public class InterviewHistoryService {
             return pdfExportService.exportInterviewReport(session);
         } catch (Exception e) {
             log.error("导出PDF失败: sessionId={}", sessionId, e);
-            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出PDF失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出面试报告失败", e);
         }
     }
 }

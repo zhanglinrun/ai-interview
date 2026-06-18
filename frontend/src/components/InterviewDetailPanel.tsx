@@ -1,7 +1,8 @@
 import {useMemo, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
+import {BarChart3, ChevronDown, CirclePlus, MessageSquare, CheckCircle, AlertCircle} from 'lucide-react';
 import {getScoreColor} from '../utils/score';
-import type {InterviewDetail} from '../api/history';
+import type {AnswerItem, InterviewDetail} from '../api/history';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -33,11 +34,11 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
   };
 
   // 计算圆环进度
-  const { scorePercent, circumference, strokeDashoffset } = useMemo(() => {
+  const { circumference, strokeDashoffset } = useMemo(() => {
     const percent = interview.overallScore !== null ? (interview.overallScore / 100) * 100 : 0;
     const circ = 2 * Math.PI * 54; // r=54
     const offset = circ - (percent / 100) * circ;
-    return { scorePercent: percent, circumference: circ, strokeDashoffset: offset };
+    return { circumference: circ, strokeDashoffset: offset };
   }, [interview.overallScore]);
 
   return (
@@ -50,7 +51,6 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
         <ScoreCard
         score={interview.overallScore}
         feedback={interview.overallFeedback}
-        scorePercent={scorePercent}
         circumference={circumference}
         strokeDashoffset={strokeDashoffset}
       />
@@ -79,13 +79,11 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
 function ScoreCard({
   score,
   feedback,
-  // scorePercent, // 暂时未使用
   circumference,
   strokeDashoffset
 }: {
   score: number | null;
   feedback: string | null;
-  scorePercent: number;
   circumference: number;
   strokeDashoffset: number;
 }) {
@@ -149,10 +147,7 @@ function StrengthsSection({ strengths }: { strengths: string[] }) {
       transition={{ delay: 0.1 }}
     >
         <h4 className="font-semibold text-emerald-600 dark:text-emerald-400 mb-4 flex items-center gap-2">
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          <polyline points="22,4 12,14.01 9,11.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <CheckCircle className="w-5 h-5" />
         表现优势
       </h4>
       <ul className="space-y-3">
@@ -177,11 +172,7 @@ function ImprovementsSection({ improvements }: { improvements: string[] }) {
       transition={{ delay: 0.2 }}
     >
         <h4 className="font-semibold text-amber-600 dark:text-amber-400 mb-4 flex items-center gap-2">
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-          <line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-          <line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-        </svg>
+        <AlertCircle className="w-5 h-5" />
         改进建议
       </h4>
       <ul className="space-y-3">
@@ -202,16 +193,14 @@ function QuestionsSection({
   expandedQuestions,
   toggleQuestion
 }: {
-  answers: any[];
+  answers: AnswerItem[];
   expandedQuestions: Set<number>;
   toggleQuestion: (index: number) => void;
 }) {
   return (
     <div>
       <h4 className="font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-        <svg className="w-5 h-5 text-primary-500" viewBox="0 0 24 24" fill="none">
-          <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <MessageSquare className="w-5 h-5 text-primary-500" />
         问答记录详情
       </h4>
 
@@ -237,7 +226,7 @@ function QuestionCard({
   isExpanded,
   onToggle
 }: {
-  answer: any;
+  answer: AnswerItem;
   index: number;
   isExpanded: boolean;
   onToggle: () => void;
@@ -267,15 +256,13 @@ function QuestionCard({
             得分: {answer.score}
           </span>
         </div>
-          <motion.svg
+          <motion.span
           className="w-5 h-5 text-slate-400"
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2 }}
-          viewBox="0 0 24 24"
-          fill="none"
         >
-          <polyline points="6,9 12,15 18,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </motion.svg>
+          <ChevronDown className="w-5 h-5" />
+        </motion.span>
       </div>
 
       {/* 问题内容 */}
@@ -297,9 +284,7 @@ function QuestionCard({
               {/* 你的回答 */}
               <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
+                  <MessageSquare className="w-4 h-4" />
                   你的回答
                 </p>
                 <p className={`leading-relaxed ${
@@ -315,10 +300,7 @@ function QuestionCard({
               {answer.feedback && (
                 <div>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-2 font-medium">
-                    <svg className="w-4 h-4 text-primary-500" viewBox="0 0 24 24" fill="none">
-                      <path d="M3 3V21H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M18 9L12 15L9 12L3 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                    <BarChart3 className="w-4 h-4 text-primary-500" />
                     AI 深度评价
                   </p>
                   <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-6">{answer.feedback}</p>
@@ -330,11 +312,7 @@ function QuestionCard({
                   <div
                       className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 border border-slate-100 dark:border-slate-600">
                     <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 flex items-center gap-2 font-medium">
-                    <svg className="w-4 h-4 text-primary-500" viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/>
-                      <path d="M9 12H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                      <path d="M12 9V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
+                    <CirclePlus className="w-4 h-4 text-primary-500" />
                     参考答案
                   </p>
                     <div

@@ -62,7 +62,7 @@ public class PdfExportService {
             throw e;
         } catch (Exception e) {
             log.error("创建中文字体失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "创建字体失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "创建字体失败", e);
         }
     }
     

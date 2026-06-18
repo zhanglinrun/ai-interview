@@ -174,7 +174,7 @@ public abstract class AbstractStreamConsumer<T> {
                 processMessage(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
-            log.warn("{} consumer 认领待确认消息失败: {}", taskDisplayName(), e.getMessage());
+            log.warn("{} consumer 认领待确认消息失败: {}", taskDisplayName(), e.getMessage(), e);
         }
     }
 

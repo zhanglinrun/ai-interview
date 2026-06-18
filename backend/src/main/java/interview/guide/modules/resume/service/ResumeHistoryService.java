@@ -173,7 +173,7 @@ public class ResumeHistoryService {
             return new ExportResult(pdfBytes, filename);
         } catch (Exception e) {
             log.error("导出PDF失败: resumeId={}", resumeId, e);
-            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出PDF失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出简历分析报告失败", e);
         }
     }
 

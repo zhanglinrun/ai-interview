@@ -31,7 +31,9 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -93,18 +95,18 @@ public class KnowledgeBaseVectorService {
         int chunkPar = vectorizeProperties.getChunkParallelism();
         if (chunkPar > 1) {
             AtomicInteger seq = new AtomicInteger(0);
-            this.chunkExecutor = new java.util.concurrent.ThreadPoolExecutor(
+            this.chunkExecutor = new ThreadPoolExecutor(
                 chunkPar,
                 chunkPar,
                 0L,
                 TimeUnit.MILLISECONDS,
-                new java.util.concurrent.LinkedBlockingQueue<>(100),
+                new LinkedBlockingQueue<>(100),
                 r -> {
                     Thread t = new Thread(r, "vectorize-chunk-" + seq.incrementAndGet());
                     t.setDaemon(true);
                     return t;
                 },
-                new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+                new ThreadPoolExecutor.CallerRunsPolicy()
             );
             log.info("向量化启用分块级并行: chunkParallelism={}", chunkPar);
         } else {
@@ -208,7 +210,7 @@ public class KnowledgeBaseVectorService {
             recordVectorizeMetrics(false, startNanos);
             log.error("向量化知识库失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
-                "向量化知识库失败: " + e.getMessage());
+                "向量化知识库失败: " + e.getMessage(), e);
         }
     }
 
@@ -426,12 +428,12 @@ public class KnowledgeBaseVectorService {
      * @param maxSiblings 最多聚合的兄弟 chunk 数
      * @return 扩展后的上下文文本
      */
-    public String expandChunkWithSiblings(org.springframework.ai.document.Document doc, int maxChars, int maxSiblings) {
+    public String expandChunkWithSiblings(Document doc, int maxChars, int maxSiblings) {
         if (doc == null || doc.getText() == null) {
             return "";
         }
         String baseText = doc.getText();
-        java.util.Map<String, Object> metadata = doc.getMetadata();
+        Map<String, Object> metadata = doc.getMetadata();
         Object kbIdRaw = metadata == null ? null : metadata.get("kb_id");
         Object parentSectionRaw = metadata == null ? null : metadata.get("parent_section");
         if (kbIdRaw == null || parentSectionRaw == null || parentSectionRaw.toString().isBlank()) {
@@ -487,7 +489,7 @@ public class KnowledgeBaseVectorService {
             return limitedResults;
             
         } catch (Exception e) {
-            log.warn("向量搜索前置过滤失败，回退到本地过滤: {}", e.getMessage());
+            log.warn("向量搜索前置过滤失败，回退到本地过滤: {}", e.getMessage(), e);
             return similaritySearchFallback(query, knowledgeBaseIds, topK, minScore);
         }
     }
@@ -630,7 +632,7 @@ public class KnowledgeBaseVectorService {
         } catch (Exception e) {
             log.error("向量搜索失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED,
-                "向量搜索失败: " + e.getMessage());
+                "向量搜索失败: " + e.getMessage(), e);
         }
     }
 

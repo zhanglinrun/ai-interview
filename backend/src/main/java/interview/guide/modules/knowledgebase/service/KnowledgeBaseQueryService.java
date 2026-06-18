@@ -17,6 +17,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
@@ -36,6 +37,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -91,8 +93,7 @@ public class KnowledgeBaseQueryService {
     private final int parentExpandMaxChars;
     private final int parentExpandMaxSiblings;
     private final MeterRegistry meterRegistry;
-    private final java.util.concurrent.atomic.AtomicInteger activeStreams =
-        new java.util.concurrent.atomic.AtomicInteger(0);
+    private final AtomicInteger activeStreams = new AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
             LlmProviderRegistry llmProviderRegistry,
@@ -102,7 +103,7 @@ public class KnowledgeBaseQueryService {
             RerankService rerankService,
             KnowledgeBaseQueryProperties queryProperties,
             ResourceLoader resourceLoader,
-            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
         this.vectorService = vectorService;
@@ -240,7 +241,11 @@ public class KnowledgeBaseQueryService {
 
         } catch (Exception e) {
             log.error("知识库问答失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED, "知识库查询失败：" + e.getMessage());
+            throw new BusinessException(
+                ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED,
+                "知识库查询失败：" + e.getMessage(),
+                e
+            );
         }
     }
 
@@ -296,7 +301,7 @@ public class KnowledgeBaseQueryService {
         try {
             return vectorService.expandChunkWithSiblings(doc, parentExpandMaxChars, parentExpandMaxSiblings);
         } catch (Exception e) {
-            log.warn("small-to-big 扩展失败，使用原 chunk: {}", e.getMessage());
+            log.warn("small-to-big 扩展失败，使用原 chunk: {}", e.getMessage(), e);
             return doc.getText();
         }
     }
@@ -444,14 +449,14 @@ public class KnowledgeBaseQueryService {
                 if (token != null && !token.isEmpty() && firstTokenSeen.compareAndSet(false, true)) {
                     meterRegistry.timer("app.ai.rag.stream.first_token_latency")
                         .record(System.nanoTime() - subscribeNanos[0],
-                            java.util.concurrent.TimeUnit.NANOSECONDS);
+                            TimeUnit.NANOSECONDS);
                 }
             })
             .doFinally(signal -> {
                 activeStreams.decrementAndGet();
                 meterRegistry.timer("app.ai.rag.stream.total_latency")
                     .record(System.nanoTime() - subscribeNanos[0],
-                        java.util.concurrent.TimeUnit.NANOSECONDS);
+                        TimeUnit.NANOSECONDS);
             });
     }
 
@@ -594,7 +599,7 @@ public class KnowledgeBaseQueryService {
             log.info("HyDE 生成假设文档: question='{}', length={}", question, trimmed.length());
             return trimmed;
         } catch (Exception e) {
-            log.warn("HyDE 生成失败，跳过假设文档召回: {}", e.getMessage());
+            log.warn("HyDE 生成失败，跳过假设文档召回: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -634,7 +639,7 @@ public class KnowledgeBaseQueryService {
             log.info("Query rewrite: origin='{}', rewritten='{}', historySize={}", question, normalized, history.size());
             return normalized;
         } catch (Exception e) {
-            log.warn("Query rewrite 失败，使用原问题继续检索: {}", e.getMessage());
+            log.warn("Query rewrite 失败，使用原问题继续检索: {}", e.getMessage(), e);
             return question;
         }
     }

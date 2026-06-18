@@ -18,6 +18,9 @@ public class KnowledgeBaseQueryProperties {
     private Hyde hyde = new Hyde();
     private Fusion fusion = new Fusion();
     private ParentExpand parentExpand = new ParentExpand();
+    private int chunkOverlapChars = 80;
+    private String chunkStrategy = "hybrid";
+    private int chunkSizeChars = 800;
     private String systemPromptPath = "classpath:prompts/knowledgebase-query-system.st";
     private String userPromptPath = "classpath:prompts/knowledgebase-query-user.st";
     private String rewritePromptPath = "classpath:prompts/knowledgebase-query-rewrite.st";

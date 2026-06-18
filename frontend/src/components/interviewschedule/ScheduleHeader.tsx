@@ -5,13 +5,26 @@ import { motion } from 'framer-motion';
 import { Plus, ChevronLeft, ChevronRight, Calendar, List, LayoutGrid } from 'lucide-react';
 import dayjs from 'dayjs';
 
+export type ScheduleView = 'day' | 'week' | 'month' | 'list';
+
 interface ScheduleHeaderProps {
-  view: 'day' | 'week' | 'month' | 'list';
-  onViewChange: (view: 'day' | 'week' | 'month' | 'list') => void;
+  view: ScheduleView;
+  onViewChange: (view: ScheduleView) => void;
   date: Date;
   onDateChange: (date: Date) => void;
   onAddClick: () => void;
 }
+
+const VIEW_OPTIONS: Array<{
+  key: ScheduleView;
+  icon: typeof Calendar;
+  label: string;
+}> = [
+  { key: 'day', icon: Calendar, label: '日视图' },
+  { key: 'week', icon: Calendar, label: '周视图' },
+  { key: 'month', icon: LayoutGrid, label: '月视图' },
+  { key: 'list', icon: List, label: '列表' },
+];
 
 export const ScheduleHeader: React.FC<ScheduleHeaderProps> = ({
   view,
@@ -107,17 +120,12 @@ export const ScheduleHeader: React.FC<ScheduleHeaderProps> = ({
 
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-100/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl p-1.5 gap-1">
-            {[
-              { key: 'day', icon: Calendar, label: '日视图' },
-              { key: 'week', icon: Calendar, label: '周视图' },
-              { key: 'month', icon: LayoutGrid, label: '月视图' },
-              { key: 'list', icon: List, label: '列表' },
-            ].map(({ key, icon: Icon, label }) => (
+            {VIEW_OPTIONS.map(({ key, icon: Icon, label }) => (
               <motion.button
                 key={key}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => onViewChange(key as any)}
+                onClick={() => onViewChange(key)}
                 className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium text-sm transition-all ${
                   view === key
                     ? 'bg-white/95 dark:bg-slate-700/80 backdrop-blur-sm shadow-md text-primary-700 dark:text-primary-200 border border-slate-200/50 dark:border-slate-600/50'

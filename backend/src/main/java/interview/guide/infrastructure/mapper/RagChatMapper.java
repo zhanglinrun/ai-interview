@@ -8,7 +8,11 @@ import interview.guide.modules.knowledgebase.model.RagChatDTO.SessionDetailDTO;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.SessionListItemDTO;
 import interview.guide.modules.knowledgebase.model.RagChatMessageEntity;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
-import org.mapstruct.*;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingConstants;
+import org.mapstruct.Named;
+import org.mapstruct.ReportingPolicy;
 
 import java.util.Collection;
 import java.util.List;

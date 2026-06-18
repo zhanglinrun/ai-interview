@@ -14,7 +14,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -79,7 +87,7 @@ public class FileStorageService {
             return s3Client.getObjectAsBytes(getRequest).asByteArray();
         } catch (S3Exception e) {
             log.error("下载文件失败: {} - {}", fileKey, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件下载失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件下载失败: " + e.getMessage(), e);
         }
     }
 
@@ -105,10 +113,10 @@ public class FileStorageService {
             return fileKey;
         } catch (IOException e) {
             log.error("读取上传文件失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "文件读取失败");
+            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "文件读取失败", e);
         } catch (S3Exception e) {
             log.error("上传文件到RustFS失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "文件存储失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "文件存储失败: " + e.getMessage(), e);
         }
     }
 
@@ -126,7 +134,7 @@ public class FileStorageService {
         } catch (NoSuchKeyException e) {
             return false;
         } catch (S3Exception e) {
-            log.warn("检查文件存在性失败: {} - {}", fileKey, e.getMessage());
+            log.warn("检查文件存在性失败: {} - {}", fileKey, e.getMessage(), e);
             return false;
         }
     }
@@ -142,8 +150,8 @@ public class FileStorageService {
                     .build();
             return s3Client.headObject(headRequest).contentLength();
         } catch (S3Exception e) {
-            log.error("获取文件大小失败: {} - {}", fileKey, e.getMessage());
-            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "获取文件信息失败");
+            log.error("获取文件大小失败: {} - {}", fileKey, e.getMessage(), e);
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "获取文件信息失败", e);
         }
     }
 
@@ -172,7 +180,7 @@ public class FileStorageService {
             log.info("文件删除成功: {}", fileKey);
         } catch (S3Exception e) {
             log.error("删除文件失败: {} - {}", fileKey, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.STORAGE_DELETE_FAILED, "文件删除失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.STORAGE_DELETE_FAILED, "文件删除失败: " + e.getMessage(), e);
         }
     }
 

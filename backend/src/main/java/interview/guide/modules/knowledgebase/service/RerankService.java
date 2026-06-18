@@ -120,7 +120,7 @@ public class RerankService {
             log.info("[RerankService] 重排完成: 候选 {} -> 保留 {}", documents.size(), reranked.size());
             return reranked;
         } catch (Exception e) {
-            log.warn("[RerankService] 重排调用失败，退回融合排序: {}", e.getMessage());
+            log.warn("[RerankService] 重排调用失败，退回融合排序: {}", e.getMessage(), e);
             return capList(documents, topN);
         }
     }

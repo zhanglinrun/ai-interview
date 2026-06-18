@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Edit2, Trash2, ExternalLink } from 'lucide-react';
 import dayjs from 'dayjs';
 import type { InterviewSchedule, InterviewStatus } from '../../types/interviewSchedule';
+import {isPendingScheduleStatus, scheduleStatusBadgeConfig} from './statusConfig';
 
 interface InterviewListItemProps {
   interview: InterviewSchedule;
@@ -12,25 +13,6 @@ interface InterviewListItemProps {
   onDelete: () => void;
   onStatusChange: (status: InterviewStatus) => void;
 }
-
-const statusConfig: Record<InterviewStatus, { label: string; className: string }> = {
-  PENDING: {
-    label: '待面试',
-    className: 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-300/30 dark:border-blue-400/30',
-  },
-  COMPLETED: {
-    label: '已完成',
-    className: 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300/30 dark:border-emerald-400/30',
-  },
-  CANCELLED: {
-    label: '已取消',
-    className: 'bg-slate-500/10 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border border-slate-300/30 dark:border-slate-400/30',
-  },
-  RESCHEDULED: {
-    label: '已改期',
-    className: 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/30 dark:border-amber-400/30',
-  },
-};
 
 const typeLabels: Record<string, string> = {
   ONSITE: '现场面试',
@@ -55,8 +37,8 @@ export const InterviewListItem: React.FC<InterviewListItemProps> = ({
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-3">
-            <span className={`status-badge backdrop-blur-sm ${statusConfig[interview.status].className}`}>
-              {statusConfig[interview.status].label}
+            <span className={`status-badge backdrop-blur-sm ${scheduleStatusBadgeConfig[interview.status].className}`}>
+              {scheduleStatusBadgeConfig[interview.status].label}
             </span>
             <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
               {dayjs(interview.interviewTime).format('YYYY-MM-DD HH:mm')}
@@ -122,7 +104,7 @@ export const InterviewListItem: React.FC<InterviewListItemProps> = ({
         </div>
       </div>
 
-      {interview.status === 'PENDING' && (
+      {isPendingScheduleStatus(interview.status) && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}

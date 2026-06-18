@@ -116,7 +116,11 @@ public class ResumeGradingService {
                 log.debug("AI响应解析成功: overallScore={}", dto.overallScore());
             } catch (Exception e) {
                 log.error("简历分析AI调用失败: {}", e.getMessage(), e);
-                throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "简历分析失败：" + e.getMessage());
+                throw new BusinessException(
+                    ErrorCode.RESUME_ANALYSIS_FAILED,
+                    "简历分析失败：" + e.getMessage(),
+                    e
+                );
             }
             
             // 转换为业务对象

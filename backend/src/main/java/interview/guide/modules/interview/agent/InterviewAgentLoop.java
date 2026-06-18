@@ -90,7 +90,7 @@ public class InterviewAgentLoop {
                     .call()
                     .content();
             } catch (Exception e) {
-                log.error("[InterviewAgentLoop] 第 {} 轮模型调用失败: {}", round, e.getMessage());
+                log.error("[InterviewAgentLoop] 第 {} 轮模型调用失败: {}", round, e.getMessage(), e);
                 break;
             }
 

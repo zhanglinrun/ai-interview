@@ -21,6 +21,14 @@ function hasStorage() {
   return typeof window !== 'undefined' && Boolean(window.localStorage);
 }
 
+function isStoredUser(value: unknown): value is StoredUser {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const user = value as Partial<StoredUser>;
+  return typeof user.userId === 'number' && typeof user.username === 'string';
+}
+
 export function getAccessToken(): string | null {
   if (!hasStorage()) return null;
   return window.localStorage.getItem(ACCESS_TOKEN_KEY);
@@ -31,7 +39,8 @@ export function getStoredUser(): StoredUser | null {
   const raw = window.localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as StoredUser;
+    const parsed = JSON.parse(raw);
+    return isStoredUser(parsed) ? parsed : null;
   } catch {
     return null;
   }

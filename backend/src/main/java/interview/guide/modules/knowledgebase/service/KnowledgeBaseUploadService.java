@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -115,7 +117,7 @@ public class KnowledgeBaseUploadService {
      * @param category 统一分类（可选）
      * @return 汇总结果：总数、成功数、失败数、每个文件的处理明细
      */
-    public Map<String, Object> uploadKnowledgeBaseBatch(java.util.List<MultipartFile> files, String category) {
+    public Map<String, Object> uploadKnowledgeBaseBatch(List<MultipartFile> files, String category) {
         if (files == null || files.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
         }
@@ -123,7 +125,7 @@ public class KnowledgeBaseUploadService {
         log.info("收到批量知识库上传请求: 文件数={}, category={}", files.size(), category);
         long startTime = System.currentTimeMillis();
 
-        java.util.List<Map<String, Object>> items = new java.util.ArrayList<>();
+        List<Map<String, Object>> items = new ArrayList<>();
         int success = 0;
         int failed = 0;
         int duplicate = 0;
@@ -145,7 +147,7 @@ public class KnowledgeBaseUploadService {
                 ));
             } catch (Exception e) {
                 failed++;
-                log.warn("批量上传中单个文件失败: {}, error={}", fileName, e.getMessage());
+                log.warn("批量上传中单个文件失败: {}, error={}", fileName, e.getMessage(), e);
                 items.add(Map.of(
                     "filename", fileName != null ? fileName : "",
                     "status", "failed",

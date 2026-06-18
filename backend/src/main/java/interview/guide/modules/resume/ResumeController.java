@@ -1,7 +1,10 @@
 package interview.guide.modules.resume;
 
 import interview.guide.common.annotation.RateLimit;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
+import interview.guide.common.web.AttachmentResponseBuilder;
 import interview.guide.modules.resume.model.ResumeDetailDTO;
 import interview.guide.modules.resume.model.ResumeListItemDTO;
 import interview.guide.modules.resume.service.ResumeDeleteService;
@@ -10,7 +13,6 @@ import interview.guide.modules.resume.service.ResumeUploadService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,8 +23,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -83,15 +83,13 @@ public class ResumeController {
     public ResponseEntity<byte[]> exportAnalysisPdf(@PathVariable Long id) {
         try {
             var result = historyService.exportAnalysisPdf(id);
-            String filename = URLEncoder.encode(result.filename(), StandardCharsets.UTF_8);
-
-            return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
-                .contentType(MediaType.APPLICATION_PDF)
-                .body(result.pdfBytes());
+            return AttachmentResponseBuilder.pdf(result.filename(), result.pdfBytes());
         } catch (Exception e) {
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
             log.error("导出PDF失败: resumeId={}", id, e);
-            return ResponseEntity.internalServerError().build();
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出简历分析报告失败", e);
         }
     }
 

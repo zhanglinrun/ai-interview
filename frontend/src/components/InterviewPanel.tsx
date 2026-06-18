@@ -5,7 +5,10 @@ import {formatDateOnly} from '../utils/date';
 import {getScoreColor} from '../utils/score';
 import type {InterviewItem} from '../api/history';
 import {historyApi} from '../api/history';
-import ConfirmDialog from './ConfirmDialog';
+import {getErrorMessage} from '../api/request';
+import DeleteConfirmDialog from './DeleteConfirmDialog';
+import LoadingButtonContent from './LoadingButtonContent';
+import {EmptyState, LoadingState} from './PageState';
 import {Calendar, ChevronRight, Download, MessageSquare, Mic, Trash2, TrendingUp} from 'lucide-react';
 
 interface InterviewPanelProps {
@@ -48,7 +51,7 @@ export default function InterviewPanel({
       onDeleteInterview(sessionId);
       setDeleteConfirm(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
+      alert(getErrorMessage(err, '删除失败，请稍后重试'));
     } finally {
       setDeletingSessionId(null);
     }
@@ -57,24 +60,29 @@ export default function InterviewPanel({
   // 准备图表数据
   const chartData = useMemo(() => {
     return interviews
-      .filter(i => i.overallScore !== null)
-      .map((interview) => ({
+      .map((interview, index) => ({ interview, index }))
+      .filter(({ interview }) => interview.overallScore !== null)
+      .map(({ interview, index }) => ({
         name: formatDateOnly(interview.createdAt),
         score: interview.overallScore || 0,
-        index: interviews.length - interviews.indexOf(interview)
+        index: interviews.length - index
       }))
       .reverse();
   }, [interviews]);
 
   if (interviews.length === 0) {
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
-          <div
-              className="w-16 h-16 mx-auto mb-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
-          <Mic className="w-8 h-8 text-slate-400" />
-        </div>
-          <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">暂无面试记录</h3>
-          <p className="text-slate-500 dark:text-slate-400 mb-6">开始模拟面试，获取专业评估</p>
+      <EmptyState
+        iconNode={
+          <div className="w-16 h-16 mx-auto mb-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
+            <Mic className="w-8 h-8 text-slate-400" />
+          </div>
+        }
+        title="暂无面试记录"
+        description="开始模拟面试，获取专业评估"
+        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+        descriptionClassName="text-slate-500 dark:text-slate-400 mb-6"
+        action={
         <motion.button
           onClick={onStartInterview}
           className="px-6 py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-medium shadow-lg shadow-primary-500/30"
@@ -83,7 +91,8 @@ export default function InterviewPanel({
         >
           开始模拟面试
         </motion.button>
-      </div>
+        }
+      />
     );
   }
 
@@ -171,28 +180,24 @@ export default function InterviewPanel({
         </div>
 
         {/* 删除确认对话框 */}
-        <ConfirmDialog
+        <DeleteConfirmDialog
           open={deleteConfirm !== null}
-          title="删除面试记录"
-          message="确定要删除这条面试记录吗？删除后无法恢复。"
-          confirmText="确定删除"
-          cancelText="取消"
-          confirmVariant="danger"
+          item={deleteConfirm ? { sessionId: deleteConfirm.sessionId } : null}
+          itemType="面试记录"
           loading={deletingSessionId !== null}
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteConfirm(null)}
+          customMessage="确定要删除这条面试记录吗？删除后无法恢复。"
         />
 
         {loadingInterview && (
             <div className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 flex items-center gap-4">
-                <motion.div
-                    className="w-8 h-8 border-3 border-slate-200 dark:border-slate-600 border-t-primary-500 rounded-full"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              <LoadingState
+                label="加载面试详情..."
+                className="bg-white dark:bg-slate-800 rounded-2xl p-6 flex items-center gap-4"
+                spinnerClassName="w-8 h-8 text-primary-500 animate-spin"
+                textClassName="text-slate-600 dark:text-slate-300"
               />
-                <span className="text-slate-600 dark:text-slate-300">加载面试详情...</span>
-            </div>
           </div>
         )}
       </motion.div>
@@ -274,15 +279,14 @@ function InterviewItemCard({
           className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="删除面试记录"
         >
-          {deleting ? (
-            <motion.div
-              className="w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-            />
-          ) : (
+          <LoadingButtonContent
+            loading={deleting}
+            loadingText="删除中"
+            spinnerClassName="w-5 h-5 animate-spin text-red-500"
+            iconOnly
+          >
             <Trash2 className="w-5 h-5" />
-          )}
+          </LoadingButtonContent>
         </button>
       </div>
 

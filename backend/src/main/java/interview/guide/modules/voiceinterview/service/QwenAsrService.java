@@ -645,7 +645,7 @@ public class QwenAsrService {
         }
     }
 
-    // Setter methods for configuration (used by Spring @Value injection or tests)
+    // Setter methods for runtime configuration refresh and tests.
 
     public void setUrl(String url) {
         this.url = url;

@@ -58,7 +58,7 @@ public class KnowledgeBaseSearchTool implements AgentTool {
                 .map(doc -> "- " + truncate(doc.getText()))
                 .collect(Collectors.joining("\n"));
         } catch (Exception e) {
-            log.warn("[KnowledgeBaseSearchTool] 检索失败: {}", e.getMessage());
+            log.warn("[KnowledgeBaseSearchTool] 检索失败: {}", e.getMessage(), e);
             return "知识库检索出错，请基于通用标准继续。";
         }
     }

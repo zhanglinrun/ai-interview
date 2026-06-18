@@ -1,4 +1,5 @@
 import { request } from './request';
+import type {EvaluateStatus} from './history';
 
 // ========== 类型定义 ==========
 
@@ -62,7 +63,7 @@ export interface VoiceEvaluationDetail {
  * Evaluation status response from GET/POST evaluation endpoints
  */
 export interface EvaluationStatusResponse {
-  evaluateStatus: string | null;  // PENDING | PROCESSING | COMPLETED | FAILED
+  evaluateStatus: EvaluateStatus | null;
   evaluateError?: string | null;
   evaluation?: VoiceEvaluationDetail | null;
 }
@@ -79,7 +80,7 @@ export interface SessionMeta {
   updatedAt: string;
   actualDuration?: number;
   messageCount: number;
-  evaluateStatus?: string;
+  evaluateStatus?: EvaluateStatus;
   evaluateError?: string;
 }
 
@@ -135,6 +136,67 @@ export type WebSocketMessage =
   | WebSocketAudioChunkMessage
   | WebSocketControlResponseMessage
   | WebSocketErrorMessage;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function parseWebSocketMessage(raw: string): WebSocketMessage | null {
+  const parsed = JSON.parse(raw);
+  if (!isRecord(parsed) || typeof parsed.type !== 'string') {
+    return null;
+  }
+
+  switch (parsed.type) {
+    case 'subtitle':
+      return typeof parsed.text === 'string'
+        ? {
+            type: 'subtitle',
+            text: parsed.text,
+            isFinal: parsed.isFinal === true,
+          }
+        : null;
+    case 'audio':
+      if (typeof parsed.data !== 'string') {
+        return null;
+      }
+      return typeof parsed.text === 'string'
+        ? { type: 'audio', data: parsed.data, text: parsed.text }
+        : { type: 'audio', data: parsed.data };
+    case 'audio_chunk':
+      return typeof parsed.data === 'string' && typeof parsed.index === 'number'
+        ? {
+            type: 'audio_chunk',
+            data: parsed.data,
+            index: parsed.index,
+            isLast: parsed.isLast === true,
+          }
+        : null;
+    case 'text':
+      return typeof parsed.content === 'string'
+        ? {
+            type: 'text',
+            content: parsed.content,
+            final: parsed.final === true,
+          }
+        : null;
+    case 'control':
+      return typeof parsed.action === 'string'
+        ? {
+            type: 'control',
+            action: parsed.action,
+            message: typeof parsed.message === 'string' ? parsed.message : undefined,
+            timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : undefined,
+          }
+        : null;
+    case 'error':
+      return typeof parsed.message === 'string'
+        ? { type: 'error', message: parsed.message }
+        : null;
+    default:
+      return null;
+  }
+}
 
 // WebSocket 事件处理器
 export interface WebSocketEventHandlers {
@@ -271,7 +333,10 @@ export class VoiceInterviewWebSocket {
 
       this.ws.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as WebSocketMessage;
+          const message = parseWebSocketMessage(event.data);
+          if (!message) {
+            return;
+          }
 
           // 调用通用消息处理器
           this.handlers.onMessage?.(message);
@@ -279,29 +344,19 @@ export class VoiceInterviewWebSocket {
           // 根据消息类型调用特定处理器
           switch (message.type) {
             case 'subtitle':
-              this.handlers.onSubtitle?.(
-                message.text,
-                (message as WebSocketSubtitleMessage).isFinal
-              );
+              this.handlers.onSubtitle?.(message.text, message.isFinal);
               break;
             case 'audio':
               // 检查是否是 AI 响应（包含 text 字段）
               if ('text' in message) {
-                const audioMsg = message as WebSocketAudioResponseMessage;
-                this.handlers.onAudioResponse?.(audioMsg.data, audioMsg.text);
+                this.handlers.onAudioResponse?.(message.data, message.text);
               }
               break;
             case 'audio_chunk':
-              if ('index' in message) {
-                const chunkMsg = message as WebSocketAudioChunkMessage;
-                this.handlers.onAudioChunk?.(chunkMsg.data, chunkMsg.index, chunkMsg.isLast);
-              }
+              this.handlers.onAudioChunk?.(message.data, message.index, message.isLast);
               break;
             case 'text':
-              if ('content' in message) {
-                const textMsg = message as WebSocketTextMessage;
-                this.handlers.onTextResponse?.(textMsg.content, !!textMsg.final);
-              }
+              this.handlers.onTextResponse?.(message.content, !!message.final);
               break;
             case 'control':
               this.handlers.onControl?.(message.action, message.message);
@@ -329,7 +384,11 @@ export class VoiceInterviewWebSocket {
       };
     } catch (error) {
       console.error('Error creating WebSocket connection:', error);
-      this.handlers.onError?.(error as Event);
+      this.handlers.onError?.(
+        error instanceof Event
+          ? error
+          : new ErrorEvent('error', { message: '创建 WebSocket 连接失败' })
+      );
     }
   }
 

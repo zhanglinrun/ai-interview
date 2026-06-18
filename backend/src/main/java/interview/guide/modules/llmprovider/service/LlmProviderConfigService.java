@@ -982,7 +982,7 @@ public class LlmProviderConfigService {
       }
       Files.writeString(path, content, StandardCharsets.UTF_8);
     } catch (IOException e) {
-      throw new BusinessException(errorCode, errorMessage + ": " + e.getMessage());
+      throw new BusinessException(errorCode, errorMessage + ": " + e.getMessage(), e);
     }
   }
 
@@ -1009,7 +1009,7 @@ public class LlmProviderConfigService {
       }
       Files.writeString(path, content, StandardCharsets.UTF_8);
     } catch (IOException e) {
-      log.warn("写入 .env 失败: {}", e.getMessage());
+      log.warn("写入 .env 失败: {}", e.getMessage(), e);
     }
   }
 
@@ -1026,7 +1026,7 @@ public class LlmProviderConfigService {
       content = content.replaceAll("(?m)^" + Pattern.quote(key) + "=.*\\R?", "");
       Files.writeString(path, content, StandardCharsets.UTF_8);
     } catch (IOException e) {
-      log.warn("删除 .env 条目失败: {}", e.getMessage());
+      log.warn("删除 .env 条目失败: {}", e.getMessage(), e);
     }
   }
 

@@ -1,4 +1,5 @@
 import {AnimatePresence, motion} from 'framer-motion';
+import LoadingButtonContent from './LoadingButtonContent';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -91,18 +92,13 @@ export default function ConfirmDialog({
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
-                    {loading ? (
-                      <span className="flex items-center gap-2">
-                        <motion.span
-                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        />
-                        处理中...
-                      </span>
-                    ) : (
-                      confirmText
-                    )}
+                    <LoadingButtonContent
+                      loading={loading}
+                      loadingText="处理中..."
+                      spinnerClassName="w-4 h-4 animate-spin text-white"
+                    >
+                      {confirmText}
+                    </LoadingButtonContent>
                   </motion.button>
                 </div>
               )}

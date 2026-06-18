@@ -2,9 +2,20 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Trash2 } from 'lucide-react';
+import {
+  X,
+  ChevronRight,
+  ChevronLeft,
+  AlertCircle,
+  CheckCircle,
+  Trash2,
+  FileText,
+  Edit3,
+} from 'lucide-react';
 import type { InterviewFormData, ParseResponse, InterviewType } from '../../types/interviewSchedule';
 import { interviewScheduleApi } from '../../api/interviewSchedule';
+import { getErrorMessage } from '../../api/request';
+import LoadingButtonContent from '../LoadingButtonContent';
 import dayjs from 'dayjs';
 
 interface InterviewFormModalProps {
@@ -27,6 +38,24 @@ const INTERVIEW_INVITE_EXAMPLE = `【阿里巴巴】后端开发工程师一面�
 面试官：李老师
 备注：请提前10分钟入会，准备项目介绍与系统设计案例。`;
 
+const createEmptyFormData = (): InterviewFormData => ({
+  companyName: '',
+  position: '',
+  interviewTime: '',
+  interviewType: 'VIDEO',
+  meetingLink: '',
+  roundNumber: 1,
+  interviewer: '',
+  notes: '',
+});
+
+const toInterviewType = (value: string): InterviewType => {
+  if (value === 'ONSITE' || value === 'PHONE') {
+    return value;
+  }
+  return 'VIDEO';
+};
+
 export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
   isOpen,
   onClose,
@@ -42,16 +71,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState<InterviewFormData>(initialData || {
-    companyName: '',
-    position: '',
-    interviewTime: '',
-    interviewType: 'VIDEO' as InterviewType,
-    meetingLink: '',
-    roundNumber: 1,
-    interviewer: '',
-    notes: '',
-  });
+  const [formData, setFormData] = useState<InterviewFormData>(initialData || createEmptyFormData());
 
   // Reset state when modal opens or mode changes
   React.useEffect(() => {
@@ -60,16 +80,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
       setRawText('');
       setParseResult(null);
       setSubmitError(null);
-      setFormData(initialData || {
-        companyName: '',
-        position: '',
-        interviewTime: '',
-        interviewType: 'VIDEO' as InterviewType,
-        meetingLink: '',
-        roundNumber: 1,
-        interviewer: '',
-        notes: '',
-      });
+      setFormData(initialData || createEmptyFormData());
     }
   }, [isOpen, mode, initialData]);
 
@@ -106,7 +117,10 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
     }
   };
 
-  const handleFormChange = (field: keyof InterviewFormData, value: any) => {
+  const handleFormChange = <K extends keyof InterviewFormData>(
+    field: K,
+    value: InterviewFormData[K]
+  ) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -117,9 +131,9 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
     try {
       await onSubmit(formData);
       onClose();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Submit failed:', error);
-      setSubmitError(error.message || '保存失败，请重试');
+      setSubmitError(getErrorMessage(error, '保存失败，请重试'));
     } finally {
       setSubmitting(false);
     }
@@ -129,16 +143,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
     setStep('text');
     setRawText('');
     setParseResult(null);
-    setFormData({
-      companyName: '',
-      position: '',
-      interviewTime: '',
-      interviewType: 'VIDEO',
-      meetingLink: '',
-      roundNumber: 1,
-      interviewer: '',
-      notes: '',
-    });
+    setFormData(createEmptyFormData());
   };
 
   const renderTextInput = () => (
@@ -158,9 +163,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
         >
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-lg bg-primary-500 flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+              <FileText className="w-5 h-5 text-white" />
             </div>
             <div className="flex-1">
               <div className="font-semibold text-primary-900 dark:text-primary-100">粘贴文本</div>
@@ -178,9 +181,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
         >
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
-              <svg className="w-5 h-5 text-slate-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
+              <Edit3 className="w-5 h-5 text-slate-600 dark:text-slate-300" />
             </div>
             <div className="flex-1">
               <div className="font-semibold text-slate-900 dark:text-white">手动输入</div>
@@ -229,7 +230,9 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
           disabled={!rawText.trim() || parsing}
           className="px-5 py-2.5 bg-gradient-to-r from-primary-600 to-primary-500 dark:from-primary-500 dark:to-primary-400 text-white rounded-xl font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
-          {parsing ? '解析中...' : '解析文本'}
+          <LoadingButtonContent loading={parsing} loadingText="解析中...">
+            解析文本
+          </LoadingButtonContent>
         </motion.button>
       </div>
     </div>
@@ -365,7 +368,7 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">面试形式</label>
         <select
           value={formData.interviewType}
-          onChange={(e) => handleFormChange('interviewType', e.target.value)}
+          onChange={(e) => handleFormChange('interviewType', toInterviewType(e.target.value))}
           className="w-full px-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 dark:focus:ring-primary-400 dark:focus:border-primary-400 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 transition-all"
         >
           <option value="VIDEO">视频面试</option>
@@ -435,12 +438,16 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
           >
             重置
           </motion.button>
-        ) : mode === 'edit' && onDelete && initialData?.id ? (
+        ) : mode === 'edit' && onDelete && initialData?.id !== undefined ? (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             type="button"
-            onClick={() => onDelete(initialData.id!)}
+            onClick={() => {
+              if (initialData.id !== undefined) {
+                onDelete(initialData.id);
+              }
+            }}
             className="px-5 py-2.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl font-medium flex items-center gap-2 transition-all"
           >
             <Trash2 className="w-4 h-4" />
@@ -464,7 +471,9 @@ export const InterviewFormModal: React.FC<InterviewFormModalProps> = ({
             disabled={submitting}
             className="px-6 py-2.5 bg-gradient-to-r from-primary-600 to-primary-500 dark:from-primary-500 dark:to-primary-400 text-white rounded-xl font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            {submitting ? '保存中...' : '保存'}
+            <LoadingButtonContent loading={submitting} loadingText="保存中...">
+              保存
+            </LoadingButtonContent>
           </motion.button>
         </div>
       </div>

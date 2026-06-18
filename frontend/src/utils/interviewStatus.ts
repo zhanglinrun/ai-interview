@@ -1,0 +1,46 @@
+import type {EvaluateStatus} from '../api/history';
+
+export type InterviewStatus = string | null | undefined;
+export type EvaluationStatus = EvaluateStatus | null | undefined;
+
+export function isCompletedInterviewStatus(status: InterviewStatus): boolean {
+  return status === 'COMPLETED' || status === 'EVALUATED';
+}
+
+export function isLiveInterviewStatus(status: InterviewStatus): boolean {
+  return status === 'IN_PROGRESS' || status === 'PAUSED';
+}
+
+export function isActiveInterviewStatus(status: InterviewStatus): boolean {
+  return status === 'IN_PROGRESS';
+}
+
+export function isEvaluationCompleted(
+  evaluateStatus: EvaluationStatus,
+  interviewStatus?: InterviewStatus
+): boolean {
+  return evaluateStatus === 'COMPLETED' || interviewStatus === 'EVALUATED';
+}
+
+export function isEvaluationProcessing(evaluateStatus: EvaluationStatus): boolean {
+  return evaluateStatus === 'PENDING' || evaluateStatus === 'PROCESSING';
+}
+
+export function isEvaluationFailed(evaluateStatus: EvaluationStatus): boolean {
+  return evaluateStatus === 'FAILED';
+}
+
+export function getInterviewStatusText(
+  interviewStatus: InterviewStatus,
+  evaluateStatus: EvaluationStatus
+): string {
+  if (isEvaluationFailed(evaluateStatus)) return '评估失败';
+  if (isEvaluationProcessing(evaluateStatus)) {
+    return evaluateStatus === 'PROCESSING' ? '评估中' : '等待评估';
+  }
+  if (isEvaluationCompleted(evaluateStatus, interviewStatus)) return '已完成';
+  if (isActiveInterviewStatus(interviewStatus)) return '进行中';
+  if (interviewStatus === 'PAUSED') return '已暂停';
+  if (isCompletedInterviewStatus(interviewStatus)) return '已提交';
+  return '已创建';
+}

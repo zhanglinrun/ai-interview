@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
 import { clearAuthSession, getAccessToken } from './authStorage';
 
 /**
@@ -10,18 +10,26 @@ interface Result<T = unknown> {
   data: T;
 }
 
-const baseURL = import.meta.env.PROD ? '' : 'http://localhost:8080';
+export const API_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8080';
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+export const AI_REQUEST_TIMEOUT_MS = 180_000;
+export const UPLOAD_REQUEST_TIMEOUT_MS = 300_000;
 
-const instance: AxiosInstance = axios.create({
-  baseURL,
-  timeout: 60000,
+const instance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: DEFAULT_REQUEST_TIMEOUT_MS,
 });
 
-instance.interceptors.request.use((config) => {
+export function getAuthHeaders(): Record<string, string> {
   const token = getAccessToken();
-  if (token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+instance.interceptors.request.use((config) => {
+  const authHeaders = getAuthHeaders();
+  if (authHeaders.Authorization) {
     config.headers = config.headers ?? {};
-    config.headers.Authorization = `Bearer ${token}`;
+    config.headers.Authorization = authHeaders.Authorization;
   }
   return config;
 });
@@ -37,6 +45,38 @@ function handleUnauthorized(code?: number, message?: string) {
   }
 }
 
+function isResult(value: unknown): value is Result {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as Partial<Result>;
+  return typeof candidate.code === 'number' && typeof candidate.message === 'string';
+}
+
+function rejectResult(result: Result) {
+  handleUnauthorized(result.code, result.message);
+  return Promise.reject(new Error(result.message || '请求失败'));
+}
+
+async function parseBlobResult(blob: Blob): Promise<Blob> {
+  if (!blob.type.includes('application/json')) {
+    return blob;
+  }
+
+  let data: unknown;
+  try {
+    data = JSON.parse(await blob.text()) as unknown;
+  } catch {
+    return blob;
+  }
+
+  if (isResult(data) && data.code !== 200) {
+    return rejectResult(data);
+  }
+
+  return blob;
+}
+
 /**
  * 响应拦截器
  * 
@@ -46,18 +86,16 @@ function handleUnauthorized(code?: number, message?: string) {
  */
 instance.interceptors.response.use(
   (response) => {
-    const result = response.data as Result;
-    
     // 检查是否是 Result 格式
-    if (result && typeof result === 'object' && 'code' in result) {
+    if (isResult(response.data)) {
+      const result = response.data;
       if (result.code === 200) {
         // 成功：返回 data
         response.data = result.data;
         return response;
       }
-      handleUnauthorized(result.code, result.message);
       // 失败：直接抛出 message
-      return Promise.reject(new Error(result.message || '请求失败'));
+      return rejectResult(result);
     }
     
     // 非 Result 格式，直接返回
@@ -68,10 +106,8 @@ instance.interceptors.response.use(
     if (error.response) {
       const { data } = error.response;
       // 尝试解析 Result 格式
-      if (data && typeof data === 'object' && 'code' in data && 'message' in data) {
-        const result = data as Result;
-        handleUnauthorized(result.code, result.message);
-        return Promise.reject(new Error(result.message || '请求失败'));
+      if (isResult(data)) {
+        return rejectResult(data);
       }
       // 响应格式不对
       return Promise.reject(new Error('请求失败，请重试'));
@@ -102,6 +138,13 @@ export const request = {
     return instance.get(url, config).then(res => res.data);
   },
 
+  getBlob(url: string, config?: AxiosRequestConfig): Promise<Blob> {
+    return instance.get(url, {
+      ...config,
+      responseType: 'blob',
+    }).then(res => parseBlobResult(res.data));
+  },
+
   post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return instance.post(url, data, config).then(res => res.data);
   },
@@ -123,28 +166,22 @@ export const request = {
    */
   upload<T>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
     return instance.post(url, formData, {
-      timeout: 300000, // 5分钟，与Nginx proxy_read_timeout对齐
+      timeout: UPLOAD_REQUEST_TIMEOUT_MS, // 5分钟，与Nginx proxy_read_timeout对齐
       headers: { 'Content-Type': 'multipart/form-data' },
       ...config,
     }).then(res => res.data);
   },
 
-  /**
-   * 获取原始实例（用于特殊场景如下载 Blob）
-   */
-  getInstance(): AxiosInstance {
-    return instance;
-  },
 };
 
 /**
  * 获取错误信息
  */
-export function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
+export function getErrorMessage(error: unknown, fallback = '未知错误'): string {
+  if (error instanceof Error && error.message) {
     return error.message;
   }
-  return '未知错误';
+  return fallback;
 }
 
 export default request;

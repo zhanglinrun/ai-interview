@@ -1,8 +1,10 @@
 package interview.guide.modules.interviewschedule.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+
 import java.time.LocalDateTime;
 
 @Data
@@ -14,8 +16,8 @@ public class CreateInterviewRequest {
     private String position;
 
     @NotNull(message = "面试时间不能为空")
-    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm[:ss]")
-    private java.time.LocalDateTime interviewTime;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm[:ss]")
+    private LocalDateTime interviewTime;
 
     private String interviewType; // ONSITE, VIDEO, PHONE
 

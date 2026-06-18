@@ -58,7 +58,7 @@ public class ResumePersistenceService {
             
             return existing;
         } catch (Exception e) {
-            log.error("检查简历重复时出错: {}", e.getMessage());
+            log.error("检查简历重复时出错: {}", e.getMessage(), e);
             return Optional.empty();
         }
     }
@@ -89,7 +89,7 @@ public class ResumePersistenceService {
             return saved;
         } catch (Exception e) {
             log.error("保存简历失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败");
+            throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败", e);
         }
     }
     
@@ -115,7 +115,7 @@ public class ResumePersistenceService {
             return saved;
         } catch (JacksonException e) {
             log.error("序列化评测结果失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "保存评测结果失败");
+            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "保存评测结果失败", e);
         }
     }
     
@@ -177,8 +177,8 @@ public class ResumePersistenceService {
                 entity.getResume().getResumeText()
             );
         } catch (JacksonException e) {
-            log.error("反序列化评测结果失败: {}", e.getMessage());
-            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "获取评测结果失败");
+            log.error("反序列化评测结果失败: {}", e.getMessage(), e);
+            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "获取评测结果失败", e);
         }
     }
     

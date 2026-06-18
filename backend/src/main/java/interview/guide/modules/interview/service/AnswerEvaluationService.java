@@ -70,7 +70,7 @@ public class AnswerEvaluationService {
         } catch (Exception e) {
             log.error("面试评估失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
-                "面试评估失败：" + e.getMessage());
+                "面试评估失败：" + e.getMessage(), e);
         }
     }
 

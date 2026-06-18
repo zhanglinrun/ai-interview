@@ -1,7 +1,5 @@
-import {getErrorMessage, request} from './request';
-import { getAccessToken } from './authStorage';
-
-const API_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8080';
+import { AI_REQUEST_TIMEOUT_MS, getAuthHeaders, request } from './request';
+import { API_BASE_URL, fetchTextStream } from './stream';
 
 // 向量化状态
 export type VectorStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -72,6 +70,42 @@ export interface QueryResponse {
   sources: RagSource[];
 }
 
+function extractDataLineContent(line: string): string | null {
+  if (!line.startsWith('data:')) {
+    return null;
+  }
+  let content = line.substring(5);
+  if (content.startsWith(' ')) {
+    content = content.substring(1);
+  }
+  return content.length === 0 ? '\n' : content;
+}
+
+function processLineStreamBuffer(
+  buffer: string,
+  emit: (chunk: string) => void,
+  isFinal: boolean
+): string {
+  const lines = buffer.split('\n');
+  const remaining = isFinal ? '' : lines.pop() || '';
+
+  for (const line of lines) {
+    const content = extractDataLineContent(line);
+    if (content !== null) {
+      emit(content);
+    }
+  }
+
+  if (isFinal && remaining) {
+    const content = extractDataLineContent(remaining);
+    if (content) {
+      emit(content);
+    }
+  }
+
+  return remaining;
+}
+
 export const knowledgeBaseApi = {
   /**
    * 上传知识库文件
@@ -92,16 +126,13 @@ export const knowledgeBaseApi = {
      * 下载知识库文件
      */
     async downloadKnowledgeBase(id: number): Promise<Blob> {
-        const response = await request.getInstance().get(`/api/knowledgebase/${id}/download`, {
-            responseType: 'blob',
-        });
-        return response.data;
+        return request.getBlob(`/api/knowledgebase/${id}/download`);
     },
 
   /**
    * 获取所有知识库列表
    */
-  async getAllKnowledgeBases(sortBy?: SortOption, vectorStatus?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'): Promise<KnowledgeBaseItem[]> {
+  async getAllKnowledgeBases(sortBy?: SortOption, vectorStatus?: VectorStatus): Promise<KnowledgeBaseItem[]> {
     const params = new URLSearchParams();
     if (sortBy) {
       params.append('sortBy', sortBy);
@@ -189,7 +220,7 @@ export const knowledgeBaseApi = {
    */
   async queryKnowledgeBase(req: QueryRequest): Promise<QueryResponse> {
     return request.post<QueryResponse>('/api/knowledgebase/query', req, {
-      timeout: 180000, // 3分钟超时
+      timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时
     });
   },
 
@@ -203,93 +234,20 @@ export const knowledgeBaseApi = {
     onComplete: () => void,
     onError: (error: Error) => void
   ): Promise<void> {
-    try {
-      const token = getAccessToken();
-      const response = await fetch(`${API_BASE_URL}/api/knowledgebase/query/stream`, {
+    return fetchTextStream({
+      url: `${API_BASE_URL}/api/knowledgebase/query/stream`,
+      init: {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(req),
-      });
-
-      if (!response.ok) {
-        // 尝试解析错误响应
-        try {
-          const errorData = await response.json();
-          if (errorData && errorData.message) {
-            throw new Error(errorData.message);
-          }
-        } catch {
-          // 忽略解析错误
-        }
-        throw new Error(`请求失败 (${response.status})`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('无法获取响应流');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      // 辅助函数：处理 data: 行并提取内容
-      const extractContent = (line: string): string | null => {
-        if (!line.startsWith('data:')) {
-          return null;
-        }
-        let content = line.substring(5); // 移除 "data:" 前缀
-        // SSE 标准：如果 data: 后第一个字符是空格，这是协议层面的空格，应该移除
-        // 但这是可选的，有些实现可能没有这个空格
-        if (content.startsWith(' ')) {
-          content = content.substring(1);
-        }
-        // 如果内容为空（data: 或 data: ），可能表示换行，返回换行符
-        if (content.length === 0) {
-          return '\n';
-        }
-        return content;
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          // 处理剩余的 buffer
-          if (buffer) {
-            const content = extractContent(buffer);
-            if (content) {
-              onMessage(content);
-            }
-          }
-          onComplete();
-          break;
-        }
-
-        // 解码数据块并添加到 buffer
-        buffer += decoder.decode(value, { stream: true });
-
-        // 按行分割处理 SSE 格式
-        // SSE 格式：data: content\n 或 data:content\n，空行 \n\n 表示事件结束
-        const lines = buffer.split('\n');
-        // 保留最后一行（可能不完整，等待更多数据）
-        buffer = lines.pop() || '';
-
-        // 处理完整的行
-        for (const line of lines) {
-          const content = extractContent(line);
-          if (content !== null) {
-            // 发送内容（保留所有格式，包括空格、换行等，因为 Markdown 需要）
-            onMessage(content);
-          }
-          // 空行（line === ''）在 SSE 中表示事件结束，但我们不需要特殊处理
-          // 因为每个 data: 行已经是一个完整的数据块
-        }
-      }
-    } catch (error) {
-      onError(new Error(getErrorMessage(error)));
-    }
+      },
+      onMessage,
+      onComplete,
+      onError,
+      processBuffer: processLineStreamBuffer,
+    });
   },
 };

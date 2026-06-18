@@ -124,7 +124,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 }
                 log.info("Opening audio cache warmed: {} entries", openingAudioCache.size());
             } catch (Exception e) {
-                log.warn("Opening audio cache warmup skipped: {}", e.getMessage());
+                log.warn("Opening audio cache warmup skipped: {}", e.getMessage(), e);
             }
         });
     }
@@ -385,7 +385,8 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
             try {
                 interviewService.endSessionIfInProgress(sessionId);
             } catch (Exception endEx) {
-                log.warn("Failed to auto-end session {} after disconnect: {}", sessionId, endEx.getMessage());
+                log.warn("Failed to auto-end session {} after disconnect: {}",
+                    sessionId, endEx.getMessage(), endEx);
             }
         } catch (Exception e) {
             log.error("Error cleaning up session {} after close", sessionId, e);

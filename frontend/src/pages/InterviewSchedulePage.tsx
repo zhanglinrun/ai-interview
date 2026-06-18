@@ -1,16 +1,57 @@
 // frontend/src/pages/InterviewSchedulePage.tsx
 
 import React, { useState, useCallback } from 'react';
-import { View } from 'react-big-calendar';
+import type { View } from 'react-big-calendar';
+import type {EventInteractionArgs} from 'react-big-calendar/lib/addons/dragAndDrop';
 import dayjs from 'dayjs';
+import { getErrorMessage } from '../api/request';
 import { useInterviewSchedule } from '../hooks/useInterviewSchedule';
-import { ScheduleHeader } from '../components/interviewschedule/ScheduleHeader';
-import { ScheduleCalendar } from '../components/interviewschedule/ScheduleCalendar';
+import { ScheduleHeader, type ScheduleView } from '../components/interviewschedule/ScheduleHeader';
+import { ScheduleCalendar, type CalendarInterviewEvent } from '../components/interviewschedule/ScheduleCalendar';
 import { ScheduleList } from '../components/interviewschedule/ScheduleList';
 import { InterviewFormModal } from '../components/interviewschedule/InterviewFormModal';
 import { CalendarErrorBoundary } from '../components/interviewschedule/CalendarErrorBoundary';
 import ConfirmDialog from '../components/ConfirmDialog';
+import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import { EmptyState, LoadingState } from '../components/PageState';
 import type { InterviewSchedule, InterviewFormData, InterviewStatus } from '../types/interviewSchedule';
+
+function buildRescheduledInterview(
+  interview: InterviewSchedule,
+  interviewTime: Date,
+): InterviewFormData {
+  return {
+    companyName: interview.companyName,
+    position: interview.position,
+    interviewTime: dayjs(interviewTime).format('YYYY-MM-DDTHH:mm:ss'),
+    interviewType: interview.interviewType,
+    meetingLink: interview.meetingLink,
+    roundNumber: interview.roundNumber,
+    interviewer: interview.interviewer,
+    notes: interview.notes,
+  };
+}
+
+type CalendarChangeData = {
+  event: CalendarInterviewEvent;
+  start: Date | string;
+  end: Date | string;
+};
+
+type CalendarChangeArgs = EventInteractionArgs<CalendarChangeData['event']>;
+
+type CalendarView = Exclude<ScheduleView, 'list'>;
+
+function isCalendarView(view: ScheduleView): view is CalendarView {
+  return view !== 'list';
+}
+
+function toScheduleCalendarView(view: View): CalendarView {
+  if (view === 'day' || view === 'month') {
+    return view;
+  }
+  return 'week';
+}
 
 export const InterviewSchedulePage: React.FC = () => {
   const {
@@ -23,7 +64,7 @@ export const InterviewSchedulePage: React.FC = () => {
     updateStatus,
   } = useInterviewSchedule();
 
-  const [view, setView] = useState<'day' | 'week' | 'month' | 'list'>('week');
+  const [view, setView] = useState<ScheduleView>('week');
   const [date, setDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -62,51 +103,40 @@ export const InterviewSchedulePage: React.FC = () => {
     await updateStatus(id, status);
   }, [updateStatus]);
 
-  const handleEventDrop = useCallback(async (data: { event: any; start: Date | string; end: Date | string }) => {
-    // Update interview time when dragged
-    const interview = interviews.find(i => i.id === data.event.id);
+  const handleCalendarTimeChange = useCallback(async (
+    data: CalendarChangeArgs,
+    fallbackMessage: string,
+    logMessage: string,
+  ) => {
+    const eventId = data.event.id;
+    const interview = interviews.find(i => i.id === eventId);
+
     if (interview) {
       try {
         const startDate = typeof data.start === 'string' ? new Date(data.start) : data.start;
-        await updateInterview(data.event.id, {
-          companyName: interview.companyName,
-          position: interview.position,
-          interviewTime: dayjs(startDate).format('YYYY-MM-DDTHH:mm:ss'),
-          interviewType: interview.interviewType,
-          meetingLink: interview.meetingLink,
-          roundNumber: interview.roundNumber,
-          interviewer: interview.interviewer,
-          notes: interview.notes,
-        });
+        await updateInterview(eventId, buildRescheduledInterview(interview, startDate));
       } catch (error) {
-        console.error('Failed to update interview time:', error);
-        alert('更新面试时间失败，请重试');
+        console.error(logMessage, error);
+        alert(getErrorMessage(error, fallbackMessage));
       }
     }
   }, [interviews, updateInterview]);
 
-  const handleEventResize = useCallback(async (data: { event: any; start: Date | string; end: Date | string }) => {
-    // Update interview duration when resized
-    const interview = interviews.find(i => i.id === data.event.id);
-    if (interview) {
-      try {
-        const startDate = typeof data.start === 'string' ? new Date(data.start) : data.start;
-        await updateInterview(data.event.id, {
-          companyName: interview.companyName,
-          position: interview.position,
-          interviewTime: dayjs(startDate).format('YYYY-MM-DDTHH:mm:ss'),
-          interviewType: interview.interviewType,
-          meetingLink: interview.meetingLink,
-          roundNumber: interview.roundNumber,
-          interviewer: interview.interviewer,
-          notes: interview.notes,
-        });
-      } catch (error) {
-        console.error('Failed to update interview duration:', error);
-        alert('更新面试时长失败，请重试');
-      }
-    }
-  }, [interviews, updateInterview]);
+  const handleEventDrop = useCallback(async (data: CalendarChangeArgs) => {
+    await handleCalendarTimeChange(
+      data,
+      '更新面试时间失败，请重试',
+      'Failed to update interview time:',
+    );
+  }, [handleCalendarTimeChange]);
+
+  const handleEventResize = useCallback(async (data: CalendarChangeArgs) => {
+    await handleCalendarTimeChange(
+      data,
+      '更新面试时长失败，请重试',
+      'Failed to update interview duration:',
+    );
+  }, [handleCalendarTimeChange]);
 
   const handleFormSubmit = useCallback(async (data: InterviewFormData) => {
     if (modalMode === 'create') {
@@ -118,22 +148,11 @@ export const InterviewSchedulePage: React.FC = () => {
     setSelectedInterview(null);
   }, [modalMode, selectedInterview, createInterview, updateInterview]);
 
-  // Event drop functionality removed - react-big-calendar doesn't support drag and drop in this version
-
   const handleConfirmChanges = useCallback(async () => {
     for (const [id, newTime] of pendingChanges) {
       const interview = interviews.find(i => i.id === id);
       if (interview) {
-        await updateInterview(id, {
-          companyName: interview.companyName,
-          position: interview.position,
-          interviewTime: dayjs(newTime).format('YYYY-MM-DDTHH:mm:ss'),
-          interviewType: interview.interviewType,
-          meetingLink: interview.meetingLink,
-          roundNumber: interview.roundNumber,
-          interviewer: interview.interviewer,
-          notes: interview.notes,
-        });
+        await updateInterview(id, buildRescheduledInterview(interview, newTime));
       }
     }
     setPendingChanges(new Map());
@@ -147,17 +166,20 @@ export const InterviewSchedulePage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="w-10 h-10 border-3 border-slate-200 border-t-primary-500 rounded-full animate-spin" />
-      </div>
+      <LoadingState
+        className="flex items-center justify-center min-h-[50vh]"
+        spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+      />
     );
   }
 
   if (error) {
     return (
-      <div className="text-center py-12 text-red-500">
-        <p>{error}</p>
-      </div>
+      <EmptyState
+        title={error}
+        className="text-center py-12"
+        titleClassName="text-red-500"
+      />
     );
   }
 
@@ -171,7 +193,7 @@ export const InterviewSchedulePage: React.FC = () => {
         onAddClick={handleAddClick}
       />
 
-      {view === 'list' ? (
+      {!isCalendarView(view) ? (
         <ScheduleList
           interviews={interviews}
           onEdit={handleEditClick}
@@ -183,8 +205,8 @@ export const InterviewSchedulePage: React.FC = () => {
           <ScheduleCalendar
             interviews={interviews}
             onSelectEvent={handleEditClick}
-            view={view as View}
-            onViewChange={(v) => setView(v as 'day' | 'week' | 'month')}
+            view={view}
+            onViewChange={(nextView) => setView(toScheduleCalendarView(nextView))}
             date={date}
             onDateChange={setDate}
             onEventDrop={handleEventDrop}
@@ -217,10 +239,11 @@ export const InterviewSchedulePage: React.FC = () => {
         onCancel={handleCancelChanges}
       />
 
-      <ConfirmDialog
+      <DeleteConfirmDialog
         open={isDeleteConfirmOpen}
-        title="确认删除"
-        message="确定要删除这个面试吗?此操作无法撤销。"
+        item={interviewToDelete ? { id: interviewToDelete } : null}
+        itemType="面试"
+        customMessage="确定要删除这个面试吗?此操作无法撤销。"
         onConfirm={handleConfirmDelete}
         onCancel={() => {
           setIsDeleteConfirmOpen(false);

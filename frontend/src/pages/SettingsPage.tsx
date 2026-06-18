@@ -3,14 +3,19 @@ import type { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Plus, Trash2, Plug, CheckCircle, XCircle,
-  Loader2, Eye, EyeOff, RefreshCw, Server, Edit2, Mic, Volume2, ChevronDown, Database,
+  Eye, EyeOff, RefreshCw, Server, Edit2, Mic, Volume2, ChevronDown, Database,
 } from 'lucide-react';
 import { llmProviderApi } from '../api/llmProvider';
+import { getErrorMessage } from '../api/request';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingButtonContent from '../components/LoadingButtonContent';
+import { EmptyState, LoadingState } from '../components/PageState';
 import type {
   ProviderItem, CreateProviderRequest, UpdateProviderRequest,
   ProviderTestResult, AsrConfig, TtsConfig, AsrConfigRequest, TtsConfigRequest,
 } from '../types/llmProvider';
+
+const DEFAULT_EMBEDDING_DIMENSIONS = 1024;
 
 // Provider 预设：已知 Provider 的 Base URL、推荐模型和向量模型
 const PROVIDER_PRESETS: Record<string, {
@@ -35,7 +40,7 @@ const PROVIDER_PRESETS: Record<string, {
     embeddingModels: [
       { value: 'text-embedding-v3', label: 'text-embedding-v3 — 推荐' },
     ],
-    embeddingDimensions: 1024,
+    embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS,
     supportsEmbedding: true,
   },
   deepseek: {
@@ -63,7 +68,7 @@ const PROVIDER_PRESETS: Record<string, {
     embeddingModels: [
       { value: 'embedding-3', label: 'embedding-3 — 推荐' },
     ],
-    embeddingDimensions: 1024,
+    embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS,
     supportsEmbedding: true,
   },
   kimi: {
@@ -92,6 +97,10 @@ type StatusBadgeProps = {
   children: ReactNode;
 };
 
+type TestButtonContentProps = {
+  loading: boolean;
+};
+
 const CARD_CLASS = `flex h-full min-h-[330px] flex-col rounded-xl border border-slate-200
   bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-slate-700
   dark:bg-slate-800`;
@@ -108,12 +117,62 @@ const ACTION_BAR_CLASS = `mt-auto flex min-h-12 flex-wrap items-center gap-2 bor
 const ACTION_BUTTON_CLASS = `inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs
   font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50`;
 
+const REQUIRED_FIELDS_MESSAGE = '请填写必填字段';
+const REQUIRED_EMBEDDING_MODEL_MESSAGE =
+  '支持向量化时需要填写向量模型，例如 GLM 填 embedding-3';
+const INVALID_EMBEDDING_DIMENSIONS_MESSAGE =
+  `向量维度必须为正整数，当前 pgvector 表为 ${DEFAULT_EMBEDDING_DIMENSIONS} 维`;
+
+type ProviderFormMode = 'create' | 'update';
+
+type ProviderFormValues = {
+  id: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  embeddingModel: string;
+  embeddingDimensions: string;
+  supportsEmbedding: boolean;
+  temperature: string;
+};
+
+type NormalizedProviderForm = {
+  id: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  supportsEmbedding: boolean;
+  temperature?: number;
+};
+
+type ProviderFormResult =
+  | { ok: true; values: NormalizedProviderForm }
+  | { ok: false; message: string };
+
 function StatusBadge({ icon, children }: StatusBadgeProps) {
   return (
     <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-primary-50 px-2.5 text-xs font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
       {icon}
       {children}
     </span>
+  );
+}
+
+function TestButtonContent({ loading }: TestButtonContentProps) {
+  return (
+    <LoadingButtonContent
+      loading={loading}
+      loadingText="测试"
+      className="inline-flex items-center gap-1.5"
+      spinnerClassName="w-3.5 h-3.5 animate-spin"
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <RefreshCw className="w-3.5 h-3.5" />
+        测试
+      </span>
+    </LoadingButtonContent>
   );
 }
 
@@ -137,6 +196,95 @@ function ConfigRow({ label, value, title, monospace = false, emphasis = false }:
   );
 }
 
+function normalizeProviderForm(values: ProviderFormValues, mode: ProviderFormMode): ProviderFormResult {
+  const id = values.id.trim();
+  const baseUrl = values.baseUrl.trim();
+  const apiKey = values.apiKey.trim();
+  const model = values.model.trim();
+  const embeddingModel = values.embeddingModel.trim();
+  const supportsEmbedding = values.supportsEmbedding;
+  const embeddingDimensions = Number.parseInt(values.embeddingDimensions.trim(), 10);
+  const temperatureText = values.temperature.trim();
+  const temperature = temperatureText ? Number.parseFloat(temperatureText) : undefined;
+
+  if (!baseUrl || !model || (mode === 'create' && (!id || !apiKey))) {
+    return { ok: false, message: REQUIRED_FIELDS_MESSAGE };
+  }
+
+  if (supportsEmbedding && !embeddingModel) {
+    return { ok: false, message: REQUIRED_EMBEDDING_MODEL_MESSAGE };
+  }
+
+  if (
+    supportsEmbedding
+    && (!Number.isFinite(embeddingDimensions) || embeddingDimensions <= 0)
+  ) {
+    return { ok: false, message: INVALID_EMBEDDING_DIMENSIONS_MESSAGE };
+  }
+
+  return {
+    ok: true,
+    values: {
+      id,
+      baseUrl,
+      apiKey,
+      model,
+      embeddingModel,
+      embeddingDimensions,
+      supportsEmbedding,
+      ...(
+        temperature !== undefined && !Number.isNaN(temperature)
+          ? { temperature }
+          : {}
+      ),
+    },
+  };
+}
+
+function buildCreateProviderRequest(values: NormalizedProviderForm): CreateProviderRequest {
+  const data: CreateProviderRequest = {
+    id: values.id,
+    baseUrl: values.baseUrl,
+    apiKey: values.apiKey,
+    model: values.model,
+    supportsEmbedding: values.supportsEmbedding,
+  };
+
+  if (values.supportsEmbedding) {
+    data.embeddingModel = values.embeddingModel;
+    data.embeddingDimensions = values.embeddingDimensions;
+  }
+
+  if (values.temperature !== undefined) {
+    data.temperature = values.temperature;
+  }
+
+  return data;
+}
+
+function buildUpdateProviderRequest(values: NormalizedProviderForm): UpdateProviderRequest {
+  const data: UpdateProviderRequest = {
+    baseUrl: values.baseUrl,
+    model: values.model,
+    embeddingModel: values.supportsEmbedding ? values.embeddingModel : '',
+    supportsEmbedding: values.supportsEmbedding,
+  };
+
+  if (values.supportsEmbedding) {
+    data.embeddingDimensions = values.embeddingDimensions;
+  }
+
+  if (values.apiKey) {
+    data.apiKey = values.apiKey;
+  }
+
+  if (values.temperature !== undefined) {
+    data.temperature = values.temperature;
+  }
+
+  return data;
+}
+
 export default function SettingsPage() {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [defaultProviderId, setDefaultProviderId] = useState('');
@@ -154,7 +302,9 @@ export default function SettingsPage() {
   const [formApiKey, setFormApiKey] = useState('');
   const [formModel, setFormModel] = useState('');
   const [formEmbeddingModel, setFormEmbeddingModel] = useState('');
-  const [formEmbeddingDimensions, setFormEmbeddingDimensions] = useState('1024');
+  const [formEmbeddingDimensions, setFormEmbeddingDimensions] = useState(
+    String(DEFAULT_EMBEDDING_DIMENSIONS),
+  );
   const [formSupportsEmbedding, setFormSupportsEmbedding] = useState(false);
   const [formTemperature, setFormTemperature] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -227,7 +377,7 @@ export default function SettingsPage() {
       setTtsConfig(tts);
     } catch (err) {
       console.error('Failed to load settings:', err);
-      showToast('加载数据失败', 'error');
+      showToast(getErrorMessage(err, '加载数据失败'), 'error');
     } finally {
       setLoading(false);
     }
@@ -245,8 +395,9 @@ export default function SettingsPage() {
     setFormApiKey('');
     setFormModel('');
     setFormEmbeddingModel('');
-    setFormEmbeddingDimensions('1024');
+    setFormEmbeddingDimensions(String(DEFAULT_EMBEDDING_DIMENSIONS));
     setFormSupportsEmbedding(false);
+    setFormTemperature('');
     setShowApiKey(false);
     setShowModal(true);
   };
@@ -258,7 +409,11 @@ export default function SettingsPage() {
     setFormApiKey('');
     setFormModel(provider.model);
     setFormEmbeddingModel(provider.embeddingModel || '');
-    setFormEmbeddingDimensions(provider.embeddingDimensions != null ? String(provider.embeddingDimensions) : '1024');
+    setFormEmbeddingDimensions(
+      provider.embeddingDimensions != null
+        ? String(provider.embeddingDimensions)
+        : String(DEFAULT_EMBEDDING_DIMENSIONS),
+    );
     setFormSupportsEmbedding(provider.supportsEmbedding);
     setFormTemperature(provider.temperature != null ? String(provider.temperature) : '');
     setShowApiKey(false);
@@ -272,43 +427,31 @@ export default function SettingsPage() {
 
   // --- CRUD handlers ---
   const handleCreate = async () => {
-    if (!formId.trim() || !formBaseUrl.trim() || !formApiKey.trim() || !formModel.trim()) {
-      showToast('请填写必填字段', 'error');
+    const formResult = normalizeProviderForm({
+      id: formId,
+      baseUrl: formBaseUrl,
+      apiKey: formApiKey,
+      model: formModel,
+      embeddingModel: formEmbeddingModel,
+      embeddingDimensions: formEmbeddingDimensions,
+      supportsEmbedding: formSupportsEmbedding,
+      temperature: formTemperature,
+    }, 'create');
+
+    if (!formResult.ok) {
+      showToast(formResult.message, 'error');
       return;
     }
-    if (formSupportsEmbedding && !formEmbeddingModel.trim()) {
-      showToast('支持向量化时需要填写向量模型，例如 GLM 填 embedding-3', 'error');
-      return;
-    }
-    const embeddingDimensions = parseInt(formEmbeddingDimensions.trim(), 10);
-    if (formSupportsEmbedding && (!Number.isFinite(embeddingDimensions) || embeddingDimensions <= 0)) {
-      showToast('向量维度必须为正整数，当前 pgvector 表为 1024 维', 'error');
-      return;
-    }
+
     setSaving(true);
     try {
-      const data: CreateProviderRequest = {
-        id: formId.trim(),
-        baseUrl: formBaseUrl.trim(),
-        apiKey: formApiKey.trim(),
-        model: formModel.trim(),
-        supportsEmbedding: formSupportsEmbedding,
-      };
-      if (formEmbeddingModel.trim()) {
-        data.embeddingModel = formEmbeddingModel.trim();
-        data.embeddingDimensions = embeddingDimensions;
-      }
-      if (formTemperature.trim()) {
-        const temp = parseFloat(formTemperature.trim());
-        if (!isNaN(temp)) data.temperature = temp;
-      }
-      await llmProviderApi.create(data);
+      await llmProviderApi.create(buildCreateProviderRequest(formResult.values));
       showToast('Provider 创建成功');
       closeModal();
       await loadData();
     } catch (err) {
       console.error('Failed to create provider:', err);
-      showToast(err instanceof Error ? err.message : '创建失败', 'error');
+      showToast(getErrorMessage(err, '创建失败'), 'error');
     } finally {
       setSaving(false);
     }
@@ -316,44 +459,34 @@ export default function SettingsPage() {
 
   const handleUpdate = async () => {
     if (!editingProvider) return;
-    if (!formBaseUrl.trim() || !formModel.trim()) {
-      showToast('请填写必填字段', 'error');
+    const formResult = normalizeProviderForm({
+      id: formId,
+      baseUrl: formBaseUrl,
+      apiKey: formApiKey,
+      model: formModel,
+      embeddingModel: formEmbeddingModel,
+      embeddingDimensions: formEmbeddingDimensions,
+      supportsEmbedding: formSupportsEmbedding,
+      temperature: formTemperature,
+    }, 'update');
+
+    if (!formResult.ok) {
+      showToast(formResult.message, 'error');
       return;
     }
-    if (formSupportsEmbedding && !formEmbeddingModel.trim()) {
-      showToast('支持向量化时需要填写向量模型，例如 GLM 填 embedding-3', 'error');
-      return;
-    }
-    const embeddingDimensions = parseInt(formEmbeddingDimensions.trim(), 10);
-    if (formSupportsEmbedding && (!Number.isFinite(embeddingDimensions) || embeddingDimensions <= 0)) {
-      showToast('向量维度必须为正整数，当前 pgvector 表为 1024 维', 'error');
-      return;
-    }
+
     setSaving(true);
     try {
-      const data: UpdateProviderRequest = {
-        baseUrl: formBaseUrl.trim(),
-        model: formModel.trim(),
-        embeddingModel: formEmbeddingModel.trim(),
-        supportsEmbedding: formSupportsEmbedding,
-      };
-      if (formSupportsEmbedding) {
-        data.embeddingDimensions = embeddingDimensions;
-      }
-      if (formApiKey.trim()) {
-        data.apiKey = formApiKey.trim();
-      }
-      if (formTemperature.trim()) {
-        const temp = parseFloat(formTemperature.trim());
-        if (!isNaN(temp)) data.temperature = temp;
-      }
-      await llmProviderApi.update(editingProvider.id, data);
+      await llmProviderApi.update(
+        editingProvider.id,
+        buildUpdateProviderRequest(formResult.values),
+      );
       showToast('Provider 更新成功');
       closeModal();
       await loadData();
     } catch (err) {
       console.error('Failed to update provider:', err);
-      showToast(err instanceof Error ? err.message : '更新失败', 'error');
+      showToast(getErrorMessage(err, '更新失败'), 'error');
     } finally {
       setSaving(false);
     }
@@ -369,7 +502,7 @@ export default function SettingsPage() {
       await loadData();
     } catch (err) {
       console.error('Failed to delete provider:', err);
-      showToast(err instanceof Error ? err.message : '删除失败', 'error');
+      showToast(getErrorMessage(err, '删除失败'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -391,7 +524,7 @@ export default function SettingsPage() {
         ...prev,
         [id]: {
           success: false,
-          message: err instanceof Error ? err.message : '连接测试失败',
+          message: getErrorMessage(err, '连接测试失败'),
           model: '',
         },
       }));
@@ -419,7 +552,7 @@ export default function SettingsPage() {
       await loadData();
     } catch (err) {
       console.error('Failed to set default:', err);
-      showToast(err instanceof Error ? err.message : '设置默认 Provider 失败', 'error');
+      showToast(getErrorMessage(err, '设置默认 Provider 失败'), 'error');
     } finally {
       setSettingDefault(false);
     }
@@ -443,12 +576,12 @@ export default function SettingsPage() {
         defaultProvider: defaultProviderId,
         defaultEmbeddingProvider: pendingDefaultEmbeddingProviderId,
       });
-      showToast(`已将 "${pendingDefaultEmbeddingProviderId}" 的 ${pendingEmbeddingProvider?.embeddingModel ?? '向量模型'} (${pendingEmbeddingProvider?.embeddingDimensions ?? 1024}维) 设为默认向量服务`);
+      showToast(`已将 "${pendingDefaultEmbeddingProviderId}" 的 ${pendingEmbeddingProvider?.embeddingModel ?? '向量模型'} (${pendingEmbeddingProvider?.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS}维) 设为默认向量服务`);
       setPendingDefaultEmbeddingProviderId(null);
       await loadData();
     } catch (err) {
       console.error('Failed to set embedding default:', err);
-      showToast(err instanceof Error ? err.message : '设置默认向量 Provider 失败', 'error');
+      showToast(getErrorMessage(err, '设置默认向量 Provider 失败'), 'error');
     } finally {
       setSettingEmbeddingDefault(false);
     }
@@ -502,7 +635,7 @@ export default function SettingsPage() {
       setShowVoiceModal(null);
       await loadData();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : '更新失败', 'error');
+      showToast(getErrorMessage(err, '更新失败'), 'error');
     } finally {
       setVoiceSaving(false);
     }
@@ -516,7 +649,7 @@ export default function SettingsPage() {
       setShowVoiceModal(null);
       await loadData();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : '更新失败', 'error');
+      showToast(getErrorMessage(err, '更新失败'), 'error');
     } finally {
       setVoiceSaving(false);
     }
@@ -531,7 +664,7 @@ export default function SettingsPage() {
     } catch (err) {
       setAsrTestResult({
         success: false,
-        message: err instanceof Error ? err.message : '连接测试失败',
+        message: getErrorMessage(err, '连接测试失败'),
         model: '',
       });
     } finally {
@@ -557,9 +690,7 @@ export default function SettingsPage() {
 
       {/* Loading state */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
-        </div>
+        <LoadingState />
       ) : (
         <AnimatePresence mode="wait">
           <motion.div
@@ -589,10 +720,13 @@ export default function SettingsPage() {
 
               {/* Provider grid */}
               {providers.length === 0 ? (
-                <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <Server className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-                  <p className="text-slate-500 dark:text-slate-400 text-sm">暂无 Provider，点击上方按钮新增</p>
-                </div>
+                <EmptyState
+                  className="text-center py-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700"
+                  icon={Server}
+                  iconClassName="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3"
+                  title="暂无 Provider，点击上方按钮新增"
+                  titleClassName="text-slate-500 dark:text-slate-400 text-sm"
+                />
               ) : (
                 <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
                   {providers.map((provider, index) => {
@@ -644,7 +778,7 @@ export default function SettingsPage() {
                           <ConfigRow label="实际向量" value={provider.embeddingModel} title={provider.embeddingModel} emphasis={isEmbeddingDefault} />
                         )}
                         {canUseEmbedding && (
-                          <ConfigRow label="向量维度" value={`${provider.embeddingDimensions ?? 1024} 维`} emphasis={isEmbeddingDefault} />
+                          <ConfigRow label="向量维度" value={`${provider.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS} 维`} emphasis={isEmbeddingDefault} />
                         )}
                         {provider.temperature != null && (
                           <ConfigRow label="温度" value={provider.temperature} />
@@ -695,11 +829,7 @@ export default function SettingsPage() {
                           className={`${ACTION_BUTTON_CLASS} text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20`}
                           title="测试连接"
                         >
-                          {testingId === provider.id
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <RefreshCw className="w-3.5 h-3.5" />
-                          }
-                          测试
+                          <TestButtonContent loading={testingId === provider.id} />
                         </button>
                         <button
                           onClick={() => handleSetDefault(provider.id)}
@@ -804,11 +934,7 @@ export default function SettingsPage() {
                           disabled={testingAsr}
                           className={`${ACTION_BUTTON_CLASS} text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20`}
                         >
-                          {testingAsr
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <RefreshCw className="w-3.5 h-3.5" />
-                          }
-                          测试
+                          <TestButtonContent loading={testingAsr} />
                         </button>
                       </div>
                     </motion.div>
@@ -910,7 +1036,9 @@ export default function SettingsPage() {
                             setFormBaseUrl(preset.baseUrl);
                             setFormSupportsEmbedding(preset.supportsEmbedding);
                             setFormEmbeddingModel(preset.embeddingModels?.[0]?.value ?? '');
-                            setFormEmbeddingDimensions(String(preset.embeddingDimensions ?? 1024));
+                            setFormEmbeddingDimensions(
+                              String(preset.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS),
+                            );
                           }
                         }
                       }}
@@ -1044,7 +1172,7 @@ export default function SettingsPage() {
                             setFormSupportsEmbedding(e.target.checked);
                             if (!e.target.checked) {
                               setFormEmbeddingModel('');
-                              setFormEmbeddingDimensions('1024');
+                              setFormEmbeddingDimensions(String(DEFAULT_EMBEDDING_DIMENSIONS));
                             }
                           }}
                           className="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
@@ -1112,14 +1240,14 @@ export default function SettingsPage() {
                   {formSupportsEmbedding && (
                     <div>
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                        向量维度 <span className="text-slate-400 font-normal">(必须与 pgvector 表一致，当前为 1024)</span>
+                        向量维度 <span className="text-slate-400 font-normal">（必须与 pgvector 表一致，当前为 {DEFAULT_EMBEDDING_DIMENSIONS} 维）</span>
                       </label>
                       <input
                         type="number"
                         min={1}
                         value={formEmbeddingDimensions}
                         onChange={(e) => setFormEmbeddingDimensions(e.target.value)}
-                        placeholder="1024"
+                        placeholder={String(DEFAULT_EMBEDDING_DIMENSIONS)}
                         className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600
                           bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-white
                           placeholder:text-slate-400 focus:outline-none focus:ring-2
@@ -1171,14 +1299,9 @@ export default function SettingsPage() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
-                    {saving ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        保存中...
-                      </span>
-                    ) : (
-                      '保存'
-                    )}
+                    <LoadingButtonContent loading={saving} loadingText="保存中...">
+                      保存
+                    </LoadingButtonContent>
                   </motion.button>
                 </div>
               </motion.div>
@@ -1362,14 +1485,9 @@ export default function SettingsPage() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
-                    {voiceSaving ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        保存中...
-                      </span>
-                    ) : (
-                      '保存'
-                    )}
+                    <LoadingButtonContent loading={voiceSaving} loadingText="保存中...">
+                      保存
+                    </LoadingButtonContent>
                   </motion.button>
                 </div>
               </motion.div>
@@ -1396,7 +1514,7 @@ export default function SettingsPage() {
       <ConfirmDialog
         open={pendingDefaultEmbeddingProviderId !== null}
         title="设为默认向量服务"
-        message={`确定要将 "${pendingDefaultEmbeddingProviderId ?? ''}" 的向量模型 "${pendingEmbeddingProvider?.embeddingModel ?? ''}"（${pendingEmbeddingProvider?.embeddingDimensions ?? 1024}维）设为知识库默认向量服务吗？后续上传和重新向量化会使用这个向量模型，不会使用聊天模型。`}
+        message={`确定要将 "${pendingDefaultEmbeddingProviderId ?? ''}" 的向量模型 "${pendingEmbeddingProvider?.embeddingModel ?? ''}"（${pendingEmbeddingProvider?.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS}维）设为知识库默认向量服务吗？后续上传和重新向量化会使用这个向量模型，不会使用聊天模型。`}
         confirmText="确认设置"
         cancelText="取消"
         loading={settingEmbeddingDefault}
@@ -1457,14 +1575,9 @@ export default function SettingsPage() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
-                    {deleting ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        删除中...
-                      </span>
-                    ) : (
-                      '确定删除'
-                    )}
+                    <LoadingButtonContent loading={deleting} loadingText="删除中...">
+                      确定删除
+                    </LoadingButtonContent>
                   </motion.button>
                 </div>
               </motion.div>

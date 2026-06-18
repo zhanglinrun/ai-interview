@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, LogIn, Sparkles, UserPlus } from 'lucide-react';
+import { LogIn, Sparkles, UserPlus } from 'lucide-react';
 import { authApi } from '../api/auth';
 import { getStoredUser } from '../api/authStorage';
+import { getErrorMessage } from '../api/request';
+import LoadingButtonContent from '../components/LoadingButtonContent';
 
 type AuthMode = 'login' | 'register';
+const AUTH_MODES: AuthMode[] = ['login', 'register'];
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -44,7 +47,7 @@ export default function LoginPage() {
       }
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败，请重试');
+      setError(getErrorMessage(err, '操作失败，请重试'));
     } finally {
       setLoading(false);
     }
@@ -66,7 +69,7 @@ export default function LoginPage() {
         </div>
 
         <div className="mb-5 grid grid-cols-2 rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
-          {(['login', 'register'] as AuthMode[]).map((item) => (
+          {AUTH_MODES.map((item) => (
             <button
               key={item}
               type="button"
@@ -148,14 +151,17 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : isRegister ? (
-              <UserPlus className="w-4 h-4" />
-            ) : (
-              <LogIn className="w-4 h-4" />
-            )}
-            {isRegister ? '注册并登录' : '登录'}
+            <LoadingButtonContent
+              loading={loading}
+              loadingText={isRegister ? '注册并登录' : '登录'}
+            >
+              {isRegister ? (
+                <UserPlus className="w-4 h-4" />
+              ) : (
+                <LogIn className="w-4 h-4" />
+              )}
+              {isRegister ? '注册并登录' : '登录'}
+            </LoadingButtonContent>
           </button>
         </form>
       </div>

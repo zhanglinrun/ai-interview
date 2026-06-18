@@ -76,7 +76,7 @@ public class KnowledgeBasePersistenceService {
             return saved;
         } catch (Exception e) {
             log.error("保存知识库失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存知识库失败");
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存知识库失败", e);
         }
     }
 

@@ -105,7 +105,7 @@ public class InterviewSessionService {
             persistenceService.saveSession(sessionId, request.resumeId(),
                 questions.size(), questions, request.llmProvider(), skillId, difficulty);
         } catch (Exception e) {
-            log.warn("保存面试会话到数据库失败: {}", e.getMessage());
+            log.warn("保存面试会话到数据库失败: {}", e.getMessage(), e);
         }
 
         return new InterviewSessionDTO(
@@ -284,7 +284,7 @@ public class InterviewSessionService {
                 persistenceService.updateSessionStatus(sessionId,
                     InterviewSessionEntity.SessionStatus.IN_PROGRESS);
             } catch (Exception e) {
-                log.warn("更新会话状态失败: {}", e.getMessage());
+                log.warn("更新会话状态失败: {}", e.getMessage(), e);
             }
         }
 
@@ -345,7 +345,7 @@ public class InterviewSessionService {
                 log.info("会话 {} 已完成所有问题，评估任务已入队", request.sessionId());
             }
         } catch (Exception e) {
-            log.warn("保存答案到数据库失败: {}", e.getMessage());
+            log.warn("保存答案到数据库失败: {}", e.getMessage(), e);
         }
 
         log.info("会话 {} 提交答案: 问题{}, 剩余{}题",
@@ -394,7 +394,7 @@ public class InterviewSessionService {
             persistenceService.updateSessionStatus(request.sessionId(),
                 InterviewSessionEntity.SessionStatus.IN_PROGRESS);
         } catch (Exception e) {
-            log.warn("暂存答案到数据库失败: {}", e.getMessage());
+            log.warn("暂存答案到数据库失败: {}", e.getMessage(), e);
         }
 
         log.info("会话 {} 暂存答案: 问题{}", request.sessionId(), index);
@@ -420,7 +420,7 @@ public class InterviewSessionService {
             // 设置评估状态为 PENDING
             persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
         } catch (Exception e) {
-            log.warn("更新会话状态失败: {}", e.getMessage());
+            log.warn("更新会话状态失败: {}", e.getMessage(), e);
         }
 
         // 发送评估任务到 Redis Stream
@@ -486,7 +486,7 @@ public class InterviewSessionService {
         try {
             persistenceService.saveReport(sessionId, report);
         } catch (Exception e) {
-            log.warn("保存报告到数据库失败: {}", e.getMessage());
+            log.warn("保存报告到数据库失败: {}", e.getMessage(), e);
         }
 
         return report;

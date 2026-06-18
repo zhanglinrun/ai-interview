@@ -4,14 +4,17 @@ import { Clock, PhoneOff, AlertCircle, Bot, Mic, ArrowLeft, SendHorizonal } from
 import { motion, AnimatePresence } from 'framer-motion';
 import AudioRecorder from '../components/AudioRecorder';
 import InterviewPageHeader from '../components/InterviewPageHeader';
-import RealtimeSubtitle from '../components/RealtimeSubtitle';
+import RealtimeSubtitle, {type RealtimeSubtitleMessage} from '../components/RealtimeSubtitle';
 import { skillApi, type SkillDTO } from '../api/skill';
+import { getElapsedSecondsSince } from '../utils/date';
+import { formatClockTime } from '../utils/format';
 import { getTemplateName } from '../utils/voiceInterview';
 import {
   voiceInterviewApi,
   connectWebSocket,
   VoiceInterviewWebSocket,
 } from '../api/voiceInterview';
+import { getErrorMessage } from '../api/request';
 
 type VoiceConfig = {
   skillId: string;
@@ -56,7 +59,7 @@ export default function VoiceInterviewPage() {
 
   const [userText, setUserText] = useState('');
   const [aiText, setAiText] = useState('');
-  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string; id: string }[]>([]);
+  const [messages, setMessages] = useState<RealtimeSubtitleMessage[]>([]);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [aiAudio, setAiAudio] = useState('');
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -182,7 +185,11 @@ export default function VoiceInterviewPage() {
     if (ctx.state === 'suspended') {
       ctx.resume();
     }
-    const buffer = chunkQueueRef.current.shift()!;
+    const buffer = chunkQueueRef.current.shift();
+    if (!buffer) {
+      isChunkPlayingRef.current = false;
+      return;
+    }
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
@@ -202,7 +209,9 @@ export default function VoiceInterviewPage() {
     }
     drainCheckRef.current = setInterval(() => {
       if (chunkQueueRef.current.length === 0 && !isChunkPlayingRef.current) {
-        clearInterval(drainCheckRef.current!);
+        if (drainCheckRef.current) {
+          clearInterval(drainCheckRef.current);
+        }
         drainCheckRef.current = null;
         setAiSpeaking(false);
         setIsSubmitting(false);
@@ -210,7 +219,9 @@ export default function VoiceInterviewPage() {
         commitAiMessage(aiTextRef.current.trim());
         setAiText('');
       } else if (Date.now() - startedAt > maxDrainWaitMs) {
-        clearInterval(drainCheckRef.current!);
+        if (drainCheckRef.current) {
+          clearInterval(drainCheckRef.current);
+        }
         drainCheckRef.current = null;
         setAiSpeaking(false);
         setIsSubmitting(false);
@@ -322,12 +333,6 @@ export default function VoiceInterviewPage() {
     timerRef.current = setInterval(() => {
       setCurrentTime((prev) => prev + 1);
     }, 1000);
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const getPhaseLabel = (phase: string) => {
@@ -506,7 +511,7 @@ export default function VoiceInterviewPage() {
       try {
         wsRef.current = connectWebSocket(sessionId, wsUrl, createWebSocketHandlers());
       } catch (error) {
-        setError('无法建立 WebSocket 连接: ' + (error instanceof Error ? error.message : '未知错误'));
+        setError('无法建立 WebSocket 连接: ' + getErrorMessage(error));
         setConnectionStatus('disconnected');
         setIsAsrReady(false);
       }
@@ -546,11 +551,11 @@ export default function VoiceInterviewPage() {
       const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
       connectWithHandlers(session.sessionId, wsUrl);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '创建面试会话失败，请重试';
+      const errorMessage = getErrorMessage(error, '创建面试会话失败，请重试');
       setError(errorMessage);
       setConnectionStatus('disconnected');
       setIsAsrReady(false);
-      alert('创建会话失败：' + errorMessage);
+      alert(errorMessage);
     }
   }, [connectWithHandlers]);
 
@@ -568,11 +573,10 @@ export default function VoiceInterviewPage() {
       setCurrentPhase(session.currentPhase);
 
       if (session.startTime) {
-        const elapsedSec = Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000);
-        setCurrentTime(elapsedSec > 0 ? elapsedSec : 0);
+        setCurrentTime(getElapsedSecondsSince(session.startTime));
       }
 
-      const restored: { role: 'user' | 'ai'; text: string; id: string }[] = [];
+      const restored: RealtimeSubtitleMessage[] = [];
       let pendingAi: { text: string; id: string } | null = null;
       for (const msg of history) {
         const aiText = msg.aiGeneratedText?.trim();
@@ -607,7 +611,7 @@ export default function VoiceInterviewPage() {
       const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
       connectWithHandlers(session.sessionId, wsUrl);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '恢复会话失败');
+      setError(getErrorMessage(error, '恢复会话失败'));
       setConnectionStatus('disconnected');
       setIsAsrReady(false);
     }
@@ -683,7 +687,7 @@ export default function VoiceInterviewPage() {
       await voiceInterviewApi.pauseSession(sessionId);
       navigate('/interviews');
     } catch (error) {
-      alert('暂停失败，请重试');
+      alert(getErrorMessage(error, '暂停失败，请重试'));
     }
   };
 
@@ -798,7 +802,7 @@ export default function VoiceInterviewPage() {
 
                 <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
                   <Clock className="w-4 h-4" />
-                  <span className="font-mono text-sm tabular-nums">{formatTime(currentTime)}</span>
+                  <span className="font-mono text-sm tabular-nums">{formatClockTime(currentTime)}</span>
                 </div>
               </div>
 

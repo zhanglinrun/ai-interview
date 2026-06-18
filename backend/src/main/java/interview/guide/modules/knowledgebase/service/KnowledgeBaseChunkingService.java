@@ -5,12 +5,11 @@ import interview.guide.modules.knowledgebase.service.chunk.ChunkStrategy;
 import interview.guide.modules.knowledgebase.service.chunk.HybridHeadingChunkStrategy;
 import interview.guide.modules.knowledgebase.service.chunk.RecursiveCharacterChunkStrategy;
 import interview.guide.modules.knowledgebase.service.chunk.SemanticChunkStrategy;
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.transformer.splitter.TextSplitter;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -41,38 +40,35 @@ public class KnowledgeBaseChunkingService {
 
     private final TextSplitter tokenTextSplitter;
 
-    /**
-     * 相邻 chunk 的重叠字符数：从上一个 chunk 末尾截取等长文本拼到下一个 chunk 开头，
-     * 降低分块器在边界处硬切断、导致召回时丢失上下文的风险。
-     * 只在同一分片段内部相邻 chunk 之间生效，不跨章节拼凑无关内容。0 表示关闭重叠。
-     */
-    @Value("${app.ai.rag.chunk-overlap-chars:80}")
-    private int overlapChars = 80;
+    private final int overlapChars;
+    private final String chunkStrategyName;
+    private final int chunkSizeChars;
+    private final ChunkStrategy chunkStrategy;
 
-    /** 分片策略名：hybrid(默认)/recursive/semantic/auto。 */
-    @Value("${app.ai.rag.chunk-strategy:hybrid}")
-    private String chunkStrategyName = "hybrid";
-
-    /** recursive/semantic/auto 使用的目标字符长度；hybrid 仍按 TokenTextSplitter 的 token 切。 */
-    @Value("${app.ai.rag.chunk-size-chars:800}")
-    private int chunkSizeChars = 800;
-
-    private ChunkStrategy chunkStrategy;
+    @Autowired
+    public KnowledgeBaseChunkingService(KnowledgeBaseQueryProperties queryProperties) {
+        this(TokenTextSplitter.builder().build(), queryProperties);
+    }
 
     public KnowledgeBaseChunkingService() {
-        this(TokenTextSplitter.builder().build());
+        this(TokenTextSplitter.builder().build(), new KnowledgeBaseQueryProperties());
     }
 
     KnowledgeBaseChunkingService(TextSplitter tokenTextSplitter) {
-        this.tokenTextSplitter = tokenTextSplitter;
-        // 单元测试不走 Spring 注入，用字段默认值（hybrid + overlap 80）初始化一次，
-        // 保证 new KnowledgeBaseChunkingService() 的行为与既有测试一致。
-        this.chunkStrategy = resolveStrategy(chunkStrategyName);
+        this(tokenTextSplitter, new KnowledgeBaseQueryProperties());
     }
 
-    @PostConstruct
-    void initStrategy() {
-        // Spring 注入完配置后，按真实值重新选定策略。new 出来的测试实例不走这里。
+    KnowledgeBaseChunkingService(
+            TextSplitter tokenTextSplitter,
+            KnowledgeBaseQueryProperties queryProperties
+    ) {
+        KnowledgeBaseQueryProperties properties = queryProperties == null
+                ? new KnowledgeBaseQueryProperties()
+                : queryProperties;
+        this.tokenTextSplitter = tokenTextSplitter;
+        this.overlapChars = Math.max(0, properties.getChunkOverlapChars());
+        this.chunkStrategyName = properties.getChunkStrategy();
+        this.chunkSizeChars = Math.max(64, properties.getChunkSizeChars());
         this.chunkStrategy = resolveStrategy(chunkStrategyName);
     }
 

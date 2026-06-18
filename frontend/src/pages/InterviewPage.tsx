@@ -1,20 +1,16 @@
-import {useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {motion} from 'framer-motion';
 import {interviewApi} from '../api/interview';
+import {getErrorMessage} from '../api/request';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InterviewChatPanel from '../components/InterviewChatPanel';
 import InterviewPageHeader from '../components/InterviewPageHeader';
-import type {InterviewQuestion, InterviewSession} from '../types/interview';
+import { EmptyState, LoadingState } from '../components/PageState';
+import type {InterviewMessage, InterviewQuestion, InterviewSession} from '../types/interview';
 import type {Difficulty} from '../components/UnifiedInterviewModal';
 import type {CategoryDTO} from '../api/skill';
 import { CUSTOM_SKILL_ID } from '../hooks/useInterviewConfig';
-
-interface Message {
-  type: 'interviewer' | 'user';
-  content: string;
-  category?: string;
-  questionIndex?: number;
-}
+import { Mic } from 'lucide-react';
 
 interface InterviewProps {
   resumeText: string;
@@ -42,7 +38,7 @@ export default function Interview({
 }: InterviewProps) {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [answer, setAnswer] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -57,20 +53,35 @@ export default function Interview({
   const customCategories = initialConfig?.customCategories;
   const jdText = initialConfig?.jdText;
 
-  // 自动开始面试（恢复已有会话 或 创建新会话）
-  useEffect(() => {
-    if (!startedRef.current) {
-      startedRef.current = true;
-      if (sessionIdToResume) {
-        resumeExistingSession(sessionIdToResume);
-      } else {
-        startInterview();
+  const initSession = useCallback((s: InterviewSession) => {
+    setSession(s);
+
+    if (s.questions.length > 0) {
+      const idx = Math.min(s.currentQuestionIndex, s.questions.length - 1);
+      const currentQ = s.questions[idx];
+      setCurrentQuestion(currentQ);
+
+      // 重建消息历史
+      const restoredMessages: InterviewMessage[] = [];
+      for (let i = 0; i <= idx; i++) {
+        const q = s.questions[i];
+        restoredMessages.push({
+          type: 'interviewer',
+          content: q.question,
+          category: q.category,
+        });
+        if (q.userAnswer) {
+          restoredMessages.push({
+            type: 'user',
+            content: q.userAnswer
+          });
+        }
       }
+      setMessages(restoredMessages);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startInterview = async () => {
+  const startInterview = useCallback(async () => {
     setIsCreating(true);
     setError('');
 
@@ -89,14 +100,24 @@ export default function Interview({
 
       initSession(newSession);
     } catch (err) {
-      setError('创建面试失败，请重试');
+      setError(getErrorMessage(err, '创建面试失败，请重试'));
       console.error(err);
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [
+    customCategories,
+    difficulty,
+    initSession,
+    jdText,
+    llmProvider,
+    questionCount,
+    resumeId,
+    resumeText,
+    skillId,
+  ]);
 
-  const resumeExistingSession = async (sessionId: string) => {
+  const resumeExistingSession = useCallback(async (sessionId: string) => {
     setIsCreating(true);
     setError('');
 
@@ -110,48 +131,32 @@ export default function Interview({
         setAnswer(currentQ.userAnswer);
       }
     } catch (err) {
-      setError('恢复面试失败，请重试');
+      setError(getErrorMessage(err, '恢复面试失败，请重试'));
       console.error(err);
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [initSession]);
 
-  const initSession = (s: InterviewSession) => {
-    setSession(s);
-
-    if (s.questions.length > 0) {
-      const idx = Math.min(s.currentQuestionIndex, s.questions.length - 1);
-      const currentQ = s.questions[idx];
-      setCurrentQuestion(currentQ);
-
-      // 重建消息历史
-      const restoredMessages: Message[] = [];
-      for (let i = 0; i <= idx; i++) {
-        const q = s.questions[i];
-        restoredMessages.push({
-          type: 'interviewer',
-          content: q.question,
-          category: q.category,
-          questionIndex: i
-        });
-        if (q.userAnswer) {
-          restoredMessages.push({
-            type: 'user',
-            content: q.userAnswer
-          });
-        }
-      }
-      setMessages(restoredMessages);
+  // 自动开始面试（恢复已有会话 或 创建新会话）
+  useEffect(() => {
+    if (startedRef.current) {
+      return;
     }
-  };
+    startedRef.current = true;
+    if (sessionIdToResume) {
+      resumeExistingSession(sessionIdToResume);
+    } else {
+      startInterview();
+    }
+  }, [resumeExistingSession, sessionIdToResume, startInterview]);
 
   const handleSubmitAnswer = async () => {
     if (!answer.trim() || !session || !currentQuestion) return;
 
     setIsSubmitting(true);
 
-    const userMessage: Message = {
+    const userMessage: InterviewMessage = {
       type: 'user',
       content: answer
     };
@@ -166,19 +171,19 @@ export default function Interview({
 
       setAnswer('');
 
-      if (response.hasNextQuestion && response.nextQuestion) {
-        setCurrentQuestion(response.nextQuestion);
+      const nextQuestion = response.nextQuestion;
+      if (response.hasNextQuestion && nextQuestion) {
+        setCurrentQuestion(nextQuestion);
         setMessages(prev => [...prev, {
           type: 'interviewer',
-          content: response.nextQuestion!.question,
-          category: response.nextQuestion!.category,
-          questionIndex: response.nextQuestion!.questionIndex
+          content: nextQuestion.question,
+          category: nextQuestion.category,
         }]);
       } else {
         onInterviewComplete();
       }
     } catch (err) {
-      setError('提交答案失败，请重试');
+      setError(getErrorMessage(err, '提交答案失败，请重试'));
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -194,7 +199,7 @@ export default function Interview({
       setShowCompleteConfirm(false);
       onInterviewComplete();
     } catch (err) {
-      setError('提前交卷失败，请重试');
+      setError(getErrorMessage(err, '提前交卷失败，请重试'));
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -204,21 +209,23 @@ export default function Interview({
   // 加载中
   if (isCreating) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="w-10 h-10 border-3 border-slate-200 border-t-primary-500 rounded-full mx-auto mb-4 animate-spin" />
-          <p className="text-slate-500 dark:text-slate-400">正在生成面试题目...</p>
-        </div>
-      </div>
+      <LoadingState
+        label="正在生成面试题目..."
+        className="flex flex-col items-center justify-center min-h-[50vh] gap-3"
+        spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+      />
     );
   }
 
   // 错误状态
   if (error && !session) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <p className="text-red-500 dark:text-red-400 mb-4">{error}</p>
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <EmptyState
+          title={error}
+          className="text-center"
+          titleClassName="text-red-500 dark:text-red-400 mb-4"
+          action={
           <div className="flex gap-3 justify-center">
             <button
               onClick={startInterview}
@@ -233,7 +240,8 @@ export default function Interview({
               返回
             </button>
           </div>
-        </div>
+          }
+        />
       </div>
     );
   }
@@ -246,12 +254,7 @@ export default function Interview({
         title="模拟面试"
         subtitle="认真回答每个问题，展示您的实力"
         icon={(
-          <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+          <Mic className="w-6 h-6 text-white" />
         )}
       />
 
@@ -267,9 +270,7 @@ export default function Interview({
           answer={answer}
           onAnswerChange={setAnswer}
           onSubmit={handleSubmitAnswer}
-          onCompleteEarly={handleCompleteEarly}
           isSubmitting={isSubmitting}
-          showCompleteConfirm={showCompleteConfirm}
           onShowCompleteConfirm={setShowCompleteConfirm}
         />
       </motion.div>

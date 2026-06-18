@@ -2,6 +2,7 @@ package interview.guide.common.aspect;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.exception.RateLimitExceededException;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +50,7 @@ public class RateLimitAspect {
         }
     }
 
-    @jakarta.annotation.PostConstruct
+    @PostConstruct
     public void init() {
         rScript = redissonClient.getScript(StringCodec.INSTANCE);
         loadScript();

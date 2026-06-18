@@ -211,7 +211,7 @@ public class InterviewSkillService {
             throw e;
         } catch (Exception e) {
             log.error("JD 解析失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "JD 解析失败，请重试或选择预设主题");
+            throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "JD 解析失败，请重试或选择预设主题", e);
         }
     }
 
@@ -355,7 +355,8 @@ public class InterviewSkillService {
         try {
             return buildEvaluationReferenceSection(skillId);
         } catch (Exception e) {
-            log.warn("加载评估参考基线失败，降级为无参考: skillId={}, error={}", skillId, e.getMessage());
+            log.warn("加载评估参考基线失败，降级为无参考: skillId={}, error={}",
+                skillId, e.getMessage(), e);
             return "";
         }
     }
@@ -444,7 +445,7 @@ public class InterviewSkillService {
             return definition;
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR,
-                "读取 Skill 文件失败: " + resource.getDescription());
+                "读取 Skill 文件失败: " + resource.getDescription(), e);
         }
     }
 
@@ -461,7 +462,7 @@ public class InterviewSkillService {
             InterviewSkillProperties.SkillMetaDefinition meta = yaml.loadAs(content, InterviewSkillProperties.SkillMetaDefinition.class);
             return meta != null ? meta : new InterviewSkillProperties.SkillMetaDefinition();
         } catch (IOException e) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "读取 skill meta 文件失败: " + location);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "读取 skill meta 文件失败: " + location, e);
         }
     }
 

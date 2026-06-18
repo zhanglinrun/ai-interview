@@ -80,7 +80,7 @@ public class VoiceInterviewEvaluationService {
         } catch (Exception e) {
             log.error("生成语音面试评估失败: sessionId={}", sessionId, e);
             throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "生成评估失败: " + e.getMessage());
+                "生成评估失败: " + e.getMessage(), e);
         }
     }
 
@@ -184,7 +184,7 @@ public class VoiceInterviewEvaluationService {
         } catch (Exception e) {
             log.error("保存评估结果失败: sessionId={}", sessionId, e);
             throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "保存评估失败: " + e.getMessage());
+                "保存评估失败: " + e.getMessage(), e);
         }
     }
 
@@ -208,7 +208,7 @@ public class VoiceInterviewEvaluationService {
         } catch (Exception e) {
             log.error("保存空评估结果失败: sessionId={}", sessionId, e);
             throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "保存空评估失败: " + e.getMessage());
+                "保存空评估失败: " + e.getMessage(), e);
         }
     }
 
@@ -266,7 +266,7 @@ public class VoiceInterviewEvaluationService {
         } catch (Exception e) {
             log.error("构建评估详情失败: sessionId={}", entity.getSessionId(), e);
             throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "构建评估结果失败: " + e.getMessage());
+                "构建评估结果失败: " + e.getMessage(), e);
         }
     }
 

@@ -163,7 +163,7 @@ public class VectorRepository {
             log.info("关键词检索完成: query='{}', 命中 {} 条", query, hits.size());
             return hits;
         } catch (Exception e) {
-            log.warn("关键词检索失败，本次仅依赖向量通道: {}", e.getMessage());
+            log.warn("关键词检索失败，本次仅依赖向量通道: {}", e.getMessage(), e);
             return List.of();
         }
     }
@@ -182,7 +182,7 @@ public class VectorRepository {
                                       boolean filterByUser) {
         // 占位符顺序：SELECT 的 word_similarity(?), WHERE 的 word_similarity(?), >= ?,
         // 然后 kb_id IN (...), 最后 user_id = ?
-        java.util.List<Object> args = new java.util.ArrayList<>();
+        List<Object> args = new ArrayList<>();
         args.add(query);
         args.add(query);
         args.add(minSimilarity);
@@ -248,9 +248,9 @@ public class VectorRepository {
             return deletedRows;
             
         } catch (Exception e) {
-            log.error("执行删除向量 SQL 失败: kbId={}, error={}", knowledgeBaseId, e.getMessage());
+            log.error("执行删除向量 SQL 失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
             // 抛出异常以触发事务回滚
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "删除向量数据失败");
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "删除向量数据失败", e);
         }
     }
 
@@ -334,7 +334,7 @@ public class VectorRepository {
             return deleted;
         } catch (Exception e) {
             log.error("清理历史向量行失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "清理历史向量数据失败");
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "清理历史向量数据失败", e);
         }
     }
 
@@ -354,7 +354,7 @@ public class VectorRepository {
             metadataJson = OBJECT_MAPPER.writeValueAsString(metadata);
         } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
-                "序列化向量元数据失败");
+                "序列化向量元数据失败", e);
         }
         String sql = """
             UPDATE vector_store
@@ -368,7 +368,7 @@ public class VectorRepository {
             log.error("更新 chunk metadata 失败: kbId={}, chunkHash={}, error={}",
                 knowledgeBaseId, chunkHash, e.getMessage(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
-                "更新向量元数据失败");
+                "更新向量元数据失败", e);
         }
     }
 
@@ -404,7 +404,7 @@ public class VectorRepository {
         } catch (Exception e) {
             log.error("增量删除失效 chunk 失败: kbId={}, error={}",
                     knowledgeBaseId, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "删除失效向量数据失败");
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "删除失效向量数据失败", e);
         }
     }
 }

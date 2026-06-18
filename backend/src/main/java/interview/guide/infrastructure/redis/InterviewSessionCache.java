@@ -80,7 +80,7 @@ public class InterviewSessionCache {
             try {
                 return objectMapper.readValue(questionsJson, new TypeReference<>() {});
             } catch (JacksonException e) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "反序列化问题列表失败");
+                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "反序列化问题列表失败", e);
             }
         }
     }

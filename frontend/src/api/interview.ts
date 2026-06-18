@@ -1,4 +1,4 @@
-import { request } from './request';
+import { AI_REQUEST_TIMEOUT_MS, request } from './request';
 import type {
   CreateInterviewRequest,
   CurrentQuestionResponse,
@@ -7,6 +7,7 @@ import type {
   SubmitAnswerRequest,
   SubmitAnswerResponse
 } from '../types/interview';
+import type {EvaluateStatus} from './history';
 
 export interface TextSessionMeta {
   sessionId: string;
@@ -15,7 +16,7 @@ export interface TextSessionMeta {
   resumeId: number | null;
   totalQuestions: number;
   status: string;
-  evaluateStatus: string | null;
+  evaluateStatus: EvaluateStatus | null;
   evaluateError: string | null;
   overallScore: number | null;
   createdAt: string;
@@ -35,7 +36,7 @@ export const interviewApi = {
    */
   async createSession(req: CreateInterviewRequest): Promise<InterviewSession> {
     return request.post<InterviewSession>('/api/interview/sessions', req, {
-      timeout: 180000, // 3分钟超时，AI生成问题需要时间
+      timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时，AI生成问题需要时间
     });
   },
 
@@ -61,7 +62,7 @@ export const interviewApi = {
       `/api/interview/sessions/${req.sessionId}/answers`,
       { questionIndex: req.questionIndex, answer: req.answer },
       {
-        timeout: 180000, // 3分钟超时
+        timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时
       }
     );
   },
@@ -71,7 +72,7 @@ export const interviewApi = {
    */
   async getReport(sessionId: string): Promise<InterviewReport> {
     return request.get<InterviewReport>(`/api/interview/sessions/${sessionId}/report`, {
-      timeout: 180000, // 3分钟超时，AI评估需要时间
+      timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时，AI评估需要时间
     });
   },
 

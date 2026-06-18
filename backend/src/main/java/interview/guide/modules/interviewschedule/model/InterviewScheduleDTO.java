@@ -1,6 +1,8 @@
 package interview.guide.modules.interviewschedule.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
+
 import java.time.LocalDateTime;
 
 @Data
@@ -9,8 +11,8 @@ public class InterviewScheduleDTO {
     private String companyName;
     private String position;
 
-    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
-    private java.time.LocalDateTime interviewTime;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    private LocalDateTime interviewTime;
     private String interviewType;
     private String meetingLink;
     private Integer roundNumber;

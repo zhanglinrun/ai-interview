@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -90,10 +91,10 @@ public class StructuredOutputInvoker {
                 recordAttempt(contextTag, STATUS_FAILURE);
                 if (attempt < maxAttempts) {
                     log.warn("{}结构化解析失败，准备重试: attempt={}/{}, error={}",
-                        logContext, attempt, maxAttempts, e.getMessage());
+                        logContext, attempt, maxAttempts, e.getMessage(), e);
                 } else {
                     log.error("{}结构化解析失败，已达最大重试次数: attempts={}, error={}",
-                        logContext, maxAttempts, e.getMessage());
+                        logContext, maxAttempts, e.getMessage(), e);
                 }
             }
         }
@@ -101,7 +102,8 @@ public class StructuredOutputInvoker {
         recordInvocation(contextTag, STATUS_FAILURE, startNanos);
         throw new BusinessException(
             errorCode,
-            errorPrefix + (lastError != null ? lastError.getMessage() : "unknown")
+            errorPrefix + (lastError != null ? lastError.getMessage() : "unknown"),
+            lastError
         );
     }
 
@@ -225,7 +227,7 @@ public class StructuredOutputInvoker {
         Tags tags = Tags.of("context", contextTag, "status", status);
         meterRegistry.counter(METRIC_INVOCATIONS, tags).increment();
         meterRegistry.timer(METRIC_LATENCY, tags)
-            .record(System.nanoTime() - startNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+            .record(System.nanoTime() - startNanos, TimeUnit.NANOSECONDS);
     }
 
     private boolean isMetricsAvailable() {

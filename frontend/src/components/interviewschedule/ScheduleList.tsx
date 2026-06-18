@@ -3,7 +3,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import type { InterviewSchedule, InterviewStatus } from '../../types/interviewSchedule';
+import { EmptyState } from '../PageState';
 import { InterviewListItem } from './InterviewListItem';
+import { compareDateAsc } from '../../utils/date';
 
 interface ScheduleListProps {
   interviews: InterviewSchedule[];
@@ -19,20 +21,18 @@ export const ScheduleList: React.FC<ScheduleListProps> = ({
   onStatusChange,
 }) => {
   const sortedInterviews = [...interviews].sort(
-    (a, b) => new Date(a.interviewTime).getTime() - new Date(b.interviewTime).getTime()
+    (a, b) => compareDateAsc(a.interviewTime, b.interviewTime)
   );
 
   if (sortedInterviews.length === 0) {
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="text-center py-16"
-      >
-        <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-12 shadow-xl">
-          <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">暂无面试记录</p>
-        </div>
-      </motion.div>
+      <div className="py-16">
+        <EmptyState
+          title="暂无面试记录"
+          className="text-center bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-12 shadow-xl"
+          titleClassName="text-slate-500 dark:text-slate-400 text-lg font-medium"
+        />
+      </div>
     );
   }
 

@@ -1,17 +1,27 @@
 import { useRef, useState, useEffect } from 'react';
-// @ts-ignore - vad is loaded via script tag
 import { Mic, MicOff } from 'lucide-react';
+import { getErrorMessage } from '../api/request';
+
+interface MicVadInstance {
+  start: () => Promise<void>;
+  pause: () => void;
+  destroy?: () => void;
+}
+
+interface MicVadConfig {
+  getStream: () => Promise<MediaStream>;
+  onnxWASMBasePath: string;
+  baseAssetPath: string;
+  onSpeechStart: () => void;
+  onSpeechEnd: () => void;
+}
 
 // Declare global vad object (loaded via script tag in index.html)
 declare global {
   interface Window {
     vad: {
       MicVAD: {
-        new: (config: any) => Promise<{
-          start: () => Promise<void>;
-          pause: () => void;
-          destroy: () => void;
-        }>;
+        new: (config: MicVadConfig) => Promise<MicVadInstance>;
       };
     };
   }
@@ -39,7 +49,7 @@ export default function AudioRecorder({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const vadRef = useRef<any>(null);
+  const vadRef = useRef<MicVadInstance | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   // Mount flag to prevent operations after unmount
@@ -267,7 +277,7 @@ export default function AudioRecorder({
         return;
       }
       console.error('Error accessing microphone:', error);
-      const message = error instanceof Error ? error.message : '无法访问麦克风，请检查权限设置';
+      const message = getErrorMessage(error, '无法访问麦克风，请检查权限设置');
       alert(message);
     }
   };

@@ -1,6 +1,8 @@
 import {ChangeEvent, DragEvent, MouseEvent, useCallback, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
-import {AlertCircle, FileText, Info, Loader2, Upload, X} from 'lucide-react';
+import {AlertCircle, FileText, Info, Upload, X} from 'lucide-react';
+import LoadingButtonContent from './LoadingButtonContent';
+import {formatFileSize} from '../utils/format';
 
 export interface FileUploadCardProps {
   /** 标题 */
@@ -92,12 +94,6 @@ export default function FileUploadCard({
     event.stopPropagation();
     if (!selectedFile) return;
     onUpload(selectedFile, name.trim() || undefined);
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   return (
@@ -301,14 +297,13 @@ export default function FileUploadCard({
             whileHover={{ scale: uploading ? 1 : 1.02 }}
             whileTap={{ scale: uploading ? 1 : 0.98 }}
           >
-            {uploading ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                处理中...
-              </>
-            ) : (
-              uploadButtonText
-            )}
+            <LoadingButtonContent
+              loading={uploading}
+              loadingText="处理中..."
+              spinnerClassName="w-5 h-5 animate-spin"
+            >
+              {uploadButtonText}
+            </LoadingButtonContent>
           </motion.button>
         )}
       </div>

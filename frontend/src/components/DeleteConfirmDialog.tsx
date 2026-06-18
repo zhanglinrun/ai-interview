@@ -1,11 +1,11 @@
 import ConfirmDialog from './ConfirmDialog';
 
 export interface DeleteItem {
-  id: number;
+  id?: number;
   name?: string;
   title?: string;
   filename?: string;
-  [key: string]: any;
+  sessionId?: string;
 }
 
 export interface DeleteConfirmDialogProps {
@@ -37,9 +37,10 @@ export default function DeleteConfirmDialog({
     return item.name || item.title || item.filename || item.sessionId || (item.id ? `ID: ${item.id}` : '');
   };
 
+  const itemName = getItemName();
   // 生成默认消息
   const defaultMessage = item
-    ? `确定要删除${itemType}"${getItemName()}"吗？删除后无法恢复。`
+    ? `确定要删除${itemType}${itemName ? `“${itemName}”` : ''}吗？删除后无法恢复。`
     : '';
 
   return (

@@ -2,6 +2,7 @@ package interview.guide.modules.knowledgebase;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.common.web.AttachmentResponseBuilder;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
@@ -15,7 +16,6 @@ import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,8 +29,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -180,17 +178,10 @@ public class KnowledgeBaseController {
         var entity = listService.getEntityForDownload(id);
         byte[] fileContent = listService.downloadFile(id);
 
-        String filename = entity.getOriginalFilename();
-        String encodedFilename = URLEncoder.encode(filename, StandardCharsets.UTF_8)
-                .replaceAll("\\+", "%20");
-
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + encodedFilename + "\"; filename*=UTF-8''" + encodedFilename)
-                .header(HttpHeaders.CONTENT_TYPE,
-                        entity.getContentType() != null ? entity.getContentType()
-                                : MediaType.APPLICATION_OCTET_STREAM_VALUE)
-                .body(fileContent);
+        return AttachmentResponseBuilder.attachment(
+                entity.getOriginalFilename(),
+                entity.getContentType(),
+                fileContent);
     }
 
     // ========== 搜索 API ==========

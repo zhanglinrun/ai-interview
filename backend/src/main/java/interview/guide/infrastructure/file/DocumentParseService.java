@@ -59,7 +59,7 @@ public class DocumentParseService {
             return cleanedContent;
         } catch (IOException | TikaException | SAXException e) {
             log.error("文件解析失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文件解析失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文件解析失败: " + e.getMessage(), e);
         }
     }
 
@@ -86,7 +86,7 @@ public class DocumentParseService {
             return cleanedContent;
         } catch (IOException | TikaException | SAXException e) {
             log.error("文件解析失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文件解析失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文件解析失败: " + e.getMessage(), e);
         }
     }
 
@@ -157,7 +157,7 @@ public class DocumentParseService {
             throw e;
         } catch (Exception e) {
             log.error("下载并解析文件失败: storageKey={}, error={}", storageKey, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载并解析文件失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载并解析文件失败: " + e.getMessage(), e);
         }
     }
 }

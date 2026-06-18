@@ -1,7 +1,10 @@
 package interview.guide.modules.interview;
 
 import interview.guide.common.annotation.RateLimit;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
+import interview.guide.common.web.AttachmentResponseBuilder;
 import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
@@ -15,8 +18,6 @@ import interview.guide.modules.interview.service.InterviewSessionService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,8 +27,6 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -162,16 +161,13 @@ public class InterviewController {
     public ResponseEntity<byte[]> exportInterviewPdf(@PathVariable String sessionId) {
         try {
             byte[] pdfBytes = historyService.exportInterviewPdf(sessionId);
-            String filename = URLEncoder.encode("模拟面试报告_" + sessionId + ".pdf", 
-                StandardCharsets.UTF_8);
-            
-            return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
-                .contentType(MediaType.APPLICATION_PDF)
-                .body(pdfBytes);
+            return AttachmentResponseBuilder.pdf("模拟面试报告_" + sessionId + ".pdf", pdfBytes);
         } catch (Exception e) {
-            log.error("导出PDF失败", e);
-            return ResponseEntity.internalServerError().build();
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            log.error("导出PDF失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出面试报告失败", e);
         }
     }
     

@@ -11,7 +11,14 @@ import type { InterviewSchedule } from '../../types/interviewSchedule';
 import { InterviewEvent } from './InterviewEvent';
 
 const localizer = dayjsLocalizer(dayjs);
-const DnDCalendar = withDragAndDrop(Calendar);
+
+export interface CalendarInterviewEvent extends InterviewSchedule {
+  title: string;
+  start: Date;
+  end: Date;
+}
+
+const DnDCalendar = withDragAndDrop<CalendarInterviewEvent>(Calendar);
 
 interface ScheduleCalendarProps {
   interviews: InterviewSchedule[];
@@ -20,8 +27,8 @@ interface ScheduleCalendarProps {
   onViewChange: (view: View) => void;
   date: Date;
   onDateChange: (date: Date) => void;
-  onEventDrop?: (data: EventInteractionArgs<object>) => void;
-  onEventResize?: (data: EventInteractionArgs<object>) => void;
+  onEventDrop?: (data: EventInteractionArgs<CalendarInterviewEvent>) => void;
+  onEventResize?: (data: EventInteractionArgs<CalendarInterviewEvent>) => void;
 }
 
 export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
@@ -35,7 +42,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   onEventResize,
 }) => {
   // Filter out invalid interviews and convert to events
-  const events = interviews
+  const events: CalendarInterviewEvent[] = interviews
     .filter(interview => {
       if (!interview.interviewTime) return false;
       const d = dayjs(interview.interviewTime);
@@ -122,8 +129,8 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
       `${dayjs(start).format('HH:mm')} - ${dayjs(end).format('HH:mm')}`,
   };
 
-  const handleSelectEvent = (event: object) => {
-    onSelectEvent(event as InterviewSchedule);
+  const handleSelectEvent = (event: CalendarInterviewEvent) => {
+    onSelectEvent(event);
   };
 
   return (
@@ -139,8 +146,8 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
           onView={onViewChange}
           date={date}
           onNavigate={onDateChange}
-          startAccessor={(event: any) => event.start}
-          endAccessor={(event: any) => event.end}
+          startAccessor="start"
+          endAccessor="end"
           min={finalMinTime}
           max={finalMaxTime}
           step={30}
@@ -148,7 +155,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
           style={{ height: 800 }}
           eventPropGetter={eventStyleGetter}
           components={{
-            event: InterviewEvent as any,
+            event: InterviewEvent,
           }}
           formats={formats}
           onSelectEvent={handleSelectEvent}

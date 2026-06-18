@@ -89,7 +89,7 @@ public class StreamMetricsReporter {
                 holder(p.name() + ":dlq").set(
                     redisService.streamLen(p.streamKey() + AsyncTaskStreamConstants.DLQ_STREAM_SUFFIX));
             } catch (Exception e) {
-                log.debug("刷新 Stream 指标失败: pipeline={}, error={}", p.name(), e.getMessage());
+                log.debug("刷新 Stream 指标失败: pipeline={}, error={}", p.name(), e.getMessage(), e);
             }
         }
     }

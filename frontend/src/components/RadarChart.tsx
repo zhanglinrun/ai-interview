@@ -20,6 +20,32 @@ interface RadarChartProps {
   className?: string;
 }
 
+const getTooltipScores = (props: unknown) => {
+  const defaultScores = { originalScore: 0, originalFullMark: 40 };
+  if (!props || typeof props !== 'object' || !('payload' in props)) {
+    return defaultScores;
+  }
+
+  const payload = (props as { payload?: unknown }).payload;
+  if (!payload || typeof payload !== 'object') {
+    return defaultScores;
+  }
+
+  const scoreRecord = payload as {
+    originalScore?: unknown;
+    originalFullMark?: unknown;
+  };
+
+  return {
+    originalScore: typeof scoreRecord.originalScore === 'number'
+      ? scoreRecord.originalScore
+      : defaultScores.originalScore,
+    originalFullMark: typeof scoreRecord.originalFullMark === 'number'
+      ? scoreRecord.originalFullMark
+      : defaultScores.originalFullMark,
+  };
+};
+
 /**
  * 雷达图组件（自动归一化到统一比例）
  */
@@ -86,9 +112,8 @@ export default function RadarChart({ data, height = 320, className = '' }: Radar
               borderRadius: '12px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
             }}
-            formatter={(_value: number | undefined, _name: string | undefined, props: any) => {
-              const originalScore = props?.payload?.originalScore ?? 0;
-              const originalFullMark = props?.payload?.originalFullMark ?? 40;
+            formatter={(_value: number | undefined, _name: string | undefined, props: unknown) => {
+              const { originalScore, originalFullMark } = getTooltipScores(props);
                 const percentage = originalFullMark > 0
                     ? Math.round((originalScore / originalFullMark) * 100)
                 : 0;

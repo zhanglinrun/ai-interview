@@ -1,13 +1,17 @@
-import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import {knowledgeBaseApi, type KnowledgeBaseItem, type SortOption} from '../api/knowledgebase';
 import {ragChatApi, type RagChatSessionListItem} from '../api/ragChat';
-import {formatDateOnly} from '../utils/date';
+import {getErrorMessage} from '../api/request';
+import {formatTimeAgo} from '../utils/date';
+import {formatFileSize} from '../utils/format';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import CodeBlock from '../components/CodeBlock';
+import {EmptyState, LoadingState} from '../components/PageState';
 import {ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2,} from 'lucide-react';
 
 interface KnowledgeBaseQueryPageProps {
@@ -62,18 +66,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
 
   const [, startTransition] = useTransition();
 
-  useEffect(() => {
-    loadKnowledgeBases();
-    loadSessions();
-  }, []);
-
-  useEffect(() => {
-    if (!searchKeyword) {
-      loadKnowledgeBases();
-    }
-  }, [sortBy]);
-
-  const loadKnowledgeBases = async () => {
+  const loadKnowledgeBases = useCallback(async () => {
     setLoadingList(true);
     try {
       // 问答助手只显示向量化完成的知识库
@@ -84,7 +77,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     } finally {
       setLoadingList(false);
     }
-  };
+  }, [sortBy]);
 
   const handleSearch = async () => {
     if (!searchKeyword.trim()) {
@@ -107,10 +100,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
 
     knowledgeBases.forEach(kb => {
       const category = kb.category || '未分类';
-      if (!groups.has(category)) {
-        groups.set(category, []);
-      }
-      groups.get(category)!.push(kb);
+      const items = groups.get(category) ?? [];
+      items.push(kb);
+      groups.set(category, items);
     });
 
     const result: CategoryGroup[] = [];
@@ -121,9 +113,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     });
 
     sortedCategories.forEach(name => {
+      const items = groups.get(name) ?? [];
       result.push({
         name,
-        items: groups.get(name)!,
+        items,
         isExpanded: expandedCategories.has(name),
       });
     });
@@ -143,7 +136,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     });
   };
 
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     setLoadingSessions(true);
     try {
       const list = await ragChatApi.listSessions();
@@ -153,7 +146,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     } finally {
       setLoadingSessions(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    if (!searchKeyword) {
+      loadKnowledgeBases();
+    }
+  }, [loadKnowledgeBases, searchKeyword]);
 
   const handleToggleKb = (kbId: number) => {
     setSelectedKbIds(prev => {
@@ -325,36 +328,15 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         (error: Error) => {
           console.error('流式查询失败:', error);
-          updateAssistantMessage(fullContent || error.message || '回答失败，请重试');
+          updateAssistantMessage(fullContent || getErrorMessage(error, '回答失败，请重试'));
           setLoading(false);
         }
       );
     } catch (err) {
       console.error('发起流式查询失败:', err);
-      updateAssistantMessage(err instanceof Error ? err.message : '回答失败，请重试');
+      updateAssistantMessage(getErrorMessage(err, '回答失败，请重试'));
       setLoading(false);
     }
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
-  const formatTimeAgo = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return '刚刚';
-    if (minutes < 60) return `${minutes} 分钟前`;
-    if (hours < 24) return `${hours} 小时前`;
-    if (days < 7) return `${days} 天前`;
-    return formatDateOnly(dateStr);
   };
 
   return (
@@ -406,17 +388,13 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
 
             <div className="flex-1 overflow-y-auto">
               {loadingSessions ? (
-                <div className="text-center py-6">
-                  <motion.div
-                    className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full mx-auto"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  />
-                </div>
+                <LoadingState compact />
               ) : sessions.length === 0 ? (
-                  <div className="text-center py-6 text-slate-400 dark:text-slate-500 text-sm">
-                  暂无对话历史
-                </div>
+                <EmptyState
+                  className="text-center py-6 text-slate-400 dark:text-slate-500"
+                  title="暂无对话历史"
+                  titleClassName="text-sm"
+                />
               ) : (
                 <div className="space-y-2">
                   {sessions.map((session) => (
@@ -609,9 +587,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
             ) : (
                 <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-slate-500">
                 <div className="text-center">
-                  <svg className="w-12 h-12 mx-auto mb-3 opacity-50" viewBox="0 0 24 24" fill="none">
-                    <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p className="text-sm">请先在右侧选择知识库</p>
                 </div>
               </div>
@@ -661,40 +637,34 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
 
                 {/* 排序 */}
                 <div className="mb-3">
-                  <select
+                  <KnowledgeBaseSortSelect
                     value={sortBy}
-                    onChange={(e) => {
-                      setSortBy(e.target.value as SortOption);
+                    onChange={(value) => {
+                      setSortBy(value);
                       setSearchKeyword('');
                     }}
-                    className="w-full px-2 py-1 text-xs border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300"
-                  >
-                    <option value="time">时间排序</option>
-                    <option value="size">大小排序</option>
-                    <option value="access">访问排序</option>
-                    <option value="question">提问排序</option>
-                  </select>
+                    compact
+                  />
                 </div>
 
                 {/* 知识库列表 */}
                 <div className="flex-1 overflow-y-auto">
                   {loadingList ? (
-                    <div className="text-center py-6">
-                      <motion.div
-                        className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full mx-auto"
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      />
-                    </div>
+                    <LoadingState compact />
                   ) : knowledgeBases.length === 0 ? (
-                      <div className="text-center py-6 text-slate-500 dark:text-slate-400">
-                      <p className="mb-2 text-sm">{searchKeyword ? '未找到' : '暂无知识库'}</p>
-                      {!searchKeyword && (
-                        <button onClick={onUpload} className="text-primary-500 hover:text-primary-600 font-medium text-sm">
+                    <EmptyState
+                      className="text-center py-6 text-slate-500 dark:text-slate-400"
+                      title={searchKeyword ? '未找到' : '暂无知识库'}
+                      titleClassName="mb-2 text-sm"
+                      action={!searchKeyword && (
+                        <button
+                          onClick={onUpload}
+                          className="text-primary-500 hover:text-primary-600 font-medium text-sm"
+                        >
                           立即上传
                         </button>
                       )}
-                    </div>
+                    />
                   ) : (
                     <div className="space-y-2">
                       {groupedKnowledgeBases.map((group) => (
@@ -776,7 +746,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       {/* 删除会话确认弹窗 */}
       <DeleteConfirmDialog
         open={!!sessionDeleteConfirm}
-        item={sessionDeleteConfirm ? { id: 0, title: sessionDeleteConfirm.title } : null}
+        item={sessionDeleteConfirm ? { title: sessionDeleteConfirm.title } : null}
         itemType="对话"
         onConfirm={handleDeleteSession}
         onCancel={() => setSessionDeleteConfirm(null)}

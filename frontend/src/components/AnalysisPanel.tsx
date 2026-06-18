@@ -2,12 +2,78 @@ import {useMemo} from 'react';
 import {motion} from 'framer-motion';
 import RadarChart from './RadarChart';
 import ScoreProgressBar from './ScoreProgressBar';
+import LoadingButtonContent from './LoadingButtonContent';
+import {EmptyState} from './PageState';
 import {formatDateTime} from '../utils/date';
+import {
+  isAnalyzeStatusFailed,
+  isAnalyzeStatusRunning,
+  shouldPollAnalyzeResult,
+} from '../utils/analyzeStatus';
 import {AlertCircle, CheckCircle2, Clock, Download, Loader2, RefreshCw, Target, TrendingUp,} from 'lucide-react';
-import type {AnalyzeStatus} from '../api/history';
+import type {AnalysisItem, AnalyzeStatus} from '../api/history';
+import type {Suggestion} from '../types/resume';
+
+type SuggestionPriority = Suggestion['priority'];
+
+type PriorityStyle = {
+  cardClassName: string;
+  badgeClassName: string;
+  headerBgClassName: string;
+  headerTextClassName: string;
+  dividerClassName: string;
+};
+
+type SuggestionsByPriority = {
+  high: Suggestion[];
+  medium: Suggestion[];
+  low: Suggestion[];
+};
+
+const EMPTY_SUGGESTIONS_BY_PRIORITY: SuggestionsByPriority = {
+  high: [],
+  medium: [],
+  low: [],
+};
+
+const PRIORITY_STYLES: Record<SuggestionPriority, PriorityStyle> = {
+  '高': {
+    cardClassName: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400',
+    badgeClassName: 'bg-red-500 text-white',
+    headerBgClassName: 'bg-red-100 dark:bg-red-900/50',
+    headerTextClassName: 'text-red-700 dark:text-red-300',
+    dividerClassName: 'bg-red-100 dark:bg-red-900/50',
+  },
+  '中': {
+    cardClassName: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400',
+    badgeClassName: 'bg-amber-500 text-white',
+    headerBgClassName: 'bg-amber-100 dark:bg-amber-900/50',
+    headerTextClassName: 'text-amber-700 dark:text-amber-300',
+    dividerClassName: 'bg-amber-100 dark:bg-amber-900/50',
+  },
+  '低': {
+    cardClassName: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400',
+    badgeClassName: 'bg-blue-500 text-white',
+    headerBgClassName: 'bg-blue-100 dark:bg-blue-900/50',
+    headerTextClassName: 'text-blue-700 dark:text-blue-300',
+    dividerClassName: 'bg-blue-100 dark:bg-blue-900/50',
+  },
+};
+
+const CATEGORY_BADGE_CLASS: Record<string, string> = {
+  '项目': 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300',
+  '技能': 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300',
+  '内容': 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300',
+  '格式': 'bg-pink-100 dark:bg-pink-900/50 text-pink-700 dark:text-pink-300',
+  '结构': 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300',
+  '表达': 'bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300',
+};
+
+const DEFAULT_CATEGORY_BADGE_CLASS =
+  'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300';
 
 interface AnalysisPanelProps {
-  analysis: any;
+  analysis: AnalysisItem | null | undefined;
   analyzeStatus?: AnalyzeStatus;
   analyzeError?: string;
   onExport: () => void;
@@ -75,53 +141,14 @@ export default function AnalysisPanel({
 
   // 按优先级分类建议
   const suggestionsByPriority = useMemo(() => {
-    if (!analysis?.suggestions) return { high: [], medium: [], low: [] };
+    if (!analysis?.suggestions) return EMPTY_SUGGESTIONS_BY_PRIORITY;
 
-    const suggestions = analysis.suggestions;
     return {
-      high: suggestions.filter((s: any) => s.priority === '高'),
-      medium: suggestions.filter((s: any) => s.priority === '中'),
-      low: suggestions.filter((s: any) => s.priority === '低')
+      high: analysis.suggestions.filter((s) => s.priority === '高'),
+      medium: analysis.suggestions.filter((s) => s.priority === '中'),
+      low: analysis.suggestions.filter((s) => s.priority === '低')
     };
   }, [analysis]);
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case '高':
-        return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400';
-      case '中':
-        return 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400';
-      case '低':
-        return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400';
-      default:
-        return 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300';
-    }
-  };
-
-  const getPriorityBadgeColor = (priority: string) => {
-    switch (priority) {
-      case '高':
-        return 'bg-red-500 text-white';
-      case '中':
-        return 'bg-amber-500 text-white';
-      case '低':
-        return 'bg-blue-500 text-white';
-      default:
-        return 'bg-slate-500 text-white';
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      '项目': 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300',
-      '技能': 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300',
-      '内容': 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300',
-      '格式': 'bg-pink-100 dark:bg-pink-900/50 text-pink-700 dark:text-pink-300',
-      '结构': 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300',
-      '表达': 'bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300'
-    };
-    return colors[category] || 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300';
-  };
 
   // 检测分析结果是否有效
   const hasErrorKeywords = analysis?.summary && (
@@ -137,65 +164,76 @@ export default function AnalysisPanel({
     !hasErrorKeywords;
 
   // 判断是否为"分析中"状态
-  const isProcessing = analyzeStatus === 'PENDING' ||
-    analyzeStatus === 'PROCESSING' ||
-    (analyzeStatus === undefined && !analysis);
+  const isProcessing = shouldPollAnalyzeResult(analyzeStatus, Boolean(analysis));
 
   // 处理分析中状态
   if (isProcessing) {
-    const isExplicitProcessing = analyzeStatus === 'PROCESSING';
+    const isExplicitProcessing = isAnalyzeStatusRunning(analyzeStatus);
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
-          <div
-              className="w-16 h-16 mx-auto mb-6 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
-          {isExplicitProcessing ? (
-              <Loader2 className="w-8 h-8 text-blue-500 dark:text-blue-400 animate-spin"/>
-          ) : (
-              <Clock className="w-8 h-8 text-yellow-500 dark:text-yellow-400"/>
-          )}
-        </div>
-          <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">
-          {isExplicitProcessing ? 'AI 正在分析中...' : '等待分析'}
-        </h3>
-          <p className="text-slate-500 dark:text-slate-400 mb-4">
-          {isExplicitProcessing
-            ? '请稍候，AI 正在对您的简历进行深度分析'
-            : '简历已上传成功，即将开始 AI 分析'}
-        </p>
-          <p className="text-sm text-slate-400 dark:text-slate-500">页面将自动刷新显示分析结果</p>
-      </div>
+      <EmptyState
+        iconNode={
+          <div className="w-16 h-16 mx-auto mb-6 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
+            {isExplicitProcessing ? (
+              <Loader2 className="w-8 h-8 text-blue-500 dark:text-blue-400 animate-spin" />
+            ) : (
+              <Clock className="w-8 h-8 text-yellow-500 dark:text-yellow-400" />
+            )}
+          </div>
+        }
+        title={isExplicitProcessing ? 'AI 正在分析中...' : '等待分析'}
+        description={isExplicitProcessing
+          ? '请稍候，AI 正在对您的简历进行深度分析'
+          : '简历已上传成功，即将开始 AI 分析'}
+        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+        descriptionClassName="text-slate-500 dark:text-slate-400 mb-4"
+        action={<p className="text-sm text-slate-400 dark:text-slate-500">页面将自动刷新显示分析结果</p>}
+      />
     );
   }
 
   // 处理分析失败状态
-  if (analyzeStatus === 'FAILED' || !isAnalysisValid) {
+  if (isAnalyzeStatusFailed(analyzeStatus) || !isAnalysisValid) {
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
-          <div
-              className="w-16 h-16 mx-auto mb-6 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center">
-            <AlertCircle className="w-8 h-8 text-red-500 dark:text-red-400"/>
-        </div>
-          <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">分析失败</h3>
-          <p className="text-slate-500 dark:text-slate-400 mb-4">AI 服务暂时不可用，请稍后重试</p>
-        {(analyzeError || analysis?.summary) && (
-            <div
-                className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-left mb-4">
-              <p className="text-sm text-red-600 dark:text-red-400">{analyzeError || analysis.summary}</p>
+      <EmptyState
+        iconNode={
+          <div className="w-16 h-16 mx-auto mb-6 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-red-500 dark:text-red-400" />
           </div>
-        )}
-        {onReanalyze && (
-          <motion.button
-            onClick={onReanalyze}
-            disabled={reanalyzing}
-            className="px-6 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <RefreshCw className={`w-4 h-4 ${reanalyzing ? 'animate-spin' : ''}`} />
-            {reanalyzing ? '重新分析中...' : '重新分析'}
-          </motion.button>
-        )}
-      </div>
+        }
+        title="分析失败"
+        description="AI 服务暂时不可用，请稍后重试"
+        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+        descriptionClassName="text-slate-500 dark:text-slate-400 mb-4"
+        action={
+          <>
+            {(analyzeError || analysis?.summary) && (
+              <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-left mb-4">
+                <p className="text-sm text-red-600 dark:text-red-400">{analyzeError || analysis?.summary}</p>
+              </div>
+            )}
+            {onReanalyze && (
+              <motion.button
+                onClick={onReanalyze}
+                disabled={reanalyzing}
+                className="px-6 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <LoadingButtonContent
+                  loading={Boolean(reanalyzing)}
+                  loadingText="重新分析中..."
+                  className="inline-flex items-center gap-2"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4" />
+                    重新分析
+                  </span>
+                </LoadingButtonContent>
+              </motion.button>
+            )}
+          </>
+        }
+      />
     );
   }
 
@@ -228,8 +266,15 @@ export default function AnalysisPanel({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <Download className="w-4 h-4" />
-              {exporting ? '导出中...' : '导出分析报告'}
+              <LoadingButtonContent
+                loading={exporting}
+                loadingText="导出中..."
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  导出分析报告
+                </span>
+              </LoadingButtonContent>
             </motion.button>
           </div>
 
@@ -349,9 +394,6 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="高"
               suggestions={suggestionsByPriority.high}
-              getPriorityColor={getPriorityColor}
-              getPriorityBadgeColor={getPriorityBadgeColor}
-              getCategoryColor={getCategoryColor}
               delay={0.4}
             />
           )}
@@ -361,9 +403,6 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="中"
               suggestions={suggestionsByPriority.medium}
-              getPriorityColor={getPriorityColor}
-              getPriorityBadgeColor={getPriorityBadgeColor}
-              getCategoryColor={getCategoryColor}
               delay={0.5}
             />
           )}
@@ -373,15 +412,16 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="低"
               suggestions={suggestionsByPriority.low}
-              getPriorityColor={getPriorityColor}
-              getPriorityBadgeColor={getPriorityBadgeColor}
-              getCategoryColor={getCategoryColor}
               delay={0.6}
             />
           )}
 
           {analysis.suggestions?.length === 0 && (
-              <div className="text-center py-8 text-slate-500 dark:text-slate-400">暂无改进建议</div>
+            <EmptyState
+              title="暂无改进建议"
+              className="text-center py-8"
+              titleClassName="text-slate-500 dark:text-slate-400"
+            />
           )}
         </div>
       </motion.div>
@@ -393,66 +433,42 @@ export default function AnalysisPanel({
 function SuggestionSection({
   priority,
   suggestions,
-  getPriorityColor,
-  getPriorityBadgeColor,
-  getCategoryColor,
   delay
 }: {
-  priority: string;
-  suggestions: any[];
-  getPriorityColor: (p: string) => string;
-  getPriorityBadgeColor: (p: string) => string;
-  getCategoryColor: (c: string) => string;
+  priority: SuggestionPriority;
+  suggestions: Suggestion[];
   delay: number;
 }) {
-  const priorityColors: Record<string, { bg: string; text: string; border: string }> = {
-    '高': {
-      bg: 'bg-red-100 dark:bg-red-900/50',
-      text: 'text-red-700 dark:text-red-300',
-      border: 'bg-red-100 dark:bg-red-900/50'
-    },
-    '中': {
-      bg: 'bg-amber-100 dark:bg-amber-900/50',
-      text: 'text-amber-700 dark:text-amber-300',
-      border: 'bg-amber-100 dark:bg-amber-900/50'
-    },
-    '低': {
-      bg: 'bg-blue-100 dark:bg-blue-900/50',
-      text: 'text-blue-700 dark:text-blue-300',
-      border: 'bg-blue-100 dark:bg-blue-900/50'
-    }
-  };
-
-  const colors = priorityColors[priority] || priorityColors['中'];
+  const styles = PRIORITY_STYLES[priority];
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
-        <span className={`px-3 py-1 ${colors.bg} ${colors.text} rounded-full text-sm font-semibold`}>
+        <span className={`px-3 py-1 ${styles.headerBgClassName} ${styles.headerTextClassName} rounded-full text-sm font-semibold`}>
           {priority}优先级 ({suggestions.length})
         </span>
-        <div className={`flex-1 h-px ${colors.border}`}></div>
+        <div className={`flex-1 h-px ${styles.dividerClassName}`}></div>
       </div>
       <div className="space-y-3">
-        {suggestions.map((s: any, i: number) => (
+        {suggestions.map((s, i) => (
             <motion.div
             key={`${priority}-${i}`}
-            className={`p-4 rounded-xl border-2 ${getPriorityColor(priority)}`}
+            className={`p-4 rounded-xl border-2 ${styles.cardClassName}`}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: delay + i * 0.1 }}
           >
             <div className="flex items-start gap-3 mb-2">
-              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${getPriorityBadgeColor(priority)}`}>
+              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${styles.badgeClassName}`}>
                 {priority}
               </span>
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${getCategoryColor(s.category || '其他')}`}>
+              <span className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_BADGE_CLASS[s.category || '其他'] || DEFAULT_CATEGORY_BADGE_CLASS}`}>
                 {s.category || '其他'}
               </span>
             </div>
             <div className="mb-2">
               <p className="font-semibold text-slate-900 dark:text-white mb-1">{s.issue || '问题描述'}</p>
-              <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{s.recommendation || s}</p>
+              <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{s.recommendation || '暂无具体建议'}</p>
             </div>
           </motion.div>
         ))}

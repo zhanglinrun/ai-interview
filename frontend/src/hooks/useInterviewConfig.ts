@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import { skillApi, type SkillDTO, type CategoryDTO } from '../api/skill';
 import { historyApi, type ResumeListItem } from '../api/history';
+import {getErrorMessage} from '../api/request';
 import { getSkillIcon } from '../utils/skillIcons';
 
 export type InterviewMode = 'text' | 'voice';
@@ -65,7 +66,7 @@ export function useInterviewConfig(options?: {
   const isCustomStartDisabled = isCustomSkill
     && (customCategories.length === 0 || jdNeedsReparse || parsingJd);
 
-  const loadSkills = async () => {
+  const loadSkills = useCallback(async () => {
     setLoadingSkills(true);
     try {
       const data = await skillApi.listSkills();
@@ -77,18 +78,18 @@ export function useInterviewConfig(options?: {
     } finally {
       setLoadingSkills(false);
     }
-  };
+  }, []);
 
-  const loadResumes = async () => {
+  const loadResumes = useCallback(async () => {
     try {
       const data = await historyApi.getResumes();
       setResumes(data);
     } catch (err) {
       console.error('Failed to load resumes:', err);
     }
-  };
+  }, []);
 
-  const handleParseJd = async () => {
+  const handleParseJd = useCallback(async () => {
     if (!customJdText || customJdText.length < MIN_JD_LENGTH) {
       alert(`JD 内容太少（至少 ${MIN_JD_LENGTH} 字），请补充后重试`);
       return;
@@ -98,12 +99,12 @@ export function useInterviewConfig(options?: {
       const categories = await skillApi.parseJd(customJdText);
       setCustomCategories(categories);
       setParsedCustomJdText(customJdText);
-    } catch {
-      alert('JD 解析失败，请重试或选择预设主题');
+    } catch (err) {
+      alert(getErrorMessage(err, 'JD 解析失败，请重试或选择预设主题'));
     } finally {
       setParsingJd(false);
     }
-  };
+  }, [customJdText]);
 
   useEffect(() => {
     if (autoLoad) {
@@ -115,8 +116,7 @@ export function useInterviewConfig(options?: {
       loadSkills();
       loadResumes();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoLoad, defaultMode, defaultResumeId]);
+  }, [autoLoad, defaultMode, defaultResumeId, loadResumes, loadSkills]);
 
   return {
     // State

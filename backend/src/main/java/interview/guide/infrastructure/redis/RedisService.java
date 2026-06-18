@@ -282,7 +282,8 @@ public class RedisService {
                     && e.getMessage().contains("BUSYGROUP")) {
                 return;
             }
-            log.warn("创建消费者组失败: stream={}, group={}, error={}", streamKey, groupName, e.getMessage());
+            log.warn("创建消费者组失败: stream={}, group={}, error={}",
+                streamKey, groupName, e.getMessage(), e);
         }
     }
 
@@ -386,7 +387,8 @@ public class RedisService {
             return messages != null ? messages : Map.of();
         } catch (Exception e) {
             // 组/流尚未创建或 Redis 临时异常时，认领是尽力而为的补偿动作，失败不应中断主消费循环。
-            log.warn("autoClaim 失败: stream={}, group={}, error={}", streamKey, groupName, e.getMessage());
+            log.warn("autoClaim 失败: stream={}, group={}, error={}",
+                streamKey, groupName, e.getMessage(), e);
             return Map.of();
         }
     }

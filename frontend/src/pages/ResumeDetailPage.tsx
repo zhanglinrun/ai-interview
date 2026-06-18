@@ -2,10 +2,16 @@ import {useCallback, useEffect, useState} from 'react';
 import {useLocation} from 'react-router-dom';
 import {AnimatePresence, motion} from 'framer-motion';
 import {historyApi, InterviewDetail, ResumeDetail} from '../api/history';
+import {getErrorMessage} from '../api/request';
 import AnalysisPanel from '../components/AnalysisPanel';
 import InterviewPanel from '../components/InterviewPanel';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
+import LoadingButtonContent from '../components/LoadingButtonContent';
+import {EmptyState, LoadingState} from '../components/PageState';
 import {formatDateOnly} from '../utils/date';
+import {downloadBlob} from '../utils/download';
+import {shouldPollAnalyzeResult} from '../utils/analyzeStatus';
+import {NORMAL_POLLING_INTERVAL_MS, useConditionalPolling} from '../hooks/useConditionalPolling';
 import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'lucide-react';
 
 interface ResumeDetailPageProps {
@@ -16,6 +22,15 @@ interface ResumeDetailPageProps {
 
 type TabType = 'analysis' | 'interview';
 type DetailViewType = 'list' | 'interviewDetail';
+
+const EXPORT_ERROR_MESSAGE = '导出失败，请重试';
+
+function getTabs(interviewCount: number) {
+  return [
+    { id: 'analysis' as const, label: '简历分析', icon: CheckSquare },
+    { id: 'interview' as const, label: '面试记录', icon: MessageSquare, count: interviewCount },
+  ];
+}
 
 export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }: ResumeDetailPageProps) {
   const location = useLocation();
@@ -57,21 +72,15 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
 
   // 轮询：当分析状态为待处理时，每5秒刷新一次
   // 待处理判断：显式的 PENDING/PROCESSING 状态，或状态未定义且无分析结果
-  useEffect(() => {
-    const isProcessing = resume && (
-      resume.analyzeStatus === 'PENDING' ||
-      resume.analyzeStatus === 'PROCESSING' ||
-      (resume.analyzeStatus === undefined && (!resume.analyses || resume.analyses.length === 0))
-    );
-
-    if (isProcessing && !loading) {
-      const timer = setInterval(() => {
-        loadResumeDetailSilent();
-      }, 5000);
-
-      return () => clearInterval(timer);
-    }
-  }, [resume, loading, loadResumeDetailSilent]);
+  const isAnalysisProcessing = Boolean(resume) && shouldPollAnalyzeResult(
+    resume?.analyzeStatus,
+    Boolean(resume?.analyses?.length)
+  );
+  useConditionalPolling(
+    isAnalysisProcessing && !loading,
+    loadResumeDetailSilent,
+    NORMAL_POLLING_INTERVAL_MS
+  );
 
   // 重新分析
   const handleReanalyze = async () => {
@@ -113,16 +122,9 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
     setExporting('analysis');
     try {
       const blob = await historyApi.exportAnalysisPdf(resumeId);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `简历分析报告_${resume?.filename || resumeId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      downloadBlob(blob, `简历分析报告_${resume?.filename || resumeId}.pdf`);
     } catch (err) {
-      alert('导出失败，请重试');
+      alert(getErrorMessage(err, EXPORT_ERROR_MESSAGE));
     } finally {
       setExporting(null);
     }
@@ -132,16 +134,9 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
     setExporting(sessionId);
     try {
       const blob = await historyApi.exportInterviewPdf(sessionId);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `面试报告_${sessionId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      downloadBlob(blob, `面试报告_${sessionId}.pdf`);
     } catch (err) {
-      alert('导出失败，请重试');
+      alert(getErrorMessage(err, EXPORT_ERROR_MESSAGE));
     } finally {
       setExporting(null);
     }
@@ -154,7 +149,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       setSelectedInterview(detail);
       setDetailView('interviewDetail');
     } catch (err) {
-      alert('加载面试详情失败');
+      alert(getErrorMessage(err, '加载面试详情失败'));
     } finally {
       setLoadingInterview(false);
     }
@@ -200,30 +195,28 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-          <motion.div
-              className="w-12 h-12 border-4 border-slate-200 dark:border-slate-600 border-t-primary-500 rounded-full"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-        />
-      </div>
+      <LoadingState
+        className="flex items-center justify-center h-96"
+        spinnerClassName="w-12 h-12 text-primary-500 animate-spin"
+      />
     );
   }
 
   if (!resume) {
     return (
-      <div className="text-center py-20">
-        <p className="text-red-500 mb-4">加载失败，请返回重试</p>
+      <EmptyState
+        title="加载失败，请返回重试"
+        className="text-center py-20"
+        titleClassName="text-red-500 mb-4"
+        action={
         <button onClick={onBack} className="px-6 py-2 bg-primary-500 text-white rounded-lg">返回列表</button>
-      </div>
+        }
+      />
     );
   }
 
   const latestAnalysis = resume.analyses?.[0];
-  const tabs = [
-    { id: 'analysis' as const, label: '简历分析', icon: CheckSquare },
-    { id: 'interview' as const, label: '面试记录', icon: MessageSquare, count: resume.interviews?.length || 0 },
-  ];
+  const tabs = getTabs(resume.interviews?.length || 0);
 
   return (
     <motion.div
@@ -265,8 +258,15 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <Download className="w-4 h-4" />
-              {exporting === selectedInterview.sessionId ? '导出中...' : '导出 PDF'}
+              <LoadingButtonContent
+                loading={exporting === selectedInterview.sessionId}
+                loadingText="导出中..."
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  导出 PDF
+                </span>
+              </LoadingButtonContent>
             </motion.button>
           )}
           {detailView !== 'interviewDetail' && (

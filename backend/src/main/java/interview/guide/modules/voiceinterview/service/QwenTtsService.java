@@ -364,7 +364,7 @@ public class QwenTtsService {
         }
     }
 
-    // Setter methods for configuration (used by Spring @Value injection or tests)
+    // Setter methods for runtime configuration refresh and tests.
 
     public void setModel(String model) {
         this.model = model;

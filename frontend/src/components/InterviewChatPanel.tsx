@@ -1,27 +1,19 @@
 import {useMemo, useRef} from 'react';
 import {motion} from 'framer-motion';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
-import type {InterviewQuestion, InterviewSession} from '../types/interview';
+import type {InterviewMessage, InterviewQuestion, InterviewSession} from '../types/interview';
 import {Send} from 'lucide-react';
 import InterviewMessageBubble from './InterviewMessageBubble';
-
-interface Message {
-  type: 'interviewer' | 'user';
-  content: string;
-  category?: string;
-  questionIndex?: number;
-}
+import LoadingButtonContent from './LoadingButtonContent';
 
 interface InterviewChatPanelProps {
   session: InterviewSession;
   currentQuestion: InterviewQuestion | null;
-  messages: Message[];
+  messages: InterviewMessage[];
   answer: string;
   onAnswerChange: (answer: string) => void;
   onSubmit: () => void;
-  onCompleteEarly: () => void;
   isSubmitting: boolean;
-  showCompleteConfirm: boolean;
   onShowCompleteConfirm: (show: boolean) => void;
 }
 
@@ -35,9 +27,7 @@ export default function InterviewChatPanel({
   answer,
   onAnswerChange,
   onSubmit,
-  // onCompleteEarly, // 暂时未使用
   isSubmitting,
-  // showCompleteConfirm, // 暂时未使用
   onShowCompleteConfirm
 }: InterviewChatPanelProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -116,21 +106,10 @@ export default function InterviewChatPanel({
                 whileHover={{ scale: isSubmitting || !answer.trim() ? 1 : 1.02 }}
                 whileTap={{ scale: isSubmitting || !answer.trim() ? 1 : 0.98 }}
               >
-                {isSubmitting ? (
-                  <>
-                    <motion.div
-                      className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    />
-                    提交中
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    提交
-                  </>
-                )}
+                <LoadingButtonContent loading={isSubmitting} loadingText="提交中">
+                  <Send className="w-4 h-4" />
+                  提交
+                </LoadingButtonContent>
               </motion.button>
               <motion.button
                 onClick={() => onShowCompleteConfirm(true)}

@@ -5,12 +5,14 @@ import { historyApi, type InterviewDetail } from './api/history';
 import type { UploadKnowledgeBaseResponse } from './api/knowledgebase';
 import type { Difficulty } from './components/UnifiedInterviewModal';
 import type { CategoryDTO } from './api/skill';
-import { Loader2 } from 'lucide-react';
+import { EmptyState, LoadingState } from './components/PageState';
 import { ROUTES } from './constants/routes';
+import { ArrowLeft } from 'lucide-react';
+import { formatShortId } from './utils/format';
 
 // Lazy load components
 const UploadPage = lazy(() => import('./pages/UploadPage'));
-const HistoryList = lazy(() => import('./pages/HistoryPage'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 const ResumeDetailPage = lazy(() => import('./pages/ResumeDetailPage'));
 const Interview = lazy(() => import('./pages/InterviewPage'));
 const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
@@ -27,9 +29,10 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 
 // Loading component
 const Loading = () => (
-  <div className="flex items-center justify-center min-h-[50vh]">
-    <div className="w-10 h-10 border-3 border-slate-200 border-t-primary-500 rounded-full animate-spin" />
-  </div>
+  <LoadingState
+    className="flex items-center justify-center min-h-[50vh]"
+    spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+  />
 );
 
 // 上传页面包装器
@@ -44,15 +47,15 @@ function UploadPageWrapper() {
   return <UploadPage onUploadComplete={handleUploadComplete} />;
 }
 
-// 历史记录列表包装器
-function HistoryListWrapper() {
+// 历史记录页包装器
+function HistoryPageWrapper() {
   const navigate = useNavigate();
 
   const handleSelectResume = (id: number) => {
     navigate(`/history/${id}`);
   };
 
-  return <HistoryList onSelectResume={handleSelectResume} />;
+  return <HistoryPage onSelectResume={handleSelectResume} />;
 }
 
 // 简历详情包装器
@@ -143,12 +146,11 @@ function InterviewWrapper() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-10 h-10 border-3 border-slate-200 border-t-primary-500 rounded-full mx-auto mb-4 animate-spin" />
-          <p className="text-slate-500">加载中...</p>
-        </div>
-      </div>
+      <LoadingState
+        label="加载中..."
+        className="flex flex-col items-center justify-center min-h-screen gap-3"
+        spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+      />
     );
   }
 
@@ -177,7 +179,7 @@ function App() {
             <Route path="upload" element={<UploadPageWrapper />} />
 
             {/* 历史记录列表（简历库） */}
-            <Route path="history" element={<HistoryListWrapper />} />
+            <Route path="history" element={<HistoryPageWrapper />} />
 
             {/* 简历详情 */}
             <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
@@ -276,24 +278,26 @@ function InterviewDetailPageWrapper() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
-      </div>
+      <LoadingState className="flex items-center justify-center min-h-[50vh]" />
     );
   }
 
-  if (error || !interview) {
+  if (error || !interview || !sessionId) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <p className="text-red-500 mb-4">{error || '面试记录不存在'}</p>
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <EmptyState
+          title={error || '面试记录不存在'}
+          className="text-center"
+          titleClassName="text-red-500 mb-4"
+          action={
           <button
             onClick={() => navigate('/interviews')}
             className="px-5 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
           >
             返回面试记录
           </button>
-        </div>
+          }
+        />
       </div>
     );
   }
@@ -305,12 +309,10 @@ function InterviewDetailPageWrapper() {
           onClick={() => navigate('/interviews')}
           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-          面试详情 #{sessionId!.slice(-8)}
+          面试详情 #{formatShortId(sessionId)}
         </h1>
       </div>
       <InterviewDetailPanel interview={interview} />

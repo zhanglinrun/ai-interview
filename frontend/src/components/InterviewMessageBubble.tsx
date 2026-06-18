@@ -72,10 +72,7 @@ export default function InterviewMessageBubble({
         </div>
       </div>
       <div className="w-8 h-8 bg-slate-200 dark:bg-slate-600 rounded-full flex items-center justify-center flex-shrink-0">
-        <svg className="w-4 h-4 text-slate-600 dark:text-slate-300" viewBox="0 0 24 24" fill="none">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
-        </svg>
+        <User className="w-4 h-4 text-slate-600 dark:text-slate-300" />
       </div>
     </motion.div>
   );

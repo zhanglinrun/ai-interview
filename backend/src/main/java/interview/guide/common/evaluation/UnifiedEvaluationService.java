@@ -274,7 +274,8 @@ public class UnifiedEvaluationService {
             List<String> improvements = sanitizeItems(dto != null ? dto.improvements() : null, fallbackImprovements);
             return new SummaryDTO(feedback, strengths, improvements);
         } catch (Exception e) {
-            log.warn("二次汇总评估失败，降级到批次聚合结果: sessionId={}, error={}", sessionId, e.getMessage());
+            log.warn("二次汇总评估失败，降级到批次聚合结果: sessionId={}, error={}",
+                sessionId, e.getMessage(), e);
             return new SummaryDTO(fallbackFeedback, fallbackStrengths, fallbackImprovements);
         }
     }
