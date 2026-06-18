@@ -53,6 +53,7 @@ qodana.yaml
 # AI assistant / local tooling
 .claude/
 .codex/
+.codex-run/
 .playwright-mcp/
 CLAUDE.md
 GEMINI.md

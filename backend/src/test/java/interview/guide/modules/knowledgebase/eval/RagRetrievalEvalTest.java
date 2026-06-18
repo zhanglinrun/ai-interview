@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
@@ -105,11 +106,13 @@ class RagRetrievalEvalTest {
     QuerySetResult easy = evaluateQuerySet(questions, allKbIds, sourceToKb, false);
     // 困难查询组
     QuerySetResult hard = evaluateQuerySet(questions, allKbIds, sourceToKb, true);
+    // P3 多路融合 + HyDE 对比只在困难查询组跑（简单查询已近天花板，无区分度）
+    FusionSetResult fusionHard = evaluateFusionSet(questions, allKbIds, true);
     AnswerEvalResult answerEval = answerEvalEnabled
         ? evaluateAnswers(questions, allKbIds, true)
         : AnswerEvalResult.disabled();
 
-    String report = buildReport(questions.size(), easy, hard, answerEval);
+    String report = buildReport(questions.size(), easy, hard, fusionHard, answerEval);
     writeReport(report);
     log.info("\n{}", report);
   }
@@ -140,6 +143,45 @@ class RagRetrievalEvalTest {
       hybridRerank.add(q, score(q, rerankHits));
     }
     return new QuerySetResult(pureVector, hybrid, hybridRerank);
+  }
+
+  /**
+   * P3 多路融合 + HyDE 对比：用反射切换 queryService 的 fusion / hyde 开关，复用其真实检索链路
+   * （含 rewrite、HyDE、多路 RRF 融合、rerank），与基线「混合+rerank」对比。仅在困难查询组跑，
+   * 结束时恢复原开关，避免污染后续档位。
+   */
+  private FusionSetResult evaluateFusionSet(List<EvalQuestion> questions, List<Long> allKbIds,
+                                            boolean useHard) {
+    boolean origFusion = (boolean) ReflectionTestUtils.getField(queryService, "fusionEnabled");
+    boolean origHyde = (boolean) ReflectionTestUtils.getField(queryService, "hydeEnabled");
+    StrategyAccumulator fusionRerank = new StrategyAccumulator("融合+rerank");
+    StrategyAccumulator fusionHydeRerank = new StrategyAccumulator("融合+HyDE+rerank");
+    try {
+      ReflectionTestUtils.setField(queryService, "fusionEnabled", true);
+      // 融合 + rerank（HyDE 关）：原句 / rewrite 两路 RRF 融合
+      ReflectionTestUtils.setField(queryService, "hydeEnabled", false);
+      for (EvalQuestion q : questions) {
+        List<Document> hits = cap(queryService.retrieveForEvaluation(allKbIds, hardQuery(q, useHard)), evalTopK);
+        fusionRerank.add(q, score(q, hits));
+      }
+      // 融合 + HyDE + rerank：再加一路 HyDE 假设文档
+      ReflectionTestUtils.setField(queryService, "hydeEnabled", true);
+      for (EvalQuestion q : questions) {
+        List<Document> hits = cap(queryService.retrieveForEvaluation(allKbIds, hardQuery(q, useHard)), evalTopK);
+        fusionHydeRerank.add(q, score(q, hits));
+      }
+    } finally {
+      ReflectionTestUtils.setField(queryService, "fusionEnabled", origFusion);
+      ReflectionTestUtils.setField(queryService, "hydeEnabled", origHyde);
+    }
+    return new FusionSetResult(fusionRerank, fusionHydeRerank);
+  }
+
+  private String hardQuery(EvalQuestion q, boolean useHard) {
+    if (useHard && q.queryHard != null && !q.queryHard.isBlank()) {
+      return q.queryHard;
+    }
+    return q.question;
   }
 
   private AnswerEvalResult evaluateAnswers(List<EvalQuestion> questions, List<Long> allKbIds,
@@ -285,7 +327,7 @@ class RagRetrievalEvalTest {
   // ==================== 报告 ====================
 
   private String buildReport(int total, QuerySetResult easy, QuerySetResult hard,
-                             AnswerEvalResult answerEval) {
+                             FusionSetResult fusionHard, AnswerEvalResult answerEval) {
     StringBuilder sb = new StringBuilder();
     sb.append("# RAG 检索侧评测报告（第二轮）\n\n");
     sb.append("- 评测集规模：").append(total).append(" 题\n");
@@ -299,12 +341,15 @@ class RagRetrievalEvalTest {
 
     appendQuerySetTable(sb, "## 简单查询（含原文关键词）", easy, total);
     appendQuerySetTable(sb, "## 困难查询（口语化、避开术语）", hard, total);
+    appendFusionTable(sb, "## P3 多路融合 + HyDE 对比（困难查询）", hard.hybridRerank, fusionHard, total);
     appendAnswerEval(sb, answerEval);
 
     sb.append("## 解读\n\n");
     sb.append("- 简单查询下三档接近，是因为查询词与原文高度重合，纯向量已足够；\n");
     sb.append("- 困难查询更能体现混合检索（关键词通道兜底）与 rerank（精排）的增益，");
-    sb.append("对比同组内三行的 MRR / NDCG 变化即为各策略的相对提升。\n");
+    sb.append("对比同组内三行的 MRR / NDCG 变化即为各策略的相对提升；\n");
+    sb.append("- P3 融合（原句 / rewrite / HyDE 多路 RRF）相对单路「混合+rerank」的增益，");
+    sb.append("看「P3 多路融合」表内三行 Hit@1 / MRR / NDCG 的变化。\n");
     return sb.toString();
   }
 
@@ -352,6 +397,28 @@ class RagRetrievalEvalTest {
     sb.append("| 策略 | Hit@1 | Hit@3 | MRR | NDCG@").append(evalTopK).append(" |\n");
     sb.append("|------|-------|-------|-----|--------|\n");
     for (StrategyAccumulator s : List.of(r.pureVector, r.hybrid, r.hybridRerank)) {
+      sb.append("| ").append(s.name)
+          .append(" | ").append(pct(s.hit1Rate(total)))
+          .append(" | ").append(pct(s.hit3Rate(total)))
+          .append(" | ").append(num(s.avgMrr(total)))
+          .append(" | ").append(num(s.avgNdcg(total)))
+          .append(" |\n");
+    }
+    sb.append("\n");
+  }
+
+  private void appendFusionTable(StringBuilder sb, String title, StrategyAccumulator baseline,
+                                 FusionSetResult r, int total) {
+    sb.append(title).append("\n\n");
+    sb.append("| 策略 | Hit@1 | Hit@3 | MRR | NDCG@").append(evalTopK).append(" |\n");
+    sb.append("|------|-------|-------|-----|--------|\n");
+    sb.append("| ").append(baseline.name).append("（基线）")
+        .append(" | ").append(pct(baseline.hit1Rate(total)))
+        .append(" | ").append(pct(baseline.hit3Rate(total)))
+        .append(" | ").append(num(baseline.avgMrr(total)))
+        .append(" | ").append(num(baseline.avgNdcg(total)))
+        .append(" |\n");
+    for (StrategyAccumulator s : List.of(r.fusionRerank, r.fusionHydeRerank)) {
       sb.append("| ").append(s.name)
           .append(" | ").append(pct(s.hit1Rate(total)))
           .append(" | ").append(pct(s.hit3Rate(total)))
@@ -428,6 +495,10 @@ class RagRetrievalEvalTest {
   private record QuerySetResult(StrategyAccumulator pureVector,
                                 StrategyAccumulator hybrid,
                                 StrategyAccumulator hybridRerank) {
+  }
+
+  private record FusionSetResult(StrategyAccumulator fusionRerank,
+                                 StrategyAccumulator fusionHydeRerank) {
   }
 
   private record AnswerScore(double answerCoverage, double faithfulness, boolean noResult) {

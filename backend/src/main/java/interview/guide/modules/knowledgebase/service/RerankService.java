@@ -4,6 +4,7 @@ import interview.guide.common.config.LlmProviderProperties;
 import interview.guide.common.config.LlmProviderProperties.ProviderConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -24,6 +25,7 @@ import java.util.Map;
 @Service
 public class RerankService {
 
+    private static final int DEFAULT_TIMEOUT_MS = 3000;
     private static final String RERANK_PATH =
         "/api/v1/services/rerank/text-rerank/text-rerank";
 
@@ -43,8 +45,13 @@ public class RerankService {
         this.apiKey = dashscope != null ? dashscope.getApiKey() : null;
 
         String baseUrl = "https://dashscope.aliyuncs.com";
+        int timeoutMs = resolveTimeoutMs(rerankProps.getTimeoutMs());
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(timeoutMs);
+        requestFactory.setReadTimeout(timeoutMs);
         this.restClient = RestClient.builder()
             .baseUrl(baseUrl)
+            .requestFactory(requestFactory)
             .build();
 
         this.available = apiKey != null && !apiKey.isBlank();
@@ -72,6 +79,9 @@ public class RerankService {
         int topN = Math.max(1, rerankProps.getTopN());
         if (documents == null || documents.isEmpty()) {
             return List.of();
+        }
+        if (documents.size() <= topN) {
+            return documents;
         }
         if (!isEnabled() || query == null || query.isBlank()) {
             return capList(documents, topN);
@@ -145,5 +155,12 @@ public class RerankService {
             return documents;
         }
         return new ArrayList<>(documents.subList(0, topN));
+    }
+
+    private static int resolveTimeoutMs(long configuredTimeoutMs) {
+        if (configuredTimeoutMs <= 0) {
+            return DEFAULT_TIMEOUT_MS;
+        }
+        return (int) Math.min(configuredTimeoutMs, Integer.MAX_VALUE);
     }
 }

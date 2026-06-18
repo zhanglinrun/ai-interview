@@ -2,7 +2,9 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.security.UserContext;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
+import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository.KeywordHit;
@@ -21,9 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -138,46 +142,69 @@ public class KnowledgeBaseVectorService {
     public void vectorizeAndStore(Long knowledgeBaseId, String content) {
         log.info("开始向量化知识库: kbId={}, contentLength={}", knowledgeBaseId, content.length());
         long startNanos = System.nanoTime();
+        KnowledgeBaseEntity knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId).orElse(null);
+        // 进入处理中状态：前端可据此展示“索引中”并轮询进度，取代上传后只能盲等结果
+        finalizeVectorization(knowledgeBase, knowledgeBaseId, VectorStatus.PROCESSING, null, null);
         try {
-            // 1. 先删除该知识库的旧向量数据（事务方法）
-            deleteByKnowledgeBaseId(knowledgeBaseId);
-            
-            // 2. 将文本分块（本地操作，无需事务）
-            KnowledgeBaseEntity knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId).orElse(null);
-            List<Document> chunks = chunkingService.split(content);
-            
-            log.info("文本分块完成: {} 个chunks", chunks.size());
-            
-            // 3. 为每个 chunk 添加检索、过滤和来源展示所需 metadata
+
+            // 1. 文本分块 + 质量评估：过滤空白/过短噪声 chunk，避免无效 embedding 污染检索
+            KnowledgeBaseChunkingService.ChunkingResult chunkingResult = chunkingService.splitWithQuality(content);
+            List<Document> chunks = chunkingResult.chunks();
+            log.info("文本分块完成: chunks={}, rawChunks={}, filtered={}, documentLength={}, qualityScore={}",
+                    chunks.size(), chunkingResult.rawChunkCount(), chunkingResult.filteredChunkCount(),
+                    chunkingResult.documentLength(), chunkingResult.qualityScore());
+
+            // 2. 为每个 chunk 填充检索/过滤/来源 metadata，并计算内容哈希用于去重与增量
             enrichChunkMetadata(chunks, knowledgeBaseId, knowledgeBase);
-            
-            // 4. 分批向量化并存储（外部 API 调用，不在事务内）
-            int totalChunks = chunks.size();
-            int batchCount = (totalChunks + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
-            log.info("开始分批向量化: 总共 {} 个chunks，分 {} 批处理，每批最多 {} 个",
-                    totalChunks, batchCount, MAX_BATCH_SIZE);
 
-            List<List<Document>> batches = new ArrayList<>(batchCount);
-            for (int i = 0; i < batchCount; i++) {
-                int start = i * MAX_BATCH_SIZE;
-                int end = Math.min(start + MAX_BATCH_SIZE, totalChunks);
-                batches.add(chunks.subList(start, end));
+            // 3. 同文档内按内容哈希去重（重复段落只留首个），再去重后重新编号 chunk_index/chunk_count
+            List<Document> dedupedChunks = dedupChunksByHash(chunks);
+            renumberChunks(dedupedChunks);
+
+            // 4. 增量 diff：对比已入库 chunk 哈希，只处理 delta，不再全量删重建
+            Set<String> existingHashes = vectorRepository.findChunkHashesByKbId(knowledgeBaseId);
+            Set<String> targetHashes = dedupedChunks.stream()
+                    .map(this::chunkHashOf)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            List<Document> toInsert = dedupedChunks.stream()
+                    .filter(chunk -> !existingHashes.contains(chunkHashOf(chunk)))
+                    .collect(Collectors.toList());
+            List<Document> toUpdateMetadata = dedupedChunks.stream()
+                    .filter(chunk -> existingHashes.contains(chunkHashOf(chunk)))
+                    .collect(Collectors.toList());
+            Set<String> staleHashes = existingHashes.stream()
+                    .filter(hash -> !targetHashes.contains(hash))
+                    .collect(Collectors.toSet());
+
+            log.info("增量向量化: 已有={}, 目标={}, 待嵌入={}, 待更新元数据={}, 失效={}",
+                    existingHashes.size(), targetHashes.size(), toInsert.size(),
+                    toUpdateMetadata.size(), staleHashes.size());
+
+            // 5. 删除失效 chunk（旧 split 有、新 split 没有的内容）
+            vectorRepository.deleteHashlessChunksByKbId(knowledgeBaseId);
+            if (!staleHashes.isEmpty()) {
+                vectorRepository.deleteByKbIdAndChunkHashes(knowledgeBaseId, staleHashes);
             }
 
-            // 分块并行：单文档内的多个批次并发提交
-            if (chunkExecutor != null && batchCount > 1) {
-                addBatchesInParallel(batches);
+            // 6. 内容未变的 chunk 复用旧向量，但必须刷新来源、分片序号等 metadata
+            for (Document chunk : toUpdateMetadata) {
+                vectorRepository.updateMetadataByKbIdAndChunkHash(
+                    knowledgeBaseId, chunkHashOf(chunk), chunk.getMetadata());
+            }
+
+            // 7. 仅对新增/变更 chunk 做向量化并入库；内容未变的 chunk 复用旧向量，跳过 embedding
+            if (!toInsert.isEmpty()) {
+                embedInBatches(toInsert);
             } else {
-                for (List<Document> batch : batches) {
-                    addBatchWithPermit(batch);
-                }
+                log.info("无新增/变更 chunk，跳过向量化: kbId={}", knowledgeBaseId);
             }
 
-            log.info("知识库向量化完成: kbId={}, chunks={}, batches={}",
-                    knowledgeBaseId, totalChunks, batchCount);
-            updateChunkCount(knowledgeBase, knowledgeBaseId, totalChunks);
+            log.info("知识库向量化完成: kbId={}, 目标={}, 嵌入={}",
+                    knowledgeBaseId, targetHashes.size(), toInsert.size());
+            finalizeVectorization(knowledgeBase, knowledgeBaseId, VectorStatus.COMPLETED, null, targetHashes.size());
             recordVectorizeMetrics(true, startNanos);
         } catch (Exception e) {
+            finalizeVectorization(knowledgeBase, knowledgeBaseId, VectorStatus.FAILED, e.getMessage(), 0);
             recordVectorizeMetrics(false, startNanos);
             log.error("向量化知识库失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
@@ -187,20 +214,84 @@ public class KnowledgeBaseVectorService {
 
     private void enrichChunkMetadata(List<Document> chunks, Long knowledgeBaseId,
                                      KnowledgeBaseEntity knowledgeBase) {
-        int total = chunks.size();
-        for (int i = 0; i < total; i++) {
-            Document chunk = chunks.get(i);
+        for (Document chunk : chunks) {
             Map<String, Object> metadata = chunk.getMetadata();
             metadata.put("kb_id", knowledgeBaseId.toString());
-            metadata.put("chunk_index", String.valueOf(i));
-            metadata.put("chunk_count", String.valueOf(total));
+            // 内容哈希作为 chunk 的稳定标识，用于去重与增量；chunk_index/chunk_count 在去重后重新编号
+            metadata.put("chunk_hash", ChunkContentHasher.hash(chunk.getText()));
             if (knowledgeBase != null) {
                 putIfNotBlank(metadata, "source_name", knowledgeBase.getOriginalFilename());
-                putIfNotBlank(metadata, "document_title", knowledgeBase.getName());
+                String documentTitle = knowledgeBase.getName();
+                putIfNotBlank(metadata, "document_title", documentTitle);
                 putIfNotBlank(metadata, "category", knowledgeBase.getCategory());
+                // 父子 chunk：同文档同章节标识，供检索侧 small-to-big 聚合更大上下文
+                Object sectionTitle = metadata.get("section_title");
+                if (documentTitle != null && !documentTitle.isBlank()
+                        && sectionTitle != null && !sectionTitle.toString().isBlank()) {
+                    metadata.put("parent_section", documentTitle + "|" + sectionTitle);
+                }
                 if (knowledgeBase.getUserId() != null) {
                     metadata.put("user_id", knowledgeBase.getUserId().toString());
                 }
+            }
+        }
+    }
+
+    /**
+     * 同文档内按内容哈希去重：重复内容只保留首个 chunk。
+     */
+    private List<Document> dedupChunksByHash(List<Document> chunks) {
+        Map<String, Document> seenByHash = new LinkedHashMap<>();
+        for (Document chunk : chunks) {
+            String hash = chunkHashOf(chunk);
+            if (hash == null || hash.isBlank()) {
+                continue;
+            }
+            seenByHash.putIfAbsent(hash, chunk);
+        }
+        return new ArrayList<>(seenByHash.values());
+    }
+
+    /**
+     * 去重后重新编号 chunk_index/chunk_count，保证展示与计数连续。
+     */
+    private void renumberChunks(List<Document> chunks) {
+        int total = chunks.size();
+        for (int i = 0; i < total; i++) {
+            Map<String, Object> metadata = chunks.get(i).getMetadata();
+            metadata.put("chunk_index", String.valueOf(i));
+            metadata.put("chunk_count", String.valueOf(total));
+        }
+    }
+
+    private String chunkHashOf(Document chunk) {
+        Object hash = chunk.getMetadata().get("chunk_hash");
+        return hash == null ? null : hash.toString();
+    }
+
+    /**
+     * 分批向量化并入库：外部 embedding API 调用，不在事务内。
+     * 启用分块并行时，单文档内多个批次并发提交，压低单大文档的关键路径。
+     */
+    private void embedInBatches(List<Document> chunks) {
+        int totalChunks = chunks.size();
+        int batchCount = (totalChunks + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
+        log.info("开始分批向量化: 总共 {} 个chunks，分 {} 批处理，每批最多 {} 个",
+                totalChunks, batchCount, MAX_BATCH_SIZE);
+
+        List<List<Document>> batches = new ArrayList<>(batchCount);
+        for (int i = 0; i < batchCount; i++) {
+            int start = i * MAX_BATCH_SIZE;
+            int end = Math.min(start + MAX_BATCH_SIZE, totalChunks);
+            batches.add(chunks.subList(start, end));
+        }
+
+        // 分块并行：单文档内的多个批次并发提交
+        if (chunkExecutor != null && batchCount > 1) {
+            addBatchesInParallel(batches);
+        } else {
+            for (List<Document> batch : batches) {
+                addBatchWithPermit(batch);
             }
         }
     }
@@ -211,7 +302,20 @@ public class KnowledgeBaseVectorService {
         }
     }
 
-    private void updateChunkCount(KnowledgeBaseEntity knowledgeBase, Long knowledgeBaseId, int chunkCount) {
+    /**
+     * 收尾向量化状态：写入状态机（PROCESSING / COMPLETED / FAILED），可选更新 chunkCount 与错误信息。
+     *
+     * <p>状态机取代了原先只在成功时写一次 chunkCount 的做法——现在上传后即可被前端轮询，
+     * 区分“索引中 / 完成 / 失败”，失败时附带错误信息便于排查。状态写入本身失败不影响主流程，仅告警。
+     *
+     * @param knowledgeBase   调用方已加载的实体，为 null 时按 id 回查（容错）
+     * @param knowledgeBaseId 知识库ID
+     * @param status          目标状态
+     * @param error           失败原因（仅 FAILED 时写入，会被截断到列长度内）
+     * @param chunkCount      非 null 时同步更新分块总数（COMPLETED 写入目标值，FAILED 重置为 0）
+     */
+    private void finalizeVectorization(KnowledgeBaseEntity knowledgeBase, Long knowledgeBaseId,
+                                       VectorStatus status, String error, Integer chunkCount) {
         try {
             KnowledgeBaseEntity target = knowledgeBase != null
                 ? knowledgeBase
@@ -219,12 +323,30 @@ public class KnowledgeBaseVectorService {
             if (target == null) {
                 return;
             }
-            target.setChunkCount(chunkCount);
+            target.setVectorStatus(status);
+            if (chunkCount != null) {
+                target.setChunkCount(chunkCount);
+            }
+            if (status == VectorStatus.COMPLETED) {
+                target.setVectorError(null);
+            } else if (error != null) {
+                target.setVectorError(truncateError(error));
+            }
             knowledgeBaseRepository.save(target);
         } catch (Exception e) {
-            log.warn("更新知识库分片数量失败: kbId={}, chunks={}, error={}",
-                knowledgeBaseId, chunkCount, e.getMessage());
+            log.warn("更新向量化状态失败: kbId={}, status={}, error={}",
+                knowledgeBaseId, status, e.getMessage());
         }
+    }
+
+    /**
+     * 截断向量化错误信息，避免超过 vectorError 列长度（500）。
+     */
+    private String truncateError(String error) {
+        if (error == null) {
+            return null;
+        }
+        return error.length() > 490 ? error.substring(0, 490) : error;
     }
 
     /**
@@ -295,6 +417,38 @@ public class KnowledgeBaseVectorService {
     }
     
     /**
+     * Small-to-big：把命中 chunk 的同段兄弟文本聚合成更大上下文，喂给 LLM 用。
+     * 检索仍用小 chunk 精准命中，这里只扩展上下文，不改变命中结果与来源列表。
+     * 无 parent_section、查询失败或无兄弟时原样返回命中 chunk 文本。
+     *
+     * @param doc         命中的小 chunk
+     * @param maxChars    扩展后总字符上限
+     * @param maxSiblings 最多聚合的兄弟 chunk 数
+     * @return 扩展后的上下文文本
+     */
+    public String expandChunkWithSiblings(org.springframework.ai.document.Document doc, int maxChars, int maxSiblings) {
+        if (doc == null || doc.getText() == null) {
+            return "";
+        }
+        String baseText = doc.getText();
+        java.util.Map<String, Object> metadata = doc.getMetadata();
+        Object kbIdRaw = metadata == null ? null : metadata.get("kb_id");
+        Object parentSectionRaw = metadata == null ? null : metadata.get("parent_section");
+        if (kbIdRaw == null || parentSectionRaw == null || parentSectionRaw.toString().isBlank()) {
+            return baseText;
+        }
+        Long kbId;
+        try {
+            kbId = Long.parseLong(kbIdRaw.toString());
+        } catch (NumberFormatException e) {
+            return baseText;
+        }
+        List<String> siblings = vectorRepository.findSiblingChunkTexts(
+            kbId, parentSectionRaw.toString(), Math.max(maxSiblings, 1), currentUserId());
+        return ParentContextExpander.expand(baseText, siblings, Math.max(maxChars, 1));
+    }
+
+    /**
      * 基于多个知识库进行相似度搜索（纯向量通道）。
      * 
      * @param query 查询文本
@@ -360,7 +514,7 @@ public class KnowledgeBaseVectorService {
         long startNanos = System.nanoTime();
         List<Document> vectorHits = similaritySearch(query, knowledgeBaseIds, vectorTopK, minScore);
         List<KeywordHit> keywordHits = vectorRepository.keywordSearch(
-            query, knowledgeBaseIds, hybrid.getKeywordTopK(), hybrid.getKeywordMinSimilarity());
+            query, knowledgeBaseIds, hybrid.getKeywordTopK(), hybrid.getKeywordMinSimilarity(), currentUserId());
 
         List<Document> result;
         if (keywordHits.isEmpty()) {
@@ -489,19 +643,50 @@ public class KnowledgeBaseVectorService {
             Long kbIdLong = kbId instanceof Long
                 ? (Long) kbId
                 : Long.parseLong(kbId.toString());
-            return knowledgeBaseIds.contains(kbIdLong);
+            if (!knowledgeBaseIds.contains(kbIdLong)) {
+                return false;
+            }
         } catch (NumberFormatException e) {
             return false;
         }
+        // 第二层 user_id 纵深防御：fallback 路径与向量主路径一致，也校验归属
+        Long userId = currentUserId();
+        if (userId != null) {
+            Object docUserId = doc.getMetadata().get("user_id");
+            if (docUserId == null || !userId.toString().equals(docUserId.toString())) {
+                return false;
+            }
+        }
+        return true;
     }
 
+    /**
+     * 构建向量检索 filter 表达式：kb_id 限定 + 可选的 user_id 纵深防御。
+     * <p>
+     * 能从请求上下文取到当前用户时，在 kb_id 过滤外再叠加 user_id 条件，
+     * 形成与 DB 层归属校验独立的第二层隔离；取不到（评测、异步线程等）时
+     * 退化为仅 kb_id，兼容历史行为。
+     */
     private String buildKbFilterExpression(List<Long> knowledgeBaseIds) {
         String values = knowledgeBaseIds.stream()
             .filter(Objects::nonNull)
             .map(String::valueOf)
             .map(id -> "'" + id + "'")
             .collect(Collectors.joining(", "));
-        return "kb_id in [" + values + "]";
+        String expression = "kb_id in [" + values + "]";
+        Long userId = currentUserId();
+        if (userId != null) {
+            expression += " && user_id == '" + userId + "'";
+        }
+        return expression;
+    }
+
+    /**
+     * 取当前请求用户 ID，用于检索层第二层 user_id 过滤。
+     * 返回 null 表示无登录上下文，调用方据此决定是否启用第二层。
+     */
+    private Long currentUserId() {
+        return UserContext.getUserId();
     }
     
     /**

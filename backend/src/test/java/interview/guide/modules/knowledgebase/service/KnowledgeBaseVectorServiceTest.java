@@ -1,6 +1,7 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
+import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,14 +17,20 @@ import org.springframework.ai.vectorstore.VectorStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -64,6 +71,8 @@ class KnowledgeBaseVectorServiceTest {
         // 向量化并行配置用默认值即可，测试场景下信号量不影响串行验证
         KnowledgeBaseVectorizeProperties vectorizeProperties = new KnowledgeBaseVectorizeProperties();
         when(knowledgeBaseRepository.findById(any())).thenReturn(Optional.empty());
+        // 增量向量化：默认按“全新文档”处理（无已入库 chunk），所有 chunk 都会嵌入
+        when(vectorRepository.findChunkHashesByKbId(any())).thenReturn(Set.of());
         vectorService = new KnowledgeBaseVectorService(
             vectorStore,
             new KnowledgeBaseChunkingService(),
@@ -185,8 +194,8 @@ class KnowledgeBaseVectorServiceTest {
             // When: 执行向量化
             vectorService.vectorizeAndStore(knowledgeBaseId, content);
 
-            // Then: 验证先删除旧数据
-            verify(vectorRepository, times(1)).deleteByKnowledgeBaseId(knowledgeBaseId);
+            // Then: 增量向量化先查已入库 chunk 哈希，再嵌入新增 chunk
+            verify(vectorRepository, times(1)).findChunkHashesByKbId(knowledgeBaseId);
 
             // 验证 VectorStore.add 被调用（文本足够长时应产生 chunks）
             verify(vectorStore, atLeastOnce()).add(anyList());
@@ -275,8 +284,8 @@ class KnowledgeBaseVectorServiceTest {
         }
 
         @Test
-        @DisplayName("向量化前应先删除旧数据")
-        void testDeleteOldDataBeforeVectorize() {
+        @DisplayName("增量向量化：查哈希在前、嵌入新增 chunk 在后")
+        void testIncrementalFlowOrder() {
             // Given: 使用足够长的内容确保产生 chunks
             Long knowledgeBaseId = 1L;
             String content = generateLongContent(10);
@@ -284,9 +293,9 @@ class KnowledgeBaseVectorServiceTest {
             // When
             vectorService.vectorizeAndStore(knowledgeBaseId, content);
 
-            // Then: 验证 delete 在 add 之前执行（通过 inOrder 严格顺序验证）
+            // Then: 增量流程顺序——先查已入库 chunk 哈希，再嵌入新增 chunk
             var inOrder = inOrder(vectorRepository, vectorStore);
-            inOrder.verify(vectorRepository).deleteByKnowledgeBaseId(knowledgeBaseId);
+            inOrder.verify(vectorRepository).findChunkHashesByKbId(knowledgeBaseId);
             inOrder.verify(vectorStore, atLeastOnce()).add(anyList());
         }
 
@@ -310,19 +319,96 @@ class KnowledgeBaseVectorServiceTest {
         }
 
         @Test
-        @DisplayName("空内容处理 - 应该删除旧数据但不添加新数据")
+        @DisplayName("空内容处理 - 清空该知识库的失效 chunk，不嵌入新 chunk")
         void testVectorizeEmptyContent() {
             // Given
             Long knowledgeBaseId = 1L;
             String content = "";
+            // 模拟该知识库已有 2 个旧 chunk，空内容应把它们全部当作失效删除
+            when(vectorRepository.findChunkHashesByKbId(knowledgeBaseId))
+                .thenReturn(new HashSet<>(Set.of("old-hash-1", "old-hash-2")));
 
             // When
             vectorService.vectorizeAndStore(knowledgeBaseId, content);
 
-            // Then: 即使是空内容，也应该删除旧数据
-            verify(vectorRepository, times(1)).deleteByKnowledgeBaseId(knowledgeBaseId);
-            // 空内容不会产生 chunks，所以 add 不会被调用
+            // Then: 空 split 无新 chunk，旧 hash 全部失效被删除；不嵌入任何 chunk
+            verify(vectorRepository).deleteByKbIdAndChunkHashes(
+                eq(knowledgeBaseId), argThat(hashes -> hashes != null && hashes.size() == 2));
             verify(vectorStore, never()).add(anyList());
+        }
+
+        @Test
+        @DisplayName("增量去重：内容未变的 chunk 复用旧向量，跳过 embedding")
+        void testIncrementalSkipsUnchangedChunks() {
+            Long knowledgeBaseId = 1L;
+            String content = generateLongContent(5);
+
+            // 第一次向量化：捕获实际产生的 chunk 哈希
+            vectorService.vectorizeAndStore(knowledgeBaseId, content);
+            ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+            verify(vectorStore, atLeastOnce()).add(captor.capture());
+            Set<String> producedHashes = captor.getAllValues().stream()
+                    .flatMap(List::stream)
+                    .map(doc -> doc.getMetadata().get("chunk_hash").toString())
+                    .collect(Collectors.toSet());
+            assertFalse(producedHashes.isEmpty(), "首次向量化应产生 chunk");
+
+            // 第二次向量化相同内容：已入库哈希 = 上次产出，应全部复用、不嵌入、不删除
+            reset(vectorStore, vectorRepository, knowledgeBaseRepository);
+            when(vectorRepository.findChunkHashesByKbId(knowledgeBaseId)).thenReturn(producedHashes);
+            when(knowledgeBaseRepository.findById(any())).thenReturn(Optional.empty());
+
+            vectorService.vectorizeAndStore(knowledgeBaseId, content);
+
+            verify(vectorStore, never()).add(anyList());
+            verify(vectorRepository, times(producedHashes.size()))
+                .updateMetadataByKbIdAndChunkHash(eq(knowledgeBaseId), anyString(), anyMap());
+            verify(vectorRepository, never()).deleteByKbIdAndChunkHashes(any(), any());
+        }
+
+        @Test
+        @DisplayName("向量化成功后状态机置为 COMPLETED 并写入分块数")
+        void testVectorizeSetsCompletedStatus() {
+            // Given: 一个 PENDING 状态的知识库
+            Long knowledgeBaseId = 1L;
+            String content = generateLongContent(10);
+            KnowledgeBaseEntity entity = new KnowledgeBaseEntity();
+            entity.setId(knowledgeBaseId);
+            entity.setVectorStatus(VectorStatus.PENDING);
+            when(knowledgeBaseRepository.findById(knowledgeBaseId)).thenReturn(Optional.of(entity));
+
+            // When
+            vectorService.vectorizeAndStore(knowledgeBaseId, content);
+
+            // Then: 状态机从 PROCESSING 流转到 COMPLETED，清空错误信息并写入目标分块数
+            assertEquals(VectorStatus.COMPLETED, entity.getVectorStatus(),
+                "向量化成功后状态应流转为 COMPLETED");
+            assertNotNull(entity.getChunkCount(), "应写入分块数");
+            assertTrue(entity.getChunkCount() > 0, "分块数应为正数");
+            assertNull(entity.getVectorError(), "成功后应清空错误信息");
+        }
+
+        @Test
+        @DisplayName("向量化失败后状态机置为 FAILED 并记录错误信息")
+        void testVectorizeSetsFailedStatus() {
+            // Given: 入库抛错，模拟向量化中途失败
+            Long knowledgeBaseId = 1L;
+            String content = generateLongContent(10);
+            KnowledgeBaseEntity entity = new KnowledgeBaseEntity();
+            entity.setId(knowledgeBaseId);
+            entity.setVectorStatus(VectorStatus.PROCESSING);
+            when(knowledgeBaseRepository.findById(knowledgeBaseId)).thenReturn(Optional.of(entity));
+            doThrow(new RuntimeException("VectorStore 连接失败")).when(vectorStore).add(anyList());
+
+            // When & Then: 抛出业务异常，且状态机流转为 FAILED、记录错误信息
+            assertThrows(RuntimeException.class,
+                () -> vectorService.vectorizeAndStore(knowledgeBaseId, content));
+
+            assertEquals(VectorStatus.FAILED, entity.getVectorStatus(),
+                "向量化失败后状态应流转为 FAILED");
+            assertNotNull(entity.getVectorError(), "失败应记录错误信息");
+            assertTrue(entity.getVectorError().contains("VectorStore 连接失败"),
+                "错误信息应包含原始异常原因");
         }
     }
 

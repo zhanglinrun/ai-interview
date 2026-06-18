@@ -32,6 +32,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -46,7 +49,15 @@ public class KnowledgeBaseQueryService {
     private static final int STREAM_PROBE_CHARS = 120;
     private static final int MAX_REWRITE_HISTORY_CHAR = 200;
     private static final int SOURCE_SNIPPET_MAX_CHARS = 220;
+    /** 追加到 system prompt 的引用标注指令，要求模型用 [n] 把陈述挂到具体来源。 */
+    private static final String CITATION_INSTRUCTION = """
 
+# Citation (引用标注)
+上下文每个片段前都标有 [n] 编号（从 [1] 开始）。回答时：
+- 每一条基于检索内容的客观陈述，都要在相关句末用方括号标注其来源编号，例如 [1]、[2]；一条陈述引用多个来源时写成 [1][2]。
+- 只能使用上下文中真实出现的编号，严禁编造不存在的编号。
+- 与检索内容无关的过渡或总结性语句可不标注。
+""";
     private final LlmProviderRegistry llmProviderRegistry;
     private final KnowledgeBaseVectorService vectorService;
     private final KnowledgeBaseListService listService;
@@ -64,6 +75,21 @@ public class KnowledgeBaseQueryService {
     private final double minScoreDefault;
     private final boolean hybridEnabled;
     private final boolean rerankEnabled;
+    private final boolean citationEnabled;
+    private final double citationCoverageWeight;
+    private final double citationInvalidPenalty;
+    private final CitationAnalyzer citationAnalyzer;
+    private final PromptTemplate hydePromptTemplate;
+    private final boolean hydeEnabled;
+    private final int hydeMaxChars;
+    private final long hydeTimeoutMs;
+    private final boolean fusionEnabled;
+    private final int fusionPerQueryTopK;
+    private final int fusionRrfK;
+    private final int fusionFinalTopK;
+    private final boolean parentExpandEnabled;
+    private final int parentExpandMaxChars;
+    private final int parentExpandMaxSiblings;
     private final MeterRegistry meterRegistry;
     private final java.util.concurrent.atomic.AtomicInteger activeStreams =
         new java.util.concurrent.atomic.AtomicInteger(0);
@@ -96,6 +122,10 @@ public class KnowledgeBaseQueryService {
             resourceLoader.getResource(queryProperties.getRewritePromptPath())
                 .getContentAsString(StandardCharsets.UTF_8)
         );
+        this.hydePromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(queryProperties.getHydePromptPath())
+                .getContentAsString(StandardCharsets.UTF_8)
+        );
         this.rewriteEnabled = queryProperties.getRewrite().isEnabled();
         this.shortQueryLength = queryProperties.getSearch().getShortQueryLength();
         this.topkShort = queryProperties.getSearch().getTopkShort();
@@ -105,6 +135,20 @@ public class KnowledgeBaseQueryService {
         this.minScoreDefault = queryProperties.getSearch().getMinScoreDefault();
         this.hybridEnabled = queryProperties.getHybrid().isEnabled();
         this.rerankEnabled = queryProperties.getRerank().isEnabled();
+        this.citationEnabled = queryProperties.getCitation().isEnabled();
+        this.citationCoverageWeight = queryProperties.getCitation().getCoverageWeight();
+        this.citationInvalidPenalty = queryProperties.getCitation().getInvalidPenalty();
+        this.citationAnalyzer = new CitationAnalyzer(citationCoverageWeight, citationInvalidPenalty);
+        this.hydeEnabled = queryProperties.getHyde().isEnabled();
+        this.hydeMaxChars = queryProperties.getHyde().getMaxChars();
+        this.hydeTimeoutMs = queryProperties.getHyde().getTimeoutMs();
+        this.fusionEnabled = queryProperties.getFusion().isEnabled();
+        this.fusionPerQueryTopK = queryProperties.getFusion().getPerQueryTopK();
+        this.fusionRrfK = queryProperties.getFusion().getRrfK();
+        this.fusionFinalTopK = queryProperties.getFusion().getFinalTopK();
+        this.parentExpandEnabled = queryProperties.getParentExpand().isEnabled();
+        this.parentExpandMaxChars = queryProperties.getParentExpand().getMaxChars();
+        this.parentExpandMaxSiblings = queryProperties.getParentExpand().getMaxSiblings();
     }
 
     private ChatClient getChatClient() {
@@ -163,10 +207,22 @@ public class KnowledgeBaseQueryService {
         return generateAnswer(knowledgeBaseIds, question, relevantDocs);
     }
 
+    /**
+     * RAG 评测专用检索入口：复用真实检索链路（rewrite / HyDE / 多路融合 / rerank），
+     * 只返回检索到的文档、不生成答案，供评测计算 Hit/MRR/NDCG 等检索指标。
+     * <p>fusion / HyDE 是否生效由构造期开关决定，评测可通过反射切换 {@code fusionEnabled} /
+     * {@code hydeEnabled} 字段对比不同档位；调用方负责恢复原值。
+     */
+    public List<Document> retrieveForEvaluation(List<Long> knowledgeBaseIds, String question) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
+            return List.of();
+        }
+        QueryContext queryContext = buildQueryContext(question, List.of());
+        return retrieveRelevantDocs(queryContext, knowledgeBaseIds);
+    }
+
     private String generateAnswer(List<Long> knowledgeBaseIds, String question, List<Document> relevantDocs) {
-        String context = relevantDocs.stream()
-                .map(Document::getText)
-                .collect(Collectors.joining("\n\n---\n\n"));
+        String context = buildNumberedContext(relevantDocs);
 
         String systemPrompt = buildSystemPrompt();
         String userPrompt = buildUserPrompt(context, question);
@@ -192,8 +248,12 @@ public class KnowledgeBaseQueryService {
      * 构建系统提示词
      */
     private String buildSystemPrompt() {
-        return systemPromptTemplate.render()
+        String prompt = systemPromptTemplate.render()
             + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
+        if (citationEnabled) {
+            prompt += CITATION_INSTRUCTION;
+        }
+        return prompt;
     }
 
     /**
@@ -207,6 +267,41 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
+     * 构建喂给模型的上下文。启用引用溯源时，给每个片段前加 [n] 编号（从 1 开始），
+     * 配合 system prompt 里的引用指令，让模型把陈述挂到具体来源；关闭时退回原始拼接。
+     */
+    private String buildNumberedContext(List<Document> docs) {
+        // small-to-big：开启时把命中 chunk 扩展为同段聚合的更大上下文喂给 LLM，命中与来源不变
+        List<String> texts = parentExpandEnabled
+            ? docs.stream().map(this::expandTextForContext).toList()
+            : docs.stream().map(Document::getText).toList();
+        if (!citationEnabled) {
+            return texts.stream().collect(Collectors.joining("\n\n---\n\n"));
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < texts.size(); i++) {
+            if (i > 0) {
+                sb.append("\n\n---\n\n");
+            }
+            sb.append("[").append(i + 1).append("] ").append(texts.get(i));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Small-to-big：把命中 chunk 扩展为同段聚合的更大上下文喂给 LLM。
+     * 检索命中与来源列表不变，只扩展上下文文本；扩展失败回退原 chunk。
+     */
+    private String expandTextForContext(Document doc) {
+        try {
+            return vectorService.expandChunkWithSiblings(doc, parentExpandMaxChars, parentExpandMaxSiblings);
+        } catch (Exception e) {
+            log.warn("small-to-big 扩展失败，使用原 chunk: {}", e.getMessage());
+            return doc.getText();
+        }
+    }
+
+    /**
      * 查询知识库并返回完整响应
      */
     public QueryResponse queryKnowledgeBase(QueryRequest request) {
@@ -214,7 +309,7 @@ public class KnowledgeBaseQueryService {
         String question = request.question();
 
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
-            return new QueryResponse(NO_RESULT_RESPONSE, null, "", List.of());
+            return new QueryResponse(NO_RESULT_RESPONSE, null, "", List.of(), null, List.of());
         }
 
         // 获取知识库名称（多个知识库用逗号分隔）
@@ -225,7 +320,7 @@ public class KnowledgeBaseQueryService {
         Long primaryKbId = knowledgeBaseIds.getFirst();
 
         if (normalizeQuestion(question).isBlank()) {
-            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of());
+            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
         countService.updateQuestionCounts(knowledgeBaseIds);
@@ -234,11 +329,20 @@ public class KnowledgeBaseQueryService {
         List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 
         if (!hasEffectiveHit(relevantDocs)) {
-            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of());
+            return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
         String answer = generateAnswer(knowledgeBaseIds, question, relevantDocs);
-        return new QueryResponse(answer, primaryKbId, kbNamesStr, buildSources(relevantDocs));
+        CitationAnalyzer.CitationAnalysis citation = citationEnabled
+            ? citationAnalyzer.analyze(answer, relevantDocs.size())
+            : new CitationAnalyzer.CitationAnalysis(List.of(), List.of(), 0.0d);
+        Double confidence = citationEnabled
+            ? citationAnalyzer.confidence(
+                relevantDocs.stream().map(this::extractSimilarity).toList(),
+                citation)
+            : null;
+        List<RagSourceDTO> sources = buildSources(relevantDocs, Set.copyOf(citation.citedIndexes()));
+        return new QueryResponse(answer, primaryKbId, kbNamesStr, sources, confidence, citation.invalidIndexes());
     }
 
     /**
@@ -280,10 +384,8 @@ public class KnowledgeBaseQueryService {
                 return Flux.just(NO_RESULT_RESPONSE);
             }
 
-            // 3. 构建上下文
-            String context = relevantDocs.stream()
-                    .map(Document::getText)
-                    .collect(Collectors.joining("\n\n---\n\n"));
+            // 3. 构建上下文（启用引用溯源时按 [n] 编号）
+            String context = buildNumberedContext(relevantDocs);
 
             log.debug("检索到 {} 个相关文档片段", relevantDocs.size());
 
@@ -360,8 +462,11 @@ public class KnowledgeBaseQueryService {
         candidates.add(rewrittenQuestion);
         candidates.add(normalizedQuestion);
 
+        // HyDE：让 LLM 生成假设性答案，作为额外一路检索锚点（多路融合开启时使用）
+        String hypothetical = generateHypotheticalDocument(normalizedQuestion);
+
         SearchParams searchParams = resolveSearchParams(normalizedQuestion);
-        return new QueryContext(normalizedQuestion, new ArrayList<>(candidates), searchParams);
+        return new QueryContext(normalizedQuestion, new ArrayList<>(candidates), hypothetical, searchParams);
     }
 
     private List<Message> sanitizeHistory(List<Message> history) {
@@ -376,29 +481,68 @@ public class KnowledgeBaseQueryService {
         return question == null ? "" : question.trim();
     }
 
-//    混合检索（向量 + 关键词 RRF 融合）+ 重排
+//    检索：多路召回融合（开启）或串行短路（关闭，历史行为）
     private List<Document> retrieveRelevantDocs(QueryContext queryContext, List<Long> knowledgeBaseIds) {
+        if (fusionEnabled) {
+            return retrieveWithFusion(queryContext, knowledgeBaseIds);
+        }
         for (String candidateQuery : queryContext.candidateQueries()) {
             if (candidateQuery.isBlank()) {
                 continue;
             }
-            List<Document> docs = hybridEnabled
-                ? vectorService.hybridSearch(
-                    candidateQuery,
-                    knowledgeBaseIds,
-                    queryContext.searchParams().topK(),
-                    queryContext.searchParams().minScore())
-                : vectorService.similaritySearch(
-                    candidateQuery,
-                    knowledgeBaseIds,
-                    queryContext.searchParams().topK(),
-                    queryContext.searchParams().minScore());
+            List<Document> docs = searchOne(candidateQuery, queryContext, knowledgeBaseIds);
             log.info("检索候选 query='{}'，混合检索命中 {} 条", candidateQuery, docs.size());
             if (hasEffectiveHit(docs)) {
-                return rerankIfEnabled(candidateQuery, docs);
+                List<Document> ranked = rerankIfEnabled(candidateQuery, docs);
+                annotateFinalScore(ranked);
+                return ranked;
             }
         }
         return List.of();
+    }
+
+    /**
+     * 多路召回 + 跨路 RRF 融合：原问题 / rewrite / HyDE 各做一次混合检索，
+     * 融合后统一重排；rerank 用原问题作为相关性参照。
+     */
+    private List<Document> retrieveWithFusion(QueryContext queryContext, List<Long> knowledgeBaseIds) {
+        List<List<Document>> routes = new ArrayList<>();
+        List<String> queries = new ArrayList<>(queryContext.candidateQueries());
+        if (queryContext.hypothetical() != null && !queryContext.hypothetical().isBlank()) {
+            queries.add(queryContext.hypothetical());
+        }
+        for (String candidateQuery : queries) {
+            if (candidateQuery.isBlank()) {
+                continue;
+            }
+            List<Document> docs = searchOneWithTopK(candidateQuery, queryContext, knowledgeBaseIds, fusionPerQueryTopK);
+            log.info("多路召回候选 query='{}'，命中 {} 条", candidateQuery, docs.size());
+            routes.add(docs);
+        }
+        List<Document> fused = MultiQueryRrfFuser.fuse(routes, fusionRrfK, fusionFinalTopK);
+        log.info("多路召回融合完成: 路数={}, 融合后 {} 条", routes.size(), fused.size());
+        if (!hasEffectiveHit(fused)) {
+            return List.of();
+        }
+        // 融合器已把跨路最大相似度写进 final_score；重排开启时用 rerank 分覆盖
+        List<Document> ranked = rerankIfEnabled(queryContext.originalQuestion(), fused);
+        if (rerankEnabled && rerankService.isEnabled()) {
+            annotateFinalScore(ranked);
+        }
+        return ranked;
+    }
+
+    /** 单路检索，topK 取自问题长度分档。 */
+    private List<Document> searchOne(String query, QueryContext queryContext, List<Long> knowledgeBaseIds) {
+        return searchOneWithTopK(query, queryContext, knowledgeBaseIds, queryContext.searchParams().topK());
+    }
+
+    /** 单路检索，topK 可指定（多路融合时每路用 perQueryTopK）。 */
+    private List<Document> searchOneWithTopK(String query, QueryContext queryContext,
+                                             List<Long> knowledgeBaseIds, int topK) {
+        return hybridEnabled
+            ? vectorService.hybridSearch(query, knowledgeBaseIds, topK, queryContext.searchParams().minScore())
+            : vectorService.similaritySearch(query, knowledgeBaseIds, topK, queryContext.searchParams().minScore());
     }
 
     /**
@@ -423,6 +567,50 @@ public class KnowledgeBaseQueryService {
             return new SearchParams(topkMedium, minScoreDefault);
         }
         return new SearchParams(topkLong, minScoreDefault);
+    }
+
+    /**
+     * HyDE（假设性文档）：让 LLM 就用户问题生成一段"可能的答案"文档，用它的向量去检索，
+     * 缩小"问题表述"与"答案表述"之间的语义鸿沟。
+     * 关闭、问题为空或生成失败时返回 null，调用方据此跳过该路召回。
+     */
+    private String generateHypotheticalDocument(String question) {
+        if (!hydeEnabled || question.isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("question", question);
+            variables.put("maxChars", hydeMaxChars);
+            String prompt = hydePromptTemplate.render(variables);
+            String hypothetical = callHydeWithTimeout(prompt);
+            if (hypothetical == null || hypothetical.isBlank()) {
+                return null;
+            }
+            String trimmed = hypothetical.trim();
+            if (trimmed.length() > hydeMaxChars) {
+                trimmed = trimmed.substring(0, hydeMaxChars);
+            }
+            log.info("HyDE 生成假设文档: question='{}', length={}", question, trimmed.length());
+            return trimmed;
+        } catch (Exception e) {
+            log.warn("HyDE 生成失败，跳过假设文档召回: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String callHydeWithTimeout(String prompt) throws Exception {
+        if (hydeTimeoutMs <= 0) {
+            return getChatClient().prompt().user(prompt).call().content();
+        }
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() ->
+            getChatClient().prompt().user(prompt).call().content());
+        try {
+            return future.get(hydeTimeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw e;
+        }
     }
 
 //    改写
@@ -480,6 +668,14 @@ public class KnowledgeBaseQueryService {
     }
 
     private List<RagSourceDTO> buildSources(List<Document> docs) {
+        return buildSources(docs, null);
+    }
+
+    /**
+     * 构造引用来源列表。citedIndexes 非空时，按片段编号（从 1 开始）标记被回答正文实际引用的来源，
+     * 用于校验模型是否真的用到了检索内容；为 null（如流式末尾拼来源）时不计算引用标记。
+     */
+    private List<RagSourceDTO> buildSources(List<Document> docs, Set<Integer> citedIndexes) {
         if (!hasEffectiveHit(docs)) {
             return List.of();
         }
@@ -491,33 +687,36 @@ public class KnowledgeBaseQueryService {
             .toList();
         Map<Long, String> nameMap = listService.getKnowledgeBaseNameMap(knowledgeBaseIds);
 
-        return docs.stream()
-            .map(doc -> {
-                Long knowledgeBaseId = extractKnowledgeBaseId(doc);
-                Map<String, Object> metadata = doc.getMetadata();
-                String fallbackTitle = knowledgeBaseId == null
-                    ? "未知知识库"
-                    : nameMap.getOrDefault(knowledgeBaseId, "未知知识库");
-                String documentTitle = firstNonBlank(
-                    metadataValue(metadata, "document_title"),
-                    fallbackTitle
-                );
-                String sourceName = metadataValue(metadata, "source_name");
-                String category = metadataValue(metadata, "category");
-                String sectionTitle = metadataValue(metadata, "section_title");
-                return new RagSourceDTO(
-                    knowledgeBaseId,
-                    documentTitle,
-                    sourceName,
-                    category,
-                    sectionTitle,
-                    parseInteger(metadataValue(metadata, "chunk_index")),
-                    parseInteger(metadataValue(metadata, "chunk_count")),
-                    buildSourceSnippet(doc.getText()),
-                    extractSimilarity(doc)
-                );
-            })
-            .toList();
+        List<RagSourceDTO> sources = new ArrayList<>(docs.size());
+        for (int i = 0; i < docs.size(); i++) {
+            Document doc = docs.get(i);
+            Long knowledgeBaseId = extractKnowledgeBaseId(doc);
+            Map<String, Object> metadata = doc.getMetadata();
+            String fallbackTitle = knowledgeBaseId == null
+                ? "未知知识库"
+                : nameMap.getOrDefault(knowledgeBaseId, "未知知识库");
+            String documentTitle = firstNonBlank(
+                metadataValue(metadata, "document_title"),
+                fallbackTitle
+            );
+            String sourceName = metadataValue(metadata, "source_name");
+            String category = metadataValue(metadata, "category");
+            String sectionTitle = metadataValue(metadata, "section_title");
+            boolean cited = citedIndexes != null && citedIndexes.contains(i + 1);
+            sources.add(new RagSourceDTO(
+                knowledgeBaseId,
+                documentTitle,
+                sourceName,
+                category,
+                sectionTitle,
+                parseInteger(metadataValue(metadata, "chunk_index")),
+                parseInteger(metadataValue(metadata, "chunk_count")),
+                buildSourceSnippet(doc.getText()),
+                extractSimilarity(doc),
+                cited
+            ));
+        }
+        return sources;
     }
 
     private String buildSourcesMarkdown(List<Document> docs) {
@@ -627,11 +826,42 @@ public class KnowledgeBaseQueryService {
     }
 
     private Double extractSimilarity(Document doc) {
-        Double score = doc.getScore();
+        Double score = readFinalScore(doc);
         if (score == null || score.isNaN() || score.isInfinite()) {
             return null;
         }
         return Math.round(score * 10000.0) / 10000.0;
+    }
+
+    /**
+     * 读取用于展示与置信度计算的最终相关性分。优先取检索后写入 metadata 的 final_score，
+     * 它不受 Document.score 后续反复覆盖影响；缺失时回退到 Document.score。
+     */
+    private Double readFinalScore(Document doc) {
+        Map<String, Object> metadata = doc.getMetadata();
+        if (metadata != null) {
+            Object value = metadata.get("final_score");
+            if (value instanceof Number number) {
+                return number.doubleValue();
+            }
+        }
+        return doc.getScore();
+    }
+
+    /**
+     * 把检索/重排后的最终相关性分写进每个文档的 metadata，作为展示与置信度计算的稳定口径，
+     * 避免 Document.score 在 RRF、重排、相似度搜索之间被反复覆盖后取到中间值。
+     */
+    private void annotateFinalScore(List<Document> docs) {
+        if (docs == null || docs.isEmpty()) {
+            return;
+        }
+        for (Document doc : docs) {
+            Double score = doc.getScore();
+            if (score != null && !score.isNaN() && !score.isInfinite()) {
+                doc.getMetadata().put("final_score", score);
+            }
+        }
     }
 
     private String normalizeAnswer(String answer) {
@@ -716,6 +946,7 @@ public class KnowledgeBaseQueryService {
     private record SearchParams(int topK, double minScore) {
     }
 
-    private record QueryContext(String originalQuestion, List<String> candidateQueries, SearchParams searchParams) {
+    private record QueryContext(String originalQuestion, List<String> candidateQueries,
+                                String hypothetical, SearchParams searchParams) {
     }
 }
