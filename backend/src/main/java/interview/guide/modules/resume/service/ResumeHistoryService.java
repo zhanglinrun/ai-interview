@@ -15,9 +15,9 @@ import interview.guide.modules.resume.model.ResumeListItemDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -127,7 +127,7 @@ public class ResumeHistoryService {
                         }
                 );
             }
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("解析 strengths JSON 失败", e);
         }
         return List.of();
@@ -145,7 +145,7 @@ public class ResumeHistoryService {
                         }
                 );
             }
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("解析 suggestions JSON 失败", e);
         }
         return List.of();

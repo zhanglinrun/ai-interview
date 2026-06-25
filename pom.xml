@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.1</version>
+    <version>3.5.6</version>
     <relativePath/>
   </parent>
 
@@ -29,22 +29,26 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-    <spring-ai.version>2.0.0-M4</spring-ai.version>
-    <spring-ai-agent-utils.version>0.7.0</spring-ai-agent-utils.version>
     <tika.version>2.9.2</tika.version>
     <lombok.version>1.18.36</lombok.version>
     <!-- JUnit 版本不再手动钉死，交由 spring-boot-starter-parent 统一管理。
-         钉成旧版（如 5.12.0 / platform 1.12.0）会与 Spring Boot 4 / Spring Framework 7 的
+         钉成旧版（如 5.12.0 / platform 1.12.0）会与 Spring Boot / Spring Framework 的
          SpringExtension 不兼容（NoSuchMethodError: ExtensionContext$Store.computeIfAbsent），
          导致所有 @SpringBootTest 集成测试无法启动。 -->
-    <redisson.version>4.0.0</redisson.version>
+    <redisson.version>3.50.0</redisson.version>
     <mapstruct.version>1.6.3</mapstruct.version>
     <aws-sdk.version>2.29.51</aws-sdk.version>
     <itext.version>8.0.5</itext.version>
     <pinyin4j.version>2.5.0</pinyin4j.version>
-    <springdoc.version>3.0.2</springdoc.version>
+    <springdoc.version>2.8.17</springdoc.version>
     <dashscope.version>2.22.7</dashscope.version>
     <victools-jsonschema.version>5.0.0</victools-jsonschema.version>
+
+    <!-- LangChain4j（对齐 know-engine：核心 1.11.0，扩展模块 1.11.0-beta19） -->
+    <langchain4j.version>1.11.0</langchain4j.version>
+    <langchain4j-beta.version>1.11.0-beta19</langchain4j-beta.version>
+    <!-- XXL-Job 分布式任务调度：向量化失败补偿 -->
+    <xxl-job.version>3.2.0</xxl-job.version>
     <!-- surefire 默认排除的测试组：rag-eval 评测连真实 pgvector + DashScope，不随普通构建运行。
          触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
     <test.excludedGroups>rag-eval</test.excludedGroups>
@@ -53,16 +57,16 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>org.springframework.ai</groupId>
-        <artifactId>spring-ai-bom</artifactId>
-        <version>${spring-ai.version}</version>
+        <groupId>dev.langchain4j</groupId>
+        <artifactId>langchain4j-bom</artifactId>
+        <version>${langchain4j.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>org.springaicommunity</groupId>
-        <artifactId>spring-ai-agent-utils-bom</artifactId>
-        <version>${spring-ai-agent-utils.version}</version>
+        <groupId>dev.langchain4j</groupId>
+        <artifactId>langchain4j-community-bom</artifactId>
+        <version>${langchain4j-beta.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

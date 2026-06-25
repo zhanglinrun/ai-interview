@@ -15,9 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Optional;
@@ -113,7 +113,7 @@ public class ResumePersistenceService {
                     saved.getId(), resume.getId(), analysis.overallScore());
 
             return saved;
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("序列化评测结果失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "保存评测结果失败", e);
         }
@@ -176,7 +176,7 @@ public class ResumePersistenceService {
                 suggestions,
                 entity.getResume().getResumeText()
             );
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("反序列化评测结果失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "获取评测结果失败", e);
         }

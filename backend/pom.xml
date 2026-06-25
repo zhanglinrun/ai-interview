@@ -17,7 +17,7 @@
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-webmvc</artifactId>
+      <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -86,17 +86,71 @@
       <version>${redisson.version}</version>
     </dependency>
 
+    <!-- ===== LangChain4j（对齐 know-engine，替代 Spring AI）===== -->
     <dependency>
-      <groupId>org.springframework.ai</groupId>
-      <artifactId>spring-ai-starter-model-openai</artifactId>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.springframework.ai</groupId>
-      <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-spring-boot-starter</artifactId>
+      <version>${langchain4j-beta.version}</version>
     </dependency>
     <dependency>
-      <groupId>org.springaicommunity</groupId>
-      <artifactId>spring-ai-agent-utils</artifactId>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- Reactor Flux 桥接（SSE 流式） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-reactor</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- Elasticsearch 向量存储（KNN/全文/混合检索，替代 pgvector） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-elasticsearch</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- 本地 ONNX Reranker（进程内 BGE-RERANKER 精排） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-onnx-scoring</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- Text2SQL（面试记录/评分/简历结构化数据检索） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-experimental-sql</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- Neo4j Text2Cypher（面试知识点关系图谱） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-community-neo4j</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-community-neo4j-spring-boot-starter</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-community-neo4j-retriever</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-neo4j</artifactId>
+    </dependency>
+
+    <!-- XXL-Job 分布式任务调度：向量化失败补偿定时扫表重试 -->
+    <dependency>
+      <groupId>com.xuxueli</groupId>
+      <artifactId>xxl-job-core</artifactId>
+      <version>${xxl-job.version}</version>
     </dependency>
 
     <dependency>

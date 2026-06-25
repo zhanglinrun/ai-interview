@@ -111,20 +111,8 @@ spring:
           subscriptionConnectionMinimumIdleSize: 1
           subscriptionConnectionPoolSize: 50
   
-  # Spring AI 配置（chat + embedding 统一由 app.ai.providers 驱动，不使用自动配置）
-  ai:
-    # 禁用自动重试机制，让异常立即返回
-    retry:
-      max-attempts: 1  # 不重试，失败立即返回
-      on-client-errors: false
-    # PostgreSQL Vector Store配置
-    vectorstore:
-      pgvector:
-        index-type: HNSW
-        distance-type: COSINE_DISTANCE
-        dimensions: 1024  # text-embedding-v3实际生成的向量维度
-        initialize-schema: true # 开发环境设置为 true，方便快速启动。生产环境设置为 false，手动管理数据库 schema，避免意外变更。
-        remove-existing-vector-store-table: false  # 保留现有表和数据
+  # LangChain4j 配置（chat + embedding 由 app.ai.providers 驱动 LlmProviderRegistry 手动构造）
+  # 向量存储迁移到 Elasticsearch（见 app.elasticsearch / app.rag 段），pgvector 配置已移除
 
 # Application custom configuration
 app:

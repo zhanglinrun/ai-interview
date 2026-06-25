@@ -1,8 +1,8 @@
 package interview.guide.modules.interview.service;
 
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.export.PdfExportService;
@@ -137,7 +137,7 @@ public class InterviewHistoryService {
         }
         try {
             return objectMapper.readValue(json, typeRef);
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("解析 JSON 失败", e);
             return null;
         }

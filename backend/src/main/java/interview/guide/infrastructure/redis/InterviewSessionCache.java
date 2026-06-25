@@ -8,9 +8,9 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.Serializable;
 import java.time.Duration;
@@ -71,7 +71,7 @@ public class InterviewSessionCache {
             this.status = status;
             try {
                 this.questionsJson = objectMapper.writeValueAsString(questions);
-            } catch (JacksonException e) {
+            } catch (JsonProcessingException e) {
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR, "序列化问题列表失败", e);
             }
         }
@@ -79,7 +79,7 @@ public class InterviewSessionCache {
         public List<InterviewQuestionDTO> getQuestions(ObjectMapper objectMapper) {
             try {
                 return objectMapper.readValue(questionsJson, new TypeReference<>() {});
-            } catch (JacksonException e) {
+            } catch (JsonProcessingException e) {
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR, "反序列化问题列表失败", e);
             }
         }
@@ -159,7 +159,7 @@ public class InterviewSessionCache {
                 String key = buildSessionKey(sessionId);
                 redisService.set(key, session, SESSION_TTL);
                 log.debug("更新会话问题: sessionId={}", sessionId);
-            } catch (JacksonException e) {
+            } catch (JsonProcessingException e) {
                 log.error("序列化问题列表失败", e);
             }
         });

@@ -18,9 +18,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -81,7 +81,7 @@ public class InterviewPersistenceService {
             log.info("面试会话已保存: sessionId={}, skillId={}, resumeId={}", sessionId, skillId, resumeId);
 
             return saved;
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("序列化问题列表失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存会话失败", e);
         }
@@ -252,7 +252,7 @@ public class InterviewPersistenceService {
             log.info("面试报告已保存: sessionId={}, score={}, 答案数={}",
                 sessionId, report.overallScore(), answersToSave.size());
 
-        } catch (JacksonException e) {
+        } catch (JsonProcessingException e) {
             log.error("序列化报告失败: {}", e.getMessage(), e);
         }
     }
