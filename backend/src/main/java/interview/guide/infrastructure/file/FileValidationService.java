@@ -25,7 +25,7 @@ public class FileValidationService {
      * @param fileTypeName 文件类型名称（用于错误消息，如"简历"、"知识库"）
      */
     public void validateFile(MultipartFile file, long maxSizeBytes, String fileTypeName) {
-        if (file.isEmpty()) {
+        if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, 
                 String.format("请选择要上传的%s文件", fileTypeName));
         }
