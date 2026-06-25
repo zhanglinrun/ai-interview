@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.FluxStreamingBridge;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.ai.PromptSecurityConstants;
 import interview.guide.common.ai.PromptTemplate;
@@ -155,6 +156,10 @@ public class KnowledgeBaseQueryService {
 
     private ChatModel getChatModel() {
         return llmProviderRegistry.getDefaultChatModel();
+    }
+
+    private dev.langchain4j.model.chat.StreamingChatModel getStreamingChatModel() {
+        return llmProviderRegistry.getDefaultStreamingChatModel();
     }
 
     /**
@@ -382,7 +387,7 @@ public class KnowledgeBaseQueryService {
             countService.updateQuestionCounts(knowledgeBaseIds);
 
             // 2. Query rewrite + 动态参数检索
-            List<Message> effectiveHistory = sanitizeHistory(history);
+            List<ChatMessage> effectiveHistory = sanitizeHistory(history);
             QueryContext queryContext = buildQueryContext(question, effectiveHistory);
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 
@@ -400,21 +405,14 @@ public class KnowledgeBaseQueryService {
             String userPrompt = buildUserPrompt(context, question);
 
             // 5. 流式调用（带历史上下文）+ 探测窗口归一化
-            // TODO 阶段8：换 StreamingChatModel + Flux.create 桥接恢复真流式（SafeGuardStreamingChatModel）
-            // 当前临时退化为同步调用，结果作为单个 Flux 元素产出，探测窗口/实时推送语义降级
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(dev.langchain4j.data.message.SystemMessage.from(systemPrompt));
             if (!effectiveHistory.isEmpty()) {
                 messages.addAll(effectiveHistory);
             }
             messages.add(UserMessage.from(userPrompt));
-            String fullContent = getChatModel().chat(ChatRequest.builder()
-                    .messages(messages)
-                    .build())
-                    .aiMessage().text();
-            Flux<String> responseFlux = (fullContent == null || fullContent.isBlank())
-                    ? Flux.empty()
-                    : Flux.just(fullContent);
+            Flux<String> responseFlux = FluxStreamingBridge.stream(getStreamingChatModel(),
+                    ChatRequest.builder().messages(messages).build());
 
             log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
             Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);

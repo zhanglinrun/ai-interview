@@ -20,7 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -158,7 +157,7 @@ public class LlmProviderRegistry {
         log.info("[LlmProviderRegistry] Building StreamingChatModel - Provider: {}, BaseUrl: {}, Model: {}",
                  providerId, config.baseUrl(), config.model());
 
-        return OpenAiStreamingChatModel.builder()
+        StreamingChatModel raw = OpenAiStreamingChatModel.builder()
                 .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
                 .apiKey(config.apiKey())
                 .defaultRequestParameters(OpenAiChatRequestParameters.builder()
@@ -166,6 +165,7 @@ public class LlmProviderRegistry {
                         .temperature(config.temperature() != null ? config.temperature() : 0.2)
                         .build())
                 .build();
+        return new SafeGuardStreamingChatModel(raw, properties.getAdvisors());
     }
 
     private EmbeddingModel createEmbeddingModel(String providerId) {

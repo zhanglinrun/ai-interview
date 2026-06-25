@@ -18,9 +18,9 @@ import interview.guide.modules.knowledgebase.repository.RagChatMessageRepository
 import interview.guide.modules.knowledgebase.repository.RagChatSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -140,7 +140,7 @@ public class RagChatSessionService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 
         List<Long> kbIds = session.getKnowledgeBaseIds();
-        List<Message> history = queryProperties.getHistory().isEnabled()
+        List<ChatMessage> history = queryProperties.getHistory().isEnabled()
             ? loadHistoryMessages(sessionId)
             : List.of();
 
@@ -200,7 +200,7 @@ public class RagChatSessionService {
         log.info("删除会话: sessionId={}", sessionId);
     }
 
-    private List<Message> loadHistoryMessages(Long sessionId) {
+    private List<ChatMessage> loadHistoryMessages(Long sessionId) {
         int limit = queryProperties.getHistory().getMaxMessages() + 1;
         List<RagChatMessageEntity> recent = messageRepository
             .findRecentCompletedBySessionId(sessionId, PageRequest.of(0, limit));
@@ -215,8 +215,8 @@ public class RagChatSessionService {
 
         return historyMessages.reversed().stream()
             .map(m -> m.getType() == RagChatMessageEntity.MessageType.USER
-                ? (Message) new UserMessage(m.getContent())
-                : (Message) new AssistantMessage(m.getContent()))
+                ? (ChatMessage) UserMessage.from(m.getContent())
+                : (ChatMessage) AiMessage.from(m.getContent()))
             .toList();
     }
 
