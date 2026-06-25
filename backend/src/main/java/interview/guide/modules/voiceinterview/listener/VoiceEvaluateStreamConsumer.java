@@ -7,7 +7,7 @@ import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewEvaluationService;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.stream.StreamMessageId;
+import org.redisson.api.StreamMessageId;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;

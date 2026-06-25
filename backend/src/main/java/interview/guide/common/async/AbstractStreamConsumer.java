@@ -5,7 +5,7 @@ import interview.guide.infrastructure.redis.RedisService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.stream.StreamMessageId;
+import org.redisson.api.StreamMessageId;
 
 import java.time.Duration;
 import java.util.HashMap;

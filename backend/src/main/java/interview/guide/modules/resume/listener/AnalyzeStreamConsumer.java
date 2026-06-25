@@ -10,7 +10,7 @@ import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.resume.service.ResumeGradingService;
 import interview.guide.modules.resume.service.ResumePersistenceService;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.stream.StreamMessageId;
+import org.redisson.api.StreamMessageId;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;

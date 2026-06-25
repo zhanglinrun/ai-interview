@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.redisson.api.stream.StreamMessageId;
+import org.redisson.api.StreamMessageId;
 
 @DisplayName("Stream 消费者可靠性：幂等去重 / 重试 / 死信")
 @ExtendWith(MockitoExtension.class)

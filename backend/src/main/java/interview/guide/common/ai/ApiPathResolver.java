@@ -1,41 +1,27 @@
 package interview.guide.common.ai;
 
-import org.springframework.ai.openai.api.OpenAiApi;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
-
-import java.util.regex.Pattern;
-
+/**
+ * LLM Provider 的 OpenAI 兼容端点 baseUrl 适配。
+ *
+ * <p>LangChain4j 的 {@code OpenAiChatModel}/{@code OpenAiEmbeddingModel} 直接接收 baseUrl，
+ * 内部按 OpenAI 约定拼接相对路径（{@code /chat/completions}、{@code /embeddings}），
+ * 因此只需把各 Provider 的 baseUrl 规整为不含尾斜杠的完整 v1 端点即可。
+ *
+ * <p>DashScope 等兼容端点 baseUrl 形如 {@code https://dashscope.aliyuncs.com/compatible-mode/v1}，
+ * 直接传入即可拼出 {@code .../compatible-mode/v1/chat/completions}，无需额外路径配置。
+ */
 public final class ApiPathResolver {
 
-  private static final int DEFAULT_CONNECT_TIMEOUT = 10000;
-  private static final int DEFAULT_READ_TIMEOUT = 300000;
-
-  private static final Pattern TRAILING_VERSION = Pattern.compile("/v\\d+[a-zA-Z0-9]*$");
+  private static final java.util.regex.Pattern TRAILING_VERSION =
+      java.util.regex.Pattern.compile("/v\\d+[a-zA-Z0-9]*$");
 
   private ApiPathResolver() {}
 
-  public static OpenAiApi buildOpenAiApi(String baseUrl, String apiKey) {
-    return buildOpenAiApi(baseUrl, apiKey, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT);
-  }
-
-  public static OpenAiApi buildOpenAiApi(String baseUrl, String apiKey,
-      int connectTimeout, int readTimeout) {
-    SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-    requestFactory.setConnectTimeout(connectTimeout);
-    requestFactory.setReadTimeout(readTimeout);
-
-    RestClient.Builder restClientBuilder = RestClient.builder()
-        .requestFactory(requestFactory);
-
-    OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
-        .baseUrl(baseUrl)
-        .apiKey(apiKey)
-        .restClientBuilder(restClientBuilder);
-    if (baseUrlContainsVersion(baseUrl)) {
-      apiBuilder.completionsPath("/chat/completions").embeddingsPath("/embeddings");
-    }
-    return apiBuilder.build();
+  /**
+   * 规整 baseUrl：去尾斜杠。LangChain4j 会自行拼接 OpenAI 相对路径。
+   */
+  public static String resolveBaseUrl(String baseUrl) {
+    return stripTrailingSlashes(baseUrl);
   }
 
   public static boolean baseUrlContainsVersion(String baseUrl) {

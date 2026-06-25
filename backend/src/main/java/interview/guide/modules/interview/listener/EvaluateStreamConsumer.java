@@ -13,7 +13,7 @@ import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.stream.StreamMessageId;
+import org.redisson.api.StreamMessageId;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.core.type.TypeReference;
