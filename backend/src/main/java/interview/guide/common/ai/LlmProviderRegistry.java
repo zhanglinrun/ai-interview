@@ -141,7 +141,7 @@ public class LlmProviderRegistry {
         log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}",
                  providerId, config.baseUrl(), config.model());
 
-        return OpenAiChatModel.builder()
+        ChatModel raw = OpenAiChatModel.builder()
                 .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
                 .apiKey(config.apiKey())
                 .defaultRequestParameters(OpenAiChatRequestParameters.builder()
@@ -150,6 +150,7 @@ public class LlmProviderRegistry {
                         .build())
                 .maxRetries(1)
                 .build();
+        return new SafeGuardChatModel(raw, properties.getAdvisors());
     }
 
     private StreamingChatModel createStreamingChatModel(String providerId) {
