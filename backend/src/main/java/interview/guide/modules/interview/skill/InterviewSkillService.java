@@ -3,14 +3,13 @@ package interview.guide.modules.interview.skill;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.ai.PromptSanitizer;
 import interview.guide.common.ai.PromptSecurityConstants;
+import interview.guide.common.ai.PromptTemplate;
 import interview.guide.common.ai.StructuredOutputInvoker;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -58,7 +57,6 @@ public class InterviewSkillService {
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final StructuredOutputInvoker structuredOutputInvoker;
-    private final BeanOutputConverter<CategoryListDTO> jdOutputConverter;
     private final PromptTemplate jdSystemPromptTemplate;
     private final ResourceLoader resourceLoader;
     private final PromptSanitizer promptSanitizer;
@@ -85,7 +83,6 @@ public class InterviewSkillService {
         this.structuredOutputInvoker = structuredOutputInvoker;
         this.resourceLoader = resourceLoader;
         this.promptSanitizer = promptSanitizer;
-        this.jdOutputConverter = new BeanOutputConverter<>(CategoryListDTO.class) {};
         this.jdSystemPromptTemplate = new PromptTemplate(loadClasspathPrompt(JD_PARSE_SYSTEM_PROMPT_PATH));
     }
 
@@ -186,17 +183,17 @@ public class InterviewSkillService {
 
         log.info("开始解析 JD，长度: {}", jdText.length());
 
-        ChatClient chatClient = llmProviderRegistry.getDefaultChatClient();
+        ChatModel chatModel = llmProviderRegistry.getDefaultChatModel();
         String systemPrompt = jdSystemPromptTemplate.render(Map.of(
             "referenceFileList", cachedReferenceFileList
-        )) + "\n\n" + jdOutputConverter.getFormat();
+        ));
         String userPrompt = PromptSecurityConstants.DATA_BOUNDARY_INSTRUCTION + "\n" +
             "职位描述：\n" +
             promptSanitizer.wrapWithDelimiters("jd", promptSanitizer.sanitize(jdText));
 
         try {
             CategoryListDTO result = structuredOutputInvoker.invoke(
-                chatClient, systemPrompt, userPrompt, jdOutputConverter,
+                chatModel, systemPrompt, userPrompt, CategoryListDTO.class,
                 ErrorCode.AI_SERVICE_ERROR, "JD 解析失败：", "JD 解析", log
             );
 

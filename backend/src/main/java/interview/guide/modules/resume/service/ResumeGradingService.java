@@ -1,17 +1,16 @@
 package interview.guide.modules.resume.service;
 
 import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.common.ai.PromptTemplate;
 import interview.guide.common.ai.StructuredOutputInvoker;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse.ScoreDetail;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse.Suggestion;
+import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
@@ -23,7 +22,7 @@ import java.util.Map;
 
 /**
  * 简历评分服务
- * 使用Spring AI调用LLM对简历进行评分和建议
+ * 使用 LangChain4j 调用 LLM 对简历进行评分和建议
  */
 @Service
 public class ResumeGradingService {
@@ -33,7 +32,6 @@ public class ResumeGradingService {
     private final LlmProviderRegistry llmProviderRegistry;
     private final PromptTemplate systemPromptTemplate;
     private final PromptTemplate userPromptTemplate;
-    private final BeanOutputConverter<ResumeAnalysisResponseDTO> outputConverter;
     private final StructuredOutputInvoker structuredOutputInvoker;
     
     // 中间DTO用于接收AI响应
@@ -75,7 +73,6 @@ public class ResumeGradingService {
             resourceLoader.getResource(properties.getUserPromptPath())
                 .getContentAsString(StandardCharsets.UTF_8)
         );
-        this.outputConverter = new BeanOutputConverter<>(ResumeAnalysisResponseDTO.class);
     }
     
     /**
@@ -95,19 +92,19 @@ public class ResumeGradingService {
             Map<String, Object> variables = new HashMap<>();
             variables.put("resumeText", resumeText);
             String userPrompt = userPromptTemplate.render(variables);
-            
-            // 添加格式指令到系统提示词
-            String systemPromptWithFormat = systemPrompt + "\n\n" + outputConverter.getFormat();
-            
+
+            // system prompt 的 JSON 结构约束由 StructuredOutputInvoker 通过 responseSchema 传入
+            String systemPromptWithFormat = systemPrompt;
+
             // 调用AI
             ResumeAnalysisResponseDTO dto;
             try {
-                ChatClient chatClient = llmProviderRegistry.getDefaultChatClient();
+                ChatModel chatModel = llmProviderRegistry.getDefaultChatModel();
                 dto = structuredOutputInvoker.invoke(
-                    chatClient,
+                    chatModel,
                     systemPromptWithFormat,
                     userPrompt,
-                    outputConverter,
+                    ResumeAnalysisResponseDTO.class,
                     ErrorCode.RESUME_ANALYSIS_FAILED,
                     "简历分析失败：",
                     "简历分析",

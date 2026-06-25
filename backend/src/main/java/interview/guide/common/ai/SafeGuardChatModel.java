@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * SafeGuard prompt 注入防御代理（LangChain4j 版）。
@@ -38,7 +37,7 @@ public class SafeGuardChatModel implements ChatModel {
     public SafeGuardChatModel(ChatModel delegate, AdvisorConfig advisorConfig) {
         this.delegate = delegate;
         this.enabled = advisorConfig != null && advisorConfig.isSafeguardEnabled();
-        this.sensitiveWords = enabled && advisorConfig.getSafeguardWords() != null
+        this.sensitiveWords = (advisorConfig != null && advisorConfig.getSafeguardWords() != null)
             ? new ArrayList<>(advisorConfig.getSafeguardWords())
             : List.of();
     }

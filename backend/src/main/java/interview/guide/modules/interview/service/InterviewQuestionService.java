@@ -3,6 +3,7 @@ package interview.guide.modules.interview.service;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.ai.PromptSanitizer;
 import interview.guide.common.ai.PromptSecurityConstants;
+import interview.guide.common.ai.PromptTemplate;
 import interview.guide.common.ai.StructuredOutputInvoker;
 import interview.guide.common.constant.CommonConstants.InterviewDefaults;
 import interview.guide.common.exception.BusinessException;
@@ -13,11 +14,9 @@ import interview.guide.modules.interview.skill.InterviewSkillService;
 import interview.guide.modules.interview.skill.InterviewSkillService.CategoryDTO;
 import interview.guide.modules.interview.skill.InterviewSkillService.SkillDTO;
 import interview.guide.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
+import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
@@ -75,7 +74,6 @@ public class InterviewQuestionService {
     private final PromptTemplate skillUserPromptTemplate;
     private final PromptTemplate resumeSystemPromptTemplate;
     private final PromptTemplate resumeUserPromptTemplate;
-    private final BeanOutputConverter<QuestionListDTO> outputConverter;
     private final StructuredOutputInvoker structuredOutputInvoker;
     private final InterviewSkillService skillService;
     private final LlmProviderRegistry llmProviderRegistry;
@@ -104,7 +102,6 @@ public class InterviewQuestionService {
         this.skillUserPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionUserPromptPath());
         this.resumeSystemPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionSystemPromptPath());
         this.resumeUserPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionUserPromptPath());
-        this.outputConverter = new BeanOutputConverter<>(QuestionListDTO.class);
         this.followUpCount = Math.max(0, Math.min(properties.getFollowUpCount(), MAX_FOLLOW_UP_COUNT));
     }
 
@@ -129,8 +126,8 @@ public class InterviewQuestionService {
 
         SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
-        ChatClient questionChatClient =
-            llmProviderRegistry.getPlainChatClient(llmProvider);
+        ChatModel questionChatClient =
+            llmProviderRegistry.getChatModelOrDefault(llmProvider);
 
         boolean hasResume = resumeText != null && !resumeText.isBlank();
         String historicalSection = buildHistoricalSection(historicalQuestions);
@@ -188,7 +185,7 @@ public class InterviewQuestionService {
     }
 
     private List<InterviewQuestionDTO> generateResumeQuestions(
-            ChatClient questionClient, String resumeText, int questionCount,
+            ChatModel questionClient, String resumeText, int questionCount,
             SkillDTO skill, String difficultyDesc, String historicalSection) {
         try {
             Map<String, Object> variables = new HashMap<>();
@@ -201,12 +198,11 @@ public class InterviewQuestionService {
             variables.put("historicalSection", historicalSection);
 
             String systemPrompt = resumeSystemPromptTemplate.render()
-                + buildSkillPersonaSection(skill)
-                + "\n\n" + outputConverter.getFormat();
+                + buildSkillPersonaSection(skill);
             String userPrompt = resumeUserPromptTemplate.render(variables);
 
             QuestionListDTO dto = structuredOutputInvoker.invoke(
-                questionClient, systemPrompt, userPrompt, outputConverter,
+                questionClient, systemPrompt, userPrompt, QuestionListDTO.class,
                 ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
                 "简历题生成失败：", "简历题", log);
 
@@ -224,7 +220,7 @@ public class InterviewQuestionService {
     }
 
     private List<InterviewQuestionDTO> generateDirectionOnly(
-            ChatClient questionClient, SkillDTO skill, String difficultyDesc,
+            ChatModel questionClient, SkillDTO skill, String difficultyDesc,
             int questionCount, String historicalSection) {
         Map<String, Integer> allocation = skillService.calculateAllocation(skill.categories(), questionCount);
         String allocationTable = skillService.buildAllocationDescription(allocation, skill.categories());
@@ -246,12 +242,11 @@ public class InterviewQuestionService {
 
             String systemPrompt = skillSystemPromptTemplate.render()
                 + buildSkillPersonaSection(skill)
-                + GENERIC_MODE_SYSTEM_APPEND
-                + outputConverter.getFormat();
+                + GENERIC_MODE_SYSTEM_APPEND;
             String userPrompt = skillUserPromptTemplate.render(variables);
 
             QuestionListDTO dto = structuredOutputInvoker.invoke(
-                questionClient, systemPrompt, userPrompt, outputConverter,
+                questionClient, systemPrompt, userPrompt, QuestionListDTO.class,
                 ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
                 "方向题生成失败：", "方向题", log);
 

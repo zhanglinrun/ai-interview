@@ -1,21 +1,37 @@
 package interview.guide.common.ai;
 
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ChatRequestParameters;
+import dev.langchain4j.model.chat.request.json.JsonSchema;
+import dev.langchain4j.service.output.JsonSchemas;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import org.slf4j.Logger;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.Type;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * 统一封装结构化输出调用与重试策略。
+ * 统一封装结构化输出调用与重试策略（LangChain4j 版）。
+ *
+ * <p>替代 Spring AI 的 ChatClient + BeanOutputConverter 组合：通过
+ * {@link JsonSchemas#jsonSchemaFrom(Type)} 从目标 Java 类型生成 LC4j
+ * {@link JsonSchema}，以 {@link ChatRequestParameters#responseFormat} 传给
+ * {@link ChatModel#chat(ChatRequest)}，拿到 LLM 返回的 JSON 文本后用 Jackson
+ * 反序列化为目标类型。保留原有的重试、未转义引号本地修复、Micrometer 指标能力。
  */
 @Component
 public class StructuredOutputInvoker {
@@ -36,6 +52,7 @@ public class StructuredOutputInvoker {
     private static final Pattern NON_ALNUM_PATTERN = Pattern.compile("[^a-z0-9_]+");
     private static final Pattern MULTI_UNDERSCORE = Pattern.compile("_+");
 
+    private final ObjectMapper objectMapper;
     private final int maxAttempts;
     private final boolean includeLastErrorInRetryPrompt;
     private final boolean retryUseRepairPrompt;
@@ -46,8 +63,10 @@ public class StructuredOutputInvoker {
 
     public StructuredOutputInvoker(
         StructuredOutputProperties properties,
+        ObjectMapper objectMapper,
         @Autowired(required = false) MeterRegistry meterRegistry
     ) {
+        this.objectMapper = objectMapper;
         this.maxAttempts = Math.max(1, properties.getStructuredMaxAttempts());
         this.includeLastErrorInRetryPrompt = properties.isStructuredIncludeLastError();
         this.retryUseRepairPrompt = properties.isStructuredRetryUseRepairPrompt();
@@ -57,11 +76,24 @@ public class StructuredOutputInvoker {
         this.meterRegistry = meterRegistry;
     }
 
+    /**
+     * 调用 LLM 并把返回的 JSON 解析为目标类型 {@code T}，带重试与本地 JSON 修复。
+     *
+     * @param chatModel              LangChain4j ChatModel（通常经 LlmProviderRegistry 获取）
+     * @param systemPromptWithFormat system prompt（已含 JSON 格式约束；防御指令会自动追加）
+     * @param userPrompt             用户 prompt
+     * @param targetType             目标 Java 类型（Class、ParameterizedType 或 TypeReference）
+     * @param errorCode              解析失败兜底错误码
+     * @param errorPrefix            错误前缀描述
+     * @param logContext             日志上下文标签
+     * @param log                    调用方 logger
+     * @return 解析后的目标类型对象
+     */
     public <T> T invoke(
-        ChatClient chatClient,
+        ChatModel chatModel,
         String systemPromptWithFormat,
         String userPrompt,
-        BeanOutputConverter<T> outputConverter,
+        Type targetType,
         ErrorCode errorCode,
         String errorPrefix,
         String logContext,
@@ -71,18 +103,24 @@ public class StructuredOutputInvoker {
         String contextTag = normalizeContextTag(logContext);
         String securedSystemPrompt = systemPromptWithFormat
             + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
+        JsonSchema jsonSchema = resolveJsonSchema(targetType, logContext, log);
         Exception lastError = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             String attemptSystemPrompt = attempt == 1
                 ? securedSystemPrompt
                 : buildRetrySystemPrompt(securedSystemPrompt, lastError);
             try {
-                String content = chatClient.prompt()
-                    .system(attemptSystemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
-                T result = convertWithRepair(content, outputConverter, logContext, log);
+                ChatRequest request = ChatRequest.builder()
+                    .messages(
+                        SystemMessage.from(attemptSystemPrompt),
+                        UserMessage.from(userPrompt))
+                    .parameters(ChatRequestParameters.builder()
+                        .responseFormat(jsonSchema)
+                        .build())
+                    .build();
+                AiMessage aiMessage = chatModel.chat(request).aiMessage();
+                String content = aiMessage != null ? aiMessage.text() : null;
+                T result = convertWithRepair(content, targetType, logContext, log);
                 recordAttempt(contextTag, STATUS_SUCCESS);
                 recordInvocation(contextTag, STATUS_SUCCESS, startNanos);
                 return result;
@@ -107,26 +145,43 @@ public class StructuredOutputInvoker {
         );
     }
 
+    private JsonSchema resolveJsonSchema(Type targetType, String logContext, Logger log) {
+        Optional<JsonSchema> schema = JsonSchemas.jsonSchemaFrom(targetType);
+        if (schema.isEmpty()) {
+            throw new BusinessException(
+                ErrorCode.AI_SERVICE_ERROR,
+                "无法为目标类型生成 JSON Schema: " + (targetType != null ? targetType.getTypeName() : "null")
+            );
+        }
+        log.debug("{}生成 JSON Schema: type={}", logContext,
+            targetType != null ? targetType.getTypeName() : "null");
+        return schema.get();
+    }
+
     private <T> T convertWithRepair(
         String content,
-        BeanOutputConverter<T> outputConverter,
+        Type targetType,
         String logContext,
         Logger log
     ) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalStateException("LLM 返回内容为空，无法解析为结构化对象");
+        }
+        JavaType javaType = objectMapper.constructType(targetType);
         try {
-            return outputConverter.convert(content);
+            return objectMapper.readValue(content, javaType);
         } catch (Exception firstError) {
             String repaired = repairUnescapedQuotesInJsonStrings(content);
             if (!repaired.equals(content)) {
                 try {
-                    T result = outputConverter.convert(repaired);
+                    T result = objectMapper.readValue(repaired, javaType);
                     log.warn("{}结构化 JSON 存在未转义引号，已在本地修复后解析成功", logContext);
                     return result;
                 } catch (Exception repairError) {
                     firstError.addSuppressed(repairError);
                 }
             }
-            throw firstError;
+            throw new RuntimeException("结构化 JSON 解析失败: " + firstError.getMessage(), firstError);
         }
     }
 
