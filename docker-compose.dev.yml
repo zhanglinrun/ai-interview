@@ -5,7 +5,8 @@
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    # 向量存储已迁移到 Elasticsearch，PG 不再需要 pgvector 扩展，改用标准 postgres 镜像。
+    image: postgres:16
     container_name: interview-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -22,6 +23,24 @@ services:
       timeout: 5s
       retries: 5
 
+  elasticsearch:
+    # 向量存储（替代 pgvector）。单节点、关闭安全认证，仅本地开发用。
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: interview-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7
     container_name: interview-redis
@@ -36,6 +55,8 @@ services:
       retries: 5
 
   rustfs:
+    # S3 兼容对象存储。容器内固定 9000(API)/9001(控制台)，
+    # 宿主机映射到 9100/9101 以避开本机其他 MinIO 占用的 9000。
     image: rustfs/rustfs:latest
     container_name: interview-rustfs
     command: ["/data"]
@@ -45,8 +66,8 @@ services:
       RUSTFS_CONSOLE_ENABLE: "true"
       RUSTFS_ALLOW_INSECURE_DEFAULT_CREDENTIALS: "true"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9100:9000"
+      - "9101:9001"
     volumes:
       - rustfs_data:/data
     healthcheck:
@@ -55,10 +76,12 @@ services:
       timeout: 3s
       retries: 5
 
-# 首次启动后，浏览器访问 http://localhost:9001
-# 使用 ${RUSTFS_ACCESS_KEY} / ${RUSTFS_SECRET_KEY} 登录，手动创建名为 interview-guide 的 bucket
+# 首次启动后，浏览器访问 http://localhost:9101（RustFS 控制台，宿主机映射 9101）
+# 使用 ${APP_STORAGE_ACCESS_KEY} / ${APP_STORAGE_SECRET_KEY}（.env 中默认 minioadmin）登录，
+# 手动创建名为 interview-guide 的 bucket。API 端点为 http://localhost:9100。
 
 volumes:
   postgres_data:
+  elasticsearch_data:
   redis_data:
   rustfs_data:

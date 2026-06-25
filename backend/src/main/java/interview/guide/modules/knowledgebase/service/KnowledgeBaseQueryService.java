@@ -20,7 +20,6 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
 import dev.langchain4j.rag.content.Content;
@@ -78,7 +77,6 @@ public class KnowledgeBaseQueryService {
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final ElasticsearchEmbeddingStore embeddingStore;
-    private final EmbeddingModel embeddingModel;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
     private final RerankService rerankService;
@@ -99,7 +97,6 @@ public class KnowledgeBaseQueryService {
     public KnowledgeBaseQueryService(
             LlmProviderRegistry llmProviderRegistry,
             ElasticsearchEmbeddingStore embeddingStore,
-            EmbeddingModel embeddingModel,
             KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
             RerankService rerankService,
@@ -109,7 +106,6 @@ public class KnowledgeBaseQueryService {
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
         this.embeddingStore = embeddingStore;
-        this.embeddingModel = embeddingModel;
         this.listService = listService;
         this.countService = countService;
         this.rerankService = rerankService;
@@ -296,7 +292,7 @@ public class KnowledgeBaseQueryService {
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history) {
         InterviewElasticsearchContentRetriever retriever = new InterviewElasticsearchContentRetriever(
-            embeddingStore, embeddingModel, topk, minScore, knowledgeBaseIds);
+            embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore, knowledgeBaseIds);
         InterviewQueryTransformer transformer = new InterviewQueryTransformer(
             getChatModel(), rewritePromptTemplate, rewriteEnabled);
         InterviewReRankingContentAggregator aggregator = rerankEnabled && rerankService.isEnabled()

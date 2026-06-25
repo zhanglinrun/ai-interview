@@ -9,7 +9,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -35,8 +34,7 @@ public class KnowledgeBaseSegmentEntity {
     private Long id;
 
     /** 分段文本内容。 */
-    @Lob
-    @Column(nullable = false)
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String text;
 
     /** 业务 chunk ID（来自 splitter metadata，非 ES docId）。 */
@@ -44,7 +42,7 @@ public class KnowledgeBaseSegmentEntity {
     private String chunkId;
 
     /** 元数据 JSON（docId/version/fileName/headerLevel/parentChunkId 等）。 */
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String metadata;
 
     /** 所属知识库 ID。 */

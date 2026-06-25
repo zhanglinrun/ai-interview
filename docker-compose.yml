@@ -3,16 +3,16 @@ services:
   # 1. PostgreSQL 数据库服务
   # -----------------------------------------
   # 作用：
-  #   - 存储业务数据（用户、简历信息等）
-  #   - 存储向量数据（基于 pgvector 插件），用于 RAG（检索增强生成）知识库检索
+  #   - 存储业务数据（用户、简历、面试会话、知识库三表等）
   #
   # 教程知识点：
-  #   - 选用 pgvector/pgvector 镜像而不是标准的 postgres 镜像，是为了获得向量搜索能力。
-  #   - 向量数据库是 LLM 应用开发中的核心基础设施。
+  #   - 向量存储已迁移到 Elasticsearch（见下方 elasticsearch 服务），PG 不再需要 pgvector 插件，
+  #     改用标准 postgres:16 镜像，精简依赖。
+  #   - schema 演进由 Flyway 管理。
   # =========================================
   postgres:
-    # 使用带有 pgvector 插件的 PostgreSQL 16 镜像
-    image: pgvector/pgvector:pg16
+    # 标准 PostgreSQL 16 镜像（向量存储已迁至 Elasticsearch，不再需要 pgvector）
+    image: postgres:16
     container_name: interview-postgres
     environment:
       POSTGRES_USER: postgres
@@ -39,7 +39,8 @@ services:
   # -----------------------------------------
   # 作用：
   #   - 缓存：存储 Session、临时数据，提升系统性能
-  #   - 消息队列：利用 Redis Stream 实现异步任务处理（如简历分析、文档向量化）
+  #   - 消息队列：利用 Redis Stream 实现简历分析、面试评估的异步任务处理
+  #     （知识库向量化已迁移到 Spring 事件 + @Async，对齐 know-engine）
   #
   # 教程知识点：
   #   - 在轻量级架构中，Redis Stream 是 Kafka/RabbitMQ 的优秀替代方案，运维成本更低。
@@ -58,7 +59,35 @@ services:
       retries: 5
 
   # =========================================
-  # 3. MinIO 对象存储服务
+  # 3. Elasticsearch 向量存储服务
+  # -----------------------------------------
+  # 作用：
+  #   - 知识库 RAG 检索的向量存储（替代 pgvector，对齐 know-engine）
+  #   - LangChain4j ElasticsearchEmbeddingStore，1024 维 COSINE，KNN + 全文 + 混合检索
+  #
+  # 教程知识点：
+  #   - 单节点 + 关闭安全认证，仅适用于本地开发/演示；生产环境应启用集群与 xpack 安全。
+  #   - 后端通过 ES_HOST 环境变量连接，索引名 interview-guide-vector（见 .env.example）。
+  # =========================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: interview-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # =========================================
+  # 4. MinIO 对象存储服务
   # -----------------------------------------
   # 作用：
   #   - 存储非结构化数据：用户上传的简历(PDF/Word)、头像、知识库文档等
@@ -89,7 +118,7 @@ services:
       retries: 5
 
   # =========================================
-  # 4. MinIO 初始化任务 (Init Container Pattern)
+  # 5. MinIO 初始化任务 (Init Container Pattern)
   # -----------------------------------------
   # 作用：
   #   - 自动创建项目所需的存储桶 (Bucket)
@@ -116,7 +145,7 @@ services:
       "
 
   # =========================================
-  # 5. 后端应用服务 (Spring Boot)
+  # 6. 后端应用服务 (Spring Boot)
   # -----------------------------------------
   # 作用：
   #   - 提供 RESTful API
@@ -132,6 +161,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -149,7 +180,12 @@ services:
       # === Redis 连接 ===
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      
+
+      # === Elasticsearch 向量存储 ===
+      ES_HOST: http://elasticsearch:9200
+      ES_INDEX_NAME: interview-guide-vector
+      ES_DIMENSIONS: 1024
+
       # === 对象存储配置 ===
       # 注意：后端在容器内访问 MinIO，使用 http://minio:9000
       APP_STORAGE_ENDPOINT: http://minio:9000
@@ -170,7 +206,7 @@ services:
       - "8080:8080"
 
   # =========================================
-  # 6. 前端应用服务 (Vue/React + Nginx)
+  # 7. 前端应用服务 (Vue/React + Nginx)
   # -----------------------------------------
   # 作用：
   #   - 提供用户界面
@@ -192,5 +228,6 @@ services:
 # =========================================
 volumes:
   postgres_data:
+  elasticsearch_data:
   redis_data:
   minio_data:

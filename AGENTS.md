@@ -1,6 +1,6 @@
 # AI Interview Platform 编码规范
 
-Spring Boot 4.0 + Java 21 + Spring AI + React 面试平台。写代码时遵守以下规则。
+Spring Boot 4.0 + Java 21 + LangChain4j + Elasticsearch + React 面试平台。写代码时遵守以下规则。
 
 ---
 
@@ -41,9 +41,17 @@ interview.guide/
     │   ├── agent/                    #   ReAct Agent：自适应出题（知识库检索、简历读取）
     │   ├── skill/                    #   Skill 管理：10+ 方向、JD 解析、分类匹配
     │   └── listener/                 #   异步评估（Redis Stream 消费者）
-    ├── knowledgebase/                #   知识库：文档上传、向量化（pgvector）、RAG 查询
-    │   ├── listener/                 #   向量化 Stream 消费者
-    │   └── service/                  #   混合检索、查询改写、Rerank、聊天会话
+    ├── knowledgebase/                #   知识库：三表（文档/版本/分段）+ 版本管理 + Spring 事件向量化 + RAG 查询
+    │   ├── constant/                 #   DocumentStatus/SegmentStatus/SplitType/FileType 状态机
+    │   ├── config/                   #   ElasticSearchConfiguration、MineruProperties
+    │   ├── event/                    #   DocumentChunkedEvent + DocumentEventListener（@Async+AFTER_COMMIT）
+    │   ├── job/                      #   DocumentCompensationJob（@Scheduled 向量化补偿 + 旧版本清理）
+    │   ├── model/                    #   KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）
+    │   ├── rag/                      #   ContentRetriever/Aggregator/QueryTransformer/QueryRouter（对齐 know-engine）
+    │   ├── repository/               #   KnowledgeBase + Version + Segment Repository
+    │   ├── service/                  #   DocumentProcessService 编排、版本管理、分段、VectorStore、RAG 查询、Rerank
+    │   │   └── parse/                #   FileProcessService 工厂 + MineruProcessService + MarkdownProcessService
+    │   └── service/splitter/         #   MarkdownHeaderParent/BrotherTextSplitter（对齐 know-engine）
     ├── interviewschedule/            #   面试安排：日历管理、AI 解析面试邀请、提醒
     ├── voiceinterview/               #   语音面试：WebSocket 实时通话、Qwen3 ASR/TTS
     │   ├── handler/                  #   WebSocket 处理器（实时字幕、VAD 断句）
@@ -52,7 +60,7 @@ interview.guide/
         └── service/                  #   API Key 加密、连通性测试、启动加载
 ```
 
-**技术栈**：Spring Boot 4.0.1 / Java 21（虚拟线程）/ Spring AI 2.0.0-M4 / Spring AI Agent Utils 0.7.0 / JPA + PostgreSQL + pgvector / Redisson 4.0.0 / Redis Stream / MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 / DashScope SDK 2.22.7（ASR/TTS）
+**技术栈**：Spring Boot 4.0.1 / Java 21（虚拟线程）/ LangChain4j 1.11.0（替代 Spring AI，对齐 know-engine）/ JPA + PostgreSQL + Flyway / Elasticsearch（向量存储，替代 pgvector）/ Redisson 3.50.0 / Redis Stream（简历/面试评估）+ Spring 事件（知识库向量化）/ MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 + MinerU（文档解析，Tika fallback）/ DashScope SDK 2.22.7（ASR/TTS）
 
 **前端**：React 18.3 + TypeScript 5.6 + Vite 5.4 + Tailwind CSS 4.1 + React Router 7.11 + Framer Motion 12.23（`frontend/` 目录）
 
@@ -76,8 +84,8 @@ Controller → Service → Repository
 ### Service 层
 
 - 业务逻辑编排，合理拆分大 Service（如 `ResumeUploadService`、`ResumeParseService`、`ResumeGradingService`）
-- 使用 `LlmProviderRegistry.getChatClientOrDefault(provider)` 获取 ChatClient（支持多 Provider）
-- 异步任务通过 Redis Stream（`AbstractStreamProducer/Consumer` 模板）
+- 使用 `LlmProviderRegistry.getChatModelOrDefault(provider)` 获取 LangChain4j `ChatModel`（流式用 `getStreamingChatModelOrDefault`，嵌入用 `getDefaultEmbeddingModel`，支持多 Provider）
+- 异步任务：简历分析/面试评估用 Redis Stream（`AbstractStreamProducer/Consumer` 模板），知识库向量化用 Spring 事件（`DocumentChunkedEvent` + `@Async`）
 - 所有业务异常使用 `BusinessException(ErrorCode.XXX, message)`，禁止 `RuntimeException`
 
 ### Repository 层
@@ -145,43 +153,69 @@ public Result<QueryResponse> queryKnowledgeBase(...) { ... }
 
 ---
 
-## 六、异步任务（Redis Stream）
+## 六、异步任务
+
+项目有两种异步机制：
+
+### Redis Stream（简历分析、面试评估）
 
 使用 `AbstractStreamProducer` / `AbstractStreamConsumer` 模板：
 
 ```java
 // 生产者
-public class VectorizeStreamProducer extends AbstractStreamProducer<KnowledgeBaseTask> { ... }
+public class ResumeAnalyzeStreamProducer extends AbstractStreamProducer<ResumeAnalyzeTask> { ... }
 
 // 消费者
-public class VectorizeStreamConsumer extends AbstractStreamConsumer<KnowledgeBaseTask> { ... }
+public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluatePayload> { ... }
 ```
 
-- 三个管道：知识库向量化、简历分析、面试评估
+- 两条管道：简历分析、面试评估（知识库向量化已迁至 Spring 事件，见下）
 - 常量定义在 `AsyncTaskStreamConstants`
 - 消费者实现 `processMessage()` 方法
 - **失败重试**：最大 3 次，超过后标记 FAILED
 - **实体删除**：异步处理前校验实体是否存在，不存在直接 ACK 丢弃
 
+### Spring 事件（知识库向量化，对齐 know-engine）
+
+```java
+// 切块完成后发布事件
+eventPublisher.publishEvent(new DocumentChunkedEvent(docId, versionId, segmentCount));
+
+// 监听器 @Async + AFTER_COMMIT 异步触发向量化
+@Async("eventListenerExecutor")
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void onDocumentChunked(DocumentChunkedEvent event) { ... }
+```
+
+- `DocumentChunkedEvent` + `DocumentEventListener`（`@Async` + `AFTER_COMMIT`，保证切块事务提交后才向量化）
+- 线程池 `eventListenerExecutor`（`AsyncConfig`，ThreadPoolTaskExecutor 核心4/最大8/队列50/CallerRunsPolicy）
+- **无显式 FAILED**：失败靠版本停在 `CHUNKED`，由 `DocumentCompensationJob`（`@Scheduled`）兜底重试
+- **补偿任务**：`@Scheduled` 替代 XXL-Job（向量化补偿扫 CHUNKED 重试 + 旧版本清理扫残留 segment）
+
 ---
 
 ## 七、AI 服务调用
 
-### LLM Provider
+### LLM Provider（LangChain4j，对齐 know-engine）
 
 ```java
-// 统一通过 Registry 获取，支持多 Provider 路由
-ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+// 统一通过 Registry 获取 ChatModel / StreamingChatModel / EmbeddingModel，支持多 Provider 路由
+ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+StreamingChatModel streamingChatModel = llmProviderRegistry.getStreamingChatModelOrDefault(provider);
+EmbeddingModel embeddingModel = llmProviderRegistry.getDefaultEmbeddingModel();
 ```
 
-- 配置：`app.ai.providers.{providerId}.baseUrl/apiKey/model`
-- 默认 Provider：`app.ai.default-provider`
+- 已从 Spring AI `ChatClient` 迁移到 LangChain4j `ChatModel` / `StreamingChatModel` / `EmbeddingModel`
+- 配置：`app.ai.providers.{providerId}.baseUrl/apiKey/model`，默认 Provider `app.ai.default-provider`
+- 敏感词过滤：`SafeGuardChatModel` / `SafeGuardStreamingChatModel` 包装底层模型
+- ReAct Agent：用 LangChain4j `AiServices` + `@Tool` 方法（`InterviewAgentLoop`），`ToolListener` 捕获执行轨迹，`ThreadLocal` 传 `AgentToolContext`
+- RAG 编排：用 LangChain4j `DefaultRetrievalAugmentor` + `ContentRetriever`/`ContentAggregator`/`QueryTransformer`/`QueryRouter`（对齐 know-engine，见 `modules/knowledgebase/rag/`）
 
 ### 结构化输出
 
 ```java
 // 使用 StructuredOutputInvoker 做重试包装
-String result = structuredOutputInvoker.invokeStructuredOutput(prompt, ChatClient, outputConverter);
+String result = structuredOutputInvoker.invokeStructuredOutput(prompt, ChatModel, outputConverter);
 ```
 
 ### Prompt 模板
@@ -220,11 +254,13 @@ String result = structuredOutputInvoker.invokeStructuredOutput(prompt, ChatClien
 
 ---
 
-## 十一、数据库
+## 十一、数据库与向量存储
 
-- PostgreSQL + pgvector（向量搜索，1024 维 COSINE）
+- PostgreSQL（关系数据，业务表）+ Flyway（数据库版本迁移）
+- Elasticsearch（向量存储，替代 pgvector；LangChain4j `ElasticsearchEmbeddingStore`，1024 维 COSINE，单一索引靠 metadata docId/version 区分）
+- 知识库三表结构：`knowledge_bases`（文档主表）+ `knowledge_base_version`（版本表）+ `knowledge_base_segment`（分段表，存 chunk 文本 + embeddingId + 分段级状态机）
 - JPA 实体使用 `@Data`、`@Builder`、`@NoArgsConstructor`、`@AllArgsConstructor`
-- `ddl-auto` 开发环境 `update`，生产环境 `false`（表结构由 JPA Entity 注解驱动，无需手动迁移）
+- `ddl-auto` 开发环境 `update`，生产环境 `false`（表结构由 JPA Entity 注解驱动 + Flyway 迁移）
 
 ---
 

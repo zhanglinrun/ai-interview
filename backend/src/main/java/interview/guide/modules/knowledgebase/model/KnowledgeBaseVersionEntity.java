@@ -9,7 +9,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -50,7 +49,7 @@ public class KnowledgeBaseVersionEntity {
     private String convertedDocUrl;
 
     /** 转换后 Markdown 文本内容（解析产物，split 时直接取，省存储往返）。 */
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String convertedContent;
 
     /** 文档内容 SHA-256（跨版本去重）。 */

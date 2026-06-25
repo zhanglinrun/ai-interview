@@ -35,7 +35,7 @@ spring:
       api-key: test-api-key
       chat:
         options:
-      model: qwen3.5-flash
+          model: qwen3.5-flash
           temperature: 0.2
       embedding:
         options:
@@ -50,6 +50,13 @@ spring:
         dimensions: 1024
         initialize-schema: false
         remove-existing-vector-store-table: false
+
+# Elasticsearch 向量存储（测试环境指向本地 ES，bean 创建时不真实连接，
+# 仅保证 ElasticSearchProperties.host 非空，避免 RestClient bean 初始化 NPE）
+elasticsearch:
+  host: ${ES_HOST:http://localhost:9200}
+  index-name: interview-guide-vector
+  dimensions: 1024
 
 app:
   ai:

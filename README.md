@@ -6,7 +6,9 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green?logo=springboot)](https://spring.io/projects/spring-boot)
 [![React](https://img.shields.io/badge/React-18.3-blue?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-336791?logo=postgresql)](https://www.postgresql.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791?logo=postgresql)](https://www.postgresql.org/)
+[![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.x-005571?logo=elasticsearch)](https://www.elastic.co/elasticsearch/)
+[![LangChain4j](https://img.shields.io/badge/LangChain4j-1.11.0-blueviolet?logo=langchain)](https://docs.langchain4j.dev/)
 
 
 </div>
@@ -24,7 +26,7 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 - **统一评估引擎**：文字面试和语音面试使用同一套评估逻辑，结果可对比分析
 - **实时语音面试**：WebSocket 双向通信，支持流式对话、自动断句、回声防护和暂停恢复
 - **多模型管理**：支持 DashScope、Kimi、DeepSeek、GLM 等多个 LLM Provider，运行时可视化切换
-- **RAG 知识库**：混合检索 + 查询改写 + 智能 Rerank，提供专业领域问答能力
+- **RAG 知识库**：LangChain4j `DefaultRetrievalAugmentor` 编排 + 混合检索 + 查询改写 + RRF 融合 + 智能 Rerank（对齐 know-engine），提供专业领域问答能力
 
 ## 系统架构
 
@@ -46,26 +48,29 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 | --------------------- | ----- | ----------------------------- |
 | Spring Boot           | 4.0.1 | 应用框架                      |
 | Java                  | 21    | 开发语言（虚拟线程）          |
-| Spring AI             | 2.0.0-M4 | AI 集成框架、OpenAI 兼容模型接入 |
-| Spring AI Agent Utils | 0.7.0 | Skill 资源加载、Advisor 能力扩展 |
-| PostgreSQL + pgvector | 14+   | 关系数据库 + 向量存储（Compose 默认 PG16） |
-| Redis + Redisson      | 6+ / 4.0.0 | 缓存 + 消息队列（Stream） |
-| Apache Tika           | 2.9.2 | 文档解析                      |
+| LangChain4j           | 1.11.0 | AI 编排框架（替代 Spring AI，对齐 know-engine；OpenAI 兼容模型接入、AiServices、RAG、Agent）|
+| PostgreSQL + Flyway   | 14+ / 11.x | 关系数据库 + 版本迁移 |
+| Elasticsearch         | 8.x   | 向量存储（替代 pgvector，LangChain4j ElasticsearchEmbeddingStore，1024 维 COSINE）|
+| Redis + Redisson      | 6+ / 3.50.0 | 缓存 + 消息队列（Stream，简历/面试评估）|
+| Spring 事件 + @Async  | -     | 知识库向量化异步（对齐 know-engine，DocumentChunkedEvent + AFTER_COMMIT）|
+| Apache Tika + MinerU  | 2.9.2 / - | 文档解析（MinerU 主路径，Tika fallback）|
 | iText 8               | 8.0.5 | PDF 导出                      |
 | MapStruct             | 1.6.3 | 对象映射                      |
-| SpringDoc OpenAPI     | 3.0.2 | API 接口文档                  |
+| SpringDoc OpenAPI     | 2.8.17 | API 接口文档                  |
 | DashScope SDK         | 2.22.7 | 语音识别/合成（Qwen3 ASR/TTS）|
 | AWS S3 SDK            | 2.29.51 | S3 兼容对象存储（MinIO/RustFS）|
+| XXL-Job（可选）       | 3.2.0 | 分布式任务调度（已用 @Scheduled 替代，依赖保留）|
 | WebSocket             | -     | 语音面试实时双向通信          |
 | Maven                 | 3.8+  | 构建工具                      |
 
 技术选型常见问题解答：
 
-1. 数据存储为什么选择 PostgreSQL + pgvector？PG 的向量数据存储功能够用了，精简架构，不想引入太多组件。
-2. 为什么引入 Redis？
+1. AI 编排为什么从 Spring AI 迁移到 LangChain4j？为了对齐企业级 RAG 项目 know-engine 的架构（AiServices、`DefaultRetrievalAugmentor` + `ContentRetriever`/`ContentAggregator` 编排、Elasticsearch 向量存储），LangChain4j 的 RAG 抽象更成熟，便于复刻 know-engine 的混合检索 + Rerank + 多路召回 + RRF 融合能力。
+2. 向量存储为什么从 pgvector 换成 Elasticsearch？对齐 know-engine 用 ES 做向量 + 全文 + 混合检索（KNN），ES 的 metadata filter 删除（按 docId/version）和规模化能力更适合知识库版本管理场景。单一索引靠 metadata 的 docId/version 区分文档版本。
+3. 为什么引入 Redis？
    - Redis 替代 `ConcurrentHashMap` 实现面试会话的缓存。
-   - 基于 Redis Stream 实现简历分析、知识库向量化等场景的异步（还能解耦，分析和向量化可以使用其他编程语言来做）。不使用 [Kafka](https://javaguide.cn/high-performance/message-queue/kafka-questions-01.html) 这类成熟的消息队列，也是不想引入太多组件。
-3. 构建工具已迁移为 Maven，后端通过根目录父 POM 管理 `backend` 模块，便于使用标准 Maven 命令编译、测试和打包。
+   - 基于 Redis Stream 实现简历分析、面试评估的异步（还能解耦，分析和评估可以使用其他编程语言来做）。知识库向量化已迁移到 Spring 事件 + `@Async`（对齐 know-engine，`DocumentChunkedEvent` + `AFTER_COMMIT`）。
+4. 构建工具已迁移为 Maven，后端通过根目录父 POM 管理 `backend` 模块，便于使用标准 Maven 命令编译、测试和打包。数据库版本迁移用 Flyway。
 
 ### 前端技术
 
@@ -123,8 +128,10 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 
 ### 知识库管理模块
 
-- **文档智能处理**：支持 PDF、DOCX、Markdown 等多种格式文档的自动上传、分块与异步向量化。
-- **RAG 检索增强**：集成 pgvector，通过查询改写、相似度阈值和 TopK 策略提升 AI 问答的准确性与专业度。
+- **三表 + 版本管理**：文档主表 + 版本表 + 分段表（对齐 know-engine），支持语义版本号、版本切换、激活/失效、旧版本自动清理。
+- **文档智能处理**：MinerU 解析 PDF/DOC/HTML 为 Markdown（保留标题层级/表格/公式，Tika fallback），MarkdownHeaderBrotherTextSplitter 按标题切块。
+- **Spring 事件异步向量化**：切块完成发布 `DocumentChunkedEvent`，`@Async` + `AFTER_COMMIT` 异步嵌入写 Elasticsearch；失败由 `@Scheduled` 补偿任务重试。
+- **RAG 检索增强**：Elasticsearch 向量存储 + LangChain4j `DefaultRetrievalAugmentor`（`ContentRetriever`/`ContentAggregator`/`QueryTransformer`/`QueryRouter`），查询改写 + RRF 融合 + Rerank 提升 AI 问答准确性与专业度。
 - **流式响应交互**：基于 SSE（Server-Sent Events）技术实现打字机式流式响应。
 - **智能问答对话**：支持会话管理、置顶、多知识库关联、Markdown 展示和虚拟列表渲染。
 - **知识库运维**：支持分类管理、下载、重新向量化、搜索和统计信息展示。
@@ -219,9 +226,17 @@ interview-guide/
 │   │       │   ├── listener/         # 异步评估 Stream 消费者
 │   │       │   └── service/          # 会话管理、出题、追问、评估
 │   │       ├── interviewschedule/    # 面试安排模块
-│   │       ├── knowledgebase/        # 知识库模块
-│   │       │   ├── listener/         # 向量化 Stream 消费者
-│   │       │   └── service/          # 混合检索、查询改写、Rerank、聊天会话
+│   │       ├── knowledgebase/        # 知识库模块（三表 + 版本管理 + Spring 事件向量化 + RAG）
+│   │       │   ├── constant/         # DocumentStatus/SegmentStatus/SplitType/FileType 状态机
+│   │       │   ├── config/           # ElasticSearchConfiguration、MineruProperties
+│   │       │   ├── event/            # DocumentChunkedEvent + DocumentEventListener（@Async+AFTER_COMMIT）
+│   │       │   ├── job/              # DocumentCompensationJob（@Scheduled 向量化补偿 + 旧版本清理）
+│   │       │   ├── model/            # KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）
+│   │       │   ├── rag/              # ContentRetriever/Aggregator/QueryTransformer/QueryRouter（对齐 know-engine）
+│   │       │   ├── repository/       # KnowledgeBase + Version + Segment Repository
+│   │       │   ├── service/          # DocumentProcessService 编排、版本管理、分段、VectorStore、RAG 查询、Rerank
+│   │       │   │   └── parse/        # FileProcessService 工厂 + MineruProcessService + MarkdownProcessService
+│   │       │   └── service/splitter/ # MarkdownHeaderParent/BrotherTextSplitter
 │   │       ├── llmprovider/          # 多模型 Provider 与语音配置
 │   │       │   └── service/          # API Key 加密、连通性测试、启动加载
 │   │       ├── resume/               # 简历模块
@@ -276,7 +291,9 @@ interview-guide/
 | pnpm          | 10+  | 推荐 | 前端包管理器（项目 packageManager 指定 10.26）|
 | Docker        | -    | 推荐 | 一键启动依赖服务（PostgreSQL/Redis/RustFS）|
 
-> 如果不用 Docker，需要自行安装 PostgreSQL 14+（含 pgvector 扩展）、Redis 6+ 和 S3 兼容存储。
+> 如果不用 Docker，需要自行安装 PostgreSQL 14+、Elasticsearch 8.x（向量存储）、Redis 6+ 和 S3 兼容存储。
+>
+> **向量存储说明**：已从 pgvector 迁移到 Elasticsearch。`docker-compose.dev.yml` 和 `docker-compose.yml` 均已内置 ES 服务（`docker.elastic.co/elasticsearch/elasticsearch:8.17.0`，单节点 + 关闭安全认证，端口 9200），随 `docker compose up` 自动拉起，无需单独启动。
 
 ### 1. 克隆项目
 
@@ -360,7 +377,7 @@ pnpm dev
 
 本项目提供了完整的 Docker 支持，可以一键启动所有服务（前后端、数据库、中间件）。
 
-Docker Compose 编排了 6 个服务：PostgreSQL（pgvector）、Redis、MinIO（S3 兼容存储）、MinIO Bucket 初始化、Spring Boot 后端、React 前端（Nginx）。数据通过 Docker 命名卷持久化，`docker-compose down` 不会丢失数据。
+Docker Compose 编排了 7 个服务：PostgreSQL、Elasticsearch（向量存储）、Redis、MinIO（S3 兼容存储）、MinIO Bucket 初始化、Spring Boot 后端、React 前端（Nginx）。数据通过 Docker 命名卷持久化，`docker-compose down` 不会丢失数据。
 
 ### 1. 前置准备
 
@@ -405,7 +422,8 @@ docker-compose up -d --build
 | **接口文档**     | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) | - | - | SpringDoc/Swagger UI |
 | **MinIO 控制台** | [http://localhost:9001](http://localhost:9001) | `minioadmin` | `minioadmin` | 对象存储管理           |
 | **MinIO API**    | `localhost:9000`                               | -            | -            | S3 兼容接口            |
-| **PostgreSQL**   | `localhost:5432`                               | `postgres`   | `password`   | 数据库 (包含 pgvector) |
+| **PostgreSQL**   | `localhost:5432`                               | `postgres`   | `password`   | 业务关系数据库         |
+| **Elasticsearch**| `localhost:9200`                                | -            | -            | 向量存储（替代 pgvector，compose 内置）|
 | **Redis**        | `localhost:6379`                               | -            | -            | 缓存与消息队列         |
 
 ### 4. 常用运维命令
@@ -463,18 +481,14 @@ jpa:
 
 ### Q: 知识库向量化失败
 
-当 `initialize-schema: false` 时，Spring AI **不会自动创建** `vector_store` 表。
+知识库向量化已从 pgvector 迁移到 Elasticsearch + Spring 事件编排（对齐 know-engine）。排查思路：
 
-```java
-spring:
-  ai:
-    vectorstore:
-      pgvector:
-        initialize-schema: true 
+1. **Elasticsearch 连通性**：检查 `elasticsearch.host` 配置和 ES 服务是否启动，向量索引（默认 `interview-guide-vector`）是否就绪。
+2. **状态机**：文档/版本状态 `CONVERTED → CHUNKED → VECTOR_STORED`。停在 `CHUNKED` 表示向量化未完成，`@Scheduled` 补偿任务（每 5 分钟）会自动重试；也可手动调 `POST /api/document/activate-version`。
+3. **MinerU 解析**：`file.parse.mineru.enabled=false` 或 MinerU 服务不可达时自动降级 Tika；若 Markdown 解析为空，检查原文件格式。
+4. **Embedding 模型**：向量化用 `LlmProviderRegistry.getDefaultEmbeddingModel()`（DashScope text-embedding-v3，1024 维），确认默认 Provider 的 embedding 模型配置正确。
 
-```
-
-建议开发环境设置为 true，方便快速启动。生产环境设置为 false，手动管理数据库 schema，避免意外变更。
+> 旧 pgvector `vector_store` 表 + `spring.ai.vectorstore.pgvector.initialize-schema` 配置已废弃。
 
 ### Q: 简历分析失败
 

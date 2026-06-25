@@ -7,7 +7,7 @@ logging:
     file: UTF-8
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8082}
   # 明确指定HTTP响应编码
   servlet:
     encoding:
@@ -56,6 +56,12 @@ spring:
       - optional:file:../.env[.properties]
   application:
     name: ai-interview-platform
+
+  # 排除 Neo4j 向量存储自动配置（阶段9引入 graph RAG 后实际退化为单一 ES 数据源，
+  # 未使用 Neo4jEmbeddingStore；本地/部署未配 Neo4j 时其 autoconfig 会因 driver=null 失败）
+  autoconfigure:
+    exclude:
+      - dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration
 
   # 启用虚拟线程 (Java 21+)
   # 显著提升 I/O 密集型场景的并发能力，特别适合 AI 调用和 SSE 长连接
@@ -112,7 +118,13 @@ spring:
           subscriptionConnectionPoolSize: 50
   
   # LangChain4j 配置（chat + embedding 由 app.ai.providers 驱动 LlmProviderRegistry 手动构造）
-  # 向量存储迁移到 Elasticsearch（见 app.elasticsearch / app.rag 段），pgvector 配置已移除
+  # 向量存储迁移到 Elasticsearch（见顶层 elasticsearch 段 / app.ai.rag 段），pgvector 配置已移除
+
+# Elasticsearch 向量存储配置（LangChain4j ElasticsearchEmbeddingStore，详见 ElasticSearchProperties）
+elasticsearch:
+  host: ${ES_HOST:http://localhost:9200}
+  index-name: ${ES_INDEX_NAME:interview-guide-vector}
+  dimensions: ${ES_DIMENSIONS:1024}
 
 # Application custom configuration
 app:
