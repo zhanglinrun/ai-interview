@@ -1,9 +1,11 @@
 package interview.guide.modules.knowledgebase.service;
 
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.scoring.ScoringModel;
 import interview.guide.common.config.LlmProviderProperties;
 import interview.guide.common.config.LlmProviderProperties.ProviderConfig;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -15,15 +17,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 文档重排服务：调用 DashScope gte-rerank 对融合后的候选文档重排。
- * <p>
- * DashScope rerank 接口不是 OpenAI 兼容格式，因此用 RestClient 直连
- * text-rerank 端点，而非复用 OpenAI ChatClient。任何失败都会安全降级，
- * 返回入参原顺序，由上层退回 RRF 融合排序。
+ * 文档重排服务（LangChain4j {@link ScoringModel} 实现）：调用 DashScope gte-rerank 对候选片段重排。
+ *
+ * <p>移植对齐 know-engine 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），
+ * 但 know-engine 用本地 ONNX {@code BgeScoringModel}，本项目复用现有 DashScope gte-rerank 云端 API
+ * （非 OpenAI 兼容格式，用 RestClient 直连 text-rerank 端点）。
+ *
+ * <p>实现 {@link ScoringModel#scoreAll(List, String)} 返回每个 segment 与 query 的相关性分列表
+ * （顺序与输入一致），由 {@code ReRankingContentAggregator} 负责按分排序与截断；任何失败安全降级，
+ * 返回等分（0.0）列表让上层退回原序。{@link #rerank(String, List)} 保留供非 Aggregator 编排路径使用。
  */
 @Slf4j
 @Service
-public class RerankService {
+public class RerankService implements ScoringModel {
 
     private static final int DEFAULT_TIMEOUT_MS = 3000;
     private static final String RERANK_PATH =
@@ -56,7 +62,7 @@ public class RerankService {
 
         this.available = apiKey != null && !apiKey.isBlank();
         if (!available) {
-            log.warn("[RerankService] 未找到 dashscope API Key，重排不可用，将始终退回融合排序");
+            log.warn("[RerankService] 未找到 dashscope API Key，重排不可用，将始终退回原序");
         }
     }
 
@@ -68,93 +74,130 @@ public class RerankService {
     }
 
     /**
-     * 对候选文档按与 query 的相关性重排，返回前 topN。
-     * 任何异常都安全降级：返回入参原顺序的前 topN。
+     * 对候选片段按与 query 的相关性重排，返回前 topN。
+     * 任何异常都安全降级：返回入参原顺序的前 topN。供非 Aggregator 编排路径使用。
      *
      * @param query     查询文本
-     * @param documents 融合后的候选文档（已带 RRF 顺序）
-     * @return 重排后的文档（每个文档的 score 被更新为 rerank 相关性分），最多 topN 个
+     * @param segments  候选片段
+     * @return 重排后的片段（最多 topN 个）
      */
-    public List<Document> rerank(String query, List<Document> documents) {
+    public List<TextSegment> rerank(String query, List<TextSegment> segments) {
         int topN = Math.max(1, rerankProps.getTopN());
-        if (documents == null || documents.isEmpty()) {
+        if (segments == null || segments.isEmpty()) {
             return List.of();
         }
-        if (documents.size() <= topN) {
-            return documents;
+        if (segments.size() <= topN) {
+            return segments;
         }
         if (!isEnabled() || query == null || query.isBlank()) {
-            return capList(documents, topN);
+            return capList(segments, topN);
         }
-
         try {
-            List<String> texts = documents.stream().map(Document::getText).toList();
-            Map<String, Object> input = Map.of("query", query, "documents", texts);
-            Map<String, Object> parameters = Map.of(
-                "return_documents", false,
-                "top_n", Math.min(topN, texts.size())
-            );
-            Map<String, Object> body = Map.of(
-                "model", rerankProps.getModel(),
-                "input", input,
-                "parameters", parameters
-            );
-
-            String responseText = restClient.post()
-                .uri(RERANK_PATH)
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .body(body)
-                .retrieve()
-                .body(String.class);
-
-            JsonNode response = (responseText == null || responseText.isBlank())
-                ? null
-                : objectMapper.readTree(responseText);
-
-            List<Document> reranked = parseReranked(response, documents);
-            if (reranked.isEmpty()) {
-                log.warn("[RerankService] 重排返回空结果，退回融合排序");
-                return capList(documents, topN);
-            }
-            log.info("[RerankService] 重排完成: 候选 {} -> 保留 {}", documents.size(), reranked.size());
-            return reranked;
+            List<Double> scores = scoreAllInternal(query, segments);
+            return reorderAndCap(segments, scores, topN);
         } catch (Exception e) {
-            log.warn("[RerankService] 重排调用失败，退回融合排序: {}", e.getMessage(), e);
-            return capList(documents, topN);
+            log.warn("[RerankService] 重排调用失败，退回原序: {}", e.getMessage(), e);
+            return capList(segments, topN);
         }
     }
 
-    private List<Document> parseReranked(JsonNode response, List<Document> documents) {
-        if (response == null) {
-            return List.of();
+    @Override
+    public Response<List<Double>> scoreAll(List<TextSegment> segments, String query) {
+        if (segments == null || segments.isEmpty()) {
+            return Response.from(List.of());
         }
-        JsonNode results = response.path("output").path("results");
-        if (!results.isArray() || results.isEmpty()) {
-            return List.of();
+        if (!isEnabled() || query == null || query.isBlank()) {
+            return Response.from(zeroScores(segments.size()));
         }
+        try {
+            List<Double> scores = scoreAllInternal(query, segments);
+            return Response.from(scores);
+        } catch (Exception e) {
+            log.warn("[RerankService] scoreAll 失败，返回等分降级: {}", e.getMessage(), e);
+            return Response.from(zeroScores(segments.size()));
+        }
+    }
 
-        List<Document> reranked = new ArrayList<>();
-        for (JsonNode result : results) {
-            int index = result.path("index").asInt(-1);
-            if (index < 0 || index >= documents.size()) {
-                continue;
-            }
-            double relevance = result.path("relevance_score").asDouble(0.0);
-            Document original = documents.get(index);
-            Document scored = original.mutate()
-                .score(relevance)
-                .build();
-            reranked.add(scored);
+    private List<Double> scoreAllInternal(String query, List<TextSegment> segments) {
+        List<String> texts = segments.stream().map(TextSegment::text).toList();
+        Map<String, Object> input = Map.of("query", query, "documents", texts);
+        Map<String, Object> parameters = Map.of(
+            "return_documents", false,
+            "top_n", texts.size()
+        );
+        Map<String, Object> body = Map.of(
+            "model", rerankProps.getModel(),
+            "input", input,
+            "parameters", parameters
+        );
+
+        String responseText = restClient.post()
+            .uri(RERANK_PATH)
+            .header("Authorization", "Bearer " + apiKey)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .retrieve()
+            .body(String.class);
+
+        return parseScores(responseText, segments.size());
+    }
+
+    /**
+     * DashScope rerank 返回的 results 按 relevance 降序，每项含 index（对应输入位置）和 relevance_score。
+     * 这里还原成与输入 segments 顺序一致的分列表。
+     */
+    private List<Double> parseScores(String responseText, int size) {
+        List<Double> scores = new ArrayList<>(zeroScores(size));
+        if (responseText == null || responseText.isBlank()) {
+            return scores;
         }
+        try {
+            JsonNode response = objectMapper.readTree(responseText);
+            JsonNode results = response.path("output").path("results");
+            if (!results.isArray() || results.isEmpty()) {
+                return scores;
+            }
+            for (JsonNode result : results) {
+                int index = result.path("index").asInt(-1);
+                if (index < 0 || index >= size) {
+                    continue;
+                }
+                double relevance = result.path("relevance_score").asDouble(0.0);
+                scores.set(index, relevance);
+            }
+        } catch (Exception e) {
+            log.warn("[RerankService] 解析 rerank 响应失败，退回等分: {}", e.getMessage());
+        }
+        return scores;
+    }
+
+    private List<TextSegment> reorderAndCap(List<TextSegment> segments, List<Double> scores, int topN) {
+        List<int[]> indexed = new ArrayList<>();
+        for (int i = 0; i < scores.size(); i++) {
+            indexed.add(new int[]{i, i});
+        }
+        indexed.sort((a, b) -> Double.compare(scores.get(b[1]), scores.get(a[1])));
+        List<TextSegment> reranked = new ArrayList<>();
+        for (int i = 0; i < Math.min(topN, indexed.size()); i++) {
+            reranked.add(segments.get(indexed.get(i)[0]));
+        }
+        log.info("[RerankService] 重排完成: 候选 {} -> 保留 {}", segments.size(), reranked.size());
         return reranked;
     }
 
-    private List<Document> capList(List<Document> documents, int topN) {
-        if (documents.size() <= topN) {
-            return documents;
+    private List<TextSegment> capList(List<TextSegment> segments, int topN) {
+        if (segments.size() <= topN) {
+            return segments;
         }
-        return new ArrayList<>(documents.subList(0, topN));
+        return new ArrayList<>(segments.subList(0, topN));
+    }
+
+    private List<Double> zeroScores(int size) {
+        List<Double> zeros = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            zeros.add(0.0);
+        }
+        return zeros;
     }
 
     private static int resolveTimeoutMs(long configuredTimeoutMs) {

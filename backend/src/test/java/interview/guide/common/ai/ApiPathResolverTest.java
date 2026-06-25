@@ -105,36 +105,4 @@ class ApiPathResolverTest {
           .isEqualTo("https://example.com");
     }
   }
-
-  @Nested
-  @DisplayName("buildOpenAiApi")
-  class BuildOpenAiApi {
-
-    @Test
-    @DisplayName("带版本段的 base-url 使用无前缀路径")
-    void versionedBaseUrlUsesShortPaths() {
-      var api = ApiPathResolver.buildOpenAiApi(
-          "https://api.moonshot.cn/v1", "test-key");
-
-      assertThat(api).isNotNull();
-    }
-
-    @Test
-    @DisplayName("不带版本段的 base-url 使用默认路径")
-    void plainBaseUrlUsesDefaultPaths() {
-      var api = ApiPathResolver.buildOpenAiApi(
-          "https://api.openai.com", "test-key");
-
-      assertThat(api).isNotNull();
-    }
-
-    @Test
-    @DisplayName("自定义超时参数生效")
-    void customTimeouts() {
-      var api = ApiPathResolver.buildOpenAiApi(
-          "https://api.openai.com", "test-key", 5000, 60000);
-
-      assertThat(api).isNotNull();
-    }
-  }
 }

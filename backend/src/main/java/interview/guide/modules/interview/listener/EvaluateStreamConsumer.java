@@ -3,6 +3,8 @@ package interview.guide.modules.interview.listener;
 import interview.guide.common.async.AbstractStreamConsumer;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
@@ -110,10 +112,17 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         }
 
         InterviewSessionEntity session = sessionOpt.get();
-        List<InterviewQuestionDTO> questions = objectMapper.readValue(
-            session.getQuestionsJson(),
-            new TypeReference<>() {}
-        );
+        List<InterviewQuestionDTO> questions;
+        try {
+            questions = objectMapper.readValue(
+                session.getQuestionsJson(),
+                new TypeReference<>() {}
+            );
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.error("解析面试题目 JSON 失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                "面试题目数据损坏，无法评估: " + e.getMessage(), e);
+        }
 
         List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(sessionId);
         for (InterviewAnswerEntity answer : answers) {
