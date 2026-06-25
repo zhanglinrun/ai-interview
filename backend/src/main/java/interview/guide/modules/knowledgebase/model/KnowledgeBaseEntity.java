@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.model;
 
+import interview.guide.modules.knowledgebase.constant.DocumentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -85,7 +86,19 @@ public class KnowledgeBaseEntity {
 
     // 向量分块数量
     private Integer chunkCount = 0;
-    
+
+    // 当前激活版本 ID（指向 knowledge_base_version.version_id），三表重构后向量状态由版本承载
+    private Long currentVersionId;
+
+    // 文档描述（对齐 know-engine KnowledgeDocument.description）
+    @Column(length = 500)
+    private String description;
+
+    // 文档状态机（对齐 know-engine DocumentStatus；过渡期与 vectorStatus 共存，后续清理旧字段）
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private DocumentStatus docStatus;
+
     @PrePersist
     protected void onCreate() {
         uploadedAt = LocalDateTime.now();
@@ -238,6 +251,30 @@ public class KnowledgeBaseEntity {
 
     public void setChunkCount(Integer chunkCount) {
         this.chunkCount = chunkCount;
+    }
+
+    public Long getCurrentVersionId() {
+        return currentVersionId;
+    }
+
+    public void setCurrentVersionId(Long currentVersionId) {
+        this.currentVersionId = currentVersionId;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public DocumentStatus getDocStatus() {
+        return docStatus;
+    }
+
+    public void setDocStatus(DocumentStatus docStatus) {
+        this.docStatus = docStatus;
     }
 }
 

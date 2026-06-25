@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.repository;
 
+import interview.guide.modules.knowledgebase.constant.DocumentStatus;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -141,5 +142,8 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
 
     List<KnowledgeBaseEntity> findByUserIdAndVectorStatusOrderByUploadedAtDesc(Long userId,
                                                                                VectorStatus vectorStatus);
+
+    /** 按文档状态机查询（三表重构后用，如扫 VECTOR_STORED 文档做旧版本清理）。 */
+    List<KnowledgeBaseEntity> findByDocStatusAndCurrentVersionIdNotNull(DocumentStatus docStatus);
 }
 
