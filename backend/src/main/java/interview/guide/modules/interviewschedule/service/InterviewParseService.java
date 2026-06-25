@@ -9,7 +9,9 @@ import interview.guide.modules.interviewschedule.model.CreateInterviewRequest;
 import interview.guide.modules.interviewschedule.model.ParseResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -303,12 +305,12 @@ public class InterviewParseService {
                 PromptSecurityConstants.DATA_BOUNDARY_INSTRUCTION + "\n" +
                 promptSanitizer.wrapWithDelimiters("parse-input", safeRawText));
 
-            ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
 
-            String content = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String content = chatModel.chat(ChatRequest.builder()
+                    .messages(UserMessage.from(prompt))
+                    .build())
+                    .aiMessage().text();
 
             if (content == null || content.trim().isEmpty()) {
                 log.error("AI 解析返回内容为空");

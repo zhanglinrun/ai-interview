@@ -2,20 +2,21 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.ai.PromptSecurityConstants;
+import interview.guide.common.ai.PromptTemplate;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
 import interview.guide.modules.knowledgebase.model.RagSourceDTO;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
@@ -152,8 +153,8 @@ public class KnowledgeBaseQueryService {
         this.parentExpandMaxSiblings = queryProperties.getParentExpand().getMaxSiblings();
     }
 
-    private ChatClient getChatClient() {
-        return llmProviderRegistry.getDefaultChatClient();
+    private ChatModel getChatModel() {
+        return llmProviderRegistry.getDefaultChatModel();
     }
 
     /**
@@ -229,11 +230,11 @@ public class KnowledgeBaseQueryService {
         String userPrompt = buildUserPrompt(context, question);
 
         try {
-            String answer = getChatClient().prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
+            String answer = getChatModel().chat(ChatRequest.builder()
+                    .messages(dev.langchain4j.data.message.SystemMessage.from(systemPrompt),
+                              UserMessage.from(userPrompt))
+                    .build())
+                    .aiMessage().text();
             answer = normalizeAnswer(answer);
 
             log.info("知识库问答完成: kbIds={}", knowledgeBaseIds);
@@ -369,7 +370,7 @@ public class KnowledgeBaseQueryService {
      * @param history 历史对话消息（可选）
      * @return 流式响应
      */
-    public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question, List<Message> history) {
+    public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history) {
         log.info("收到知识库流式提问: kbIds={}, question={}, historySize={}", knowledgeBaseIds, question,
                 history != null ? history.size() : 0);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
@@ -399,14 +400,21 @@ public class KnowledgeBaseQueryService {
             String userPrompt = buildUserPrompt(context, question);
 
             // 5. 流式调用（带历史上下文）+ 探测窗口归一化
-            var promptSpec = getChatClient().prompt().system(systemPrompt);
+            // TODO 阶段8：换 StreamingChatModel + Flux.create 桥接恢复真流式（SafeGuardStreamingChatModel）
+            // 当前临时退化为同步调用，结果作为单个 Flux 元素产出，探测窗口/实时推送语义降级
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(dev.langchain4j.data.message.SystemMessage.from(systemPrompt));
             if (!effectiveHistory.isEmpty()) {
-                promptSpec = promptSpec.messages(effectiveHistory);
+                messages.addAll(effectiveHistory);
             }
-            Flux<String> responseFlux = promptSpec
-                    .user(userPrompt)
-                    .stream()
-                    .content();
+            messages.add(UserMessage.from(userPrompt));
+            String fullContent = getChatModel().chat(ChatRequest.builder()
+                    .messages(messages)
+                    .build())
+                    .aiMessage().text();
+            Flux<String> responseFlux = (fullContent == null || fullContent.isBlank())
+                    ? Flux.empty()
+                    : Flux.just(fullContent);
 
             log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
             Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
@@ -460,7 +468,7 @@ public class KnowledgeBaseQueryService {
             });
     }
 
-    private QueryContext buildQueryContext(String originalQuestion, List<Message> history) {
+    private QueryContext buildQueryContext(String originalQuestion, List<ChatMessage> history) {
         String normalizedQuestion = normalizeQuestion(originalQuestion);
         String rewrittenQuestion = rewriteQuestion(normalizedQuestion, history);
         Set<String> candidates = new LinkedHashSet<>();
@@ -474,7 +482,7 @@ public class KnowledgeBaseQueryService {
         return new QueryContext(normalizedQuestion, new ArrayList<>(candidates), hypothetical, searchParams);
     }
 
-    private List<Message> sanitizeHistory(List<Message> history) {
+    private List<ChatMessage> sanitizeHistory(List<ChatMessage> history) {
         if (history == null || history.isEmpty()) {
             return List.of();
         }
@@ -606,10 +614,9 @@ public class KnowledgeBaseQueryService {
 
     private String callHydeWithTimeout(String prompt) throws Exception {
         if (hydeTimeoutMs <= 0) {
-            return getChatClient().prompt().user(prompt).call().content();
+            return chatOnce(prompt);
         }
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() ->
-            getChatClient().prompt().user(prompt).call().content());
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> chatOnce(prompt));
         try {
             return future.get(hydeTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
@@ -618,8 +625,16 @@ public class KnowledgeBaseQueryService {
         }
     }
 
+    /** 单轮 user-only 同步调用，复用默认 ChatModel。 */
+    private String chatOnce(String prompt) {
+        return getChatModel().chat(ChatRequest.builder()
+                .messages(UserMessage.from(prompt))
+                .build())
+                .aiMessage().text();
+    }
+
 //    改写
-    private String rewriteQuestion(String question, List<Message> history) {
+    private String rewriteQuestion(String question, List<ChatMessage> history) {
         if (!rewriteEnabled || question.isBlank()) {
             return question;
         }
@@ -628,10 +643,7 @@ public class KnowledgeBaseQueryService {
             variables.put("question", question);
             variables.put("history", formatHistoryForRewrite(history));
             String rewritePrompt = rewritePromptTemplate.render(variables);
-            String rewritten = getChatClient().prompt()
-                .user(rewritePrompt)
-                .call()
-                .content();
+            String rewritten = chatOnce(rewritePrompt);
             if (rewritten == null || rewritten.isBlank()) {
                 return question;
             }
@@ -648,17 +660,17 @@ public class KnowledgeBaseQueryService {
      * 将历史消息格式化为重写 prompt 中的文本摘要。
      * 每条消息格式：用户: xxx / 助手: xxx
      */
-    private String formatHistoryForRewrite(List<Message> history) {
+    private String formatHistoryForRewrite(List<ChatMessage> history) {
         if (history == null || history.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        for (Message msg : history) {
-            if (msg instanceof UserMessage) {
-                sb.append("用户: ").append(msg.getText()).append("\n");
-            } else if (msg instanceof AssistantMessage) {
+        for (ChatMessage msg : history) {
+            if (msg instanceof UserMessage userMessage) {
+                sb.append("用户: ").append(userMessage.singleText()).append("\n");
+            } else if (msg instanceof AiMessage aiMessage) {
                 // 截断过长的助手回复，避免 rewrite prompt 过长
-                String text = msg.getText();
+                String text = aiMessage.text();
                 if (text.length() > MAX_REWRITE_HISTORY_CHAR) {
                     text = text.substring(0, MAX_REWRITE_HISTORY_CHAR) + "...";
                 }

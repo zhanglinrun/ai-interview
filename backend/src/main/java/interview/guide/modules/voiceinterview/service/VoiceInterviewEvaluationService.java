@@ -17,7 +17,7 @@ import interview.guide.modules.voiceinterview.repository.VoiceInterviewMessageRe
 import interview.guide.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
+import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -66,12 +66,12 @@ public class VoiceInterviewEvaluationService {
             List<QaRecord> qaRecords = buildQaRecords(messages);
 
             String provider = session.getLlmProvider();
-            ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
 
             String sessionIdStr = String.valueOf(sessionId);
             String referenceContext = skillService.buildEvaluationReferenceSectionSafe(session.getSkillId());
             EvaluationReport report = unifiedEvaluationService.evaluate(
-                chatClient, sessionIdStr, qaRecords, null, referenceContext);
+                chatModel, sessionIdStr, qaRecords, null, referenceContext);
 
             saveEvaluationTransactional(sessionId, session, report);
 

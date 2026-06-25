@@ -6,15 +6,16 @@ import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 @Service
@@ -37,14 +38,13 @@ public class DashscopeLlmService {
             String provider = session.getLlmProvider();
             log.info("[VoiceInterview] Session {} using LLM provider: {}", session.getId(), provider);
 
-            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(provider);
+            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
 
-            ChatClient.CallResponseSpec response = chatClient.prompt()
-                .system(promptContext.systemPrompt())
-                .user(promptContext.userPrompt())
-                .call();
-
-            String content = response.chatResponse().getResult().getOutput().getText();
+            String content = chatModel.chat(ChatRequest.builder()
+                .messages(SystemMessage.from(promptContext.systemPrompt()),
+                          UserMessage.from(promptContext.userPrompt()))
+                .build())
+                .aiMessage().text();
             String optimized = optimizeForVoice(content);
 
             log.info("LLM response generated for session {}: {}", session.getId(),
@@ -76,58 +76,31 @@ public class DashscopeLlmService {
             String provider = session.getLlmProvider();
             log.info("[VoiceInterview] Session {} using LLM provider (sentence stream): {}", session.getId(), provider);
 
-            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(provider);
+            // TODO 阶段8：换 StreamingChatModel + Flux.create 桥接恢复真流式（SafeGuardStreamingChatModel）
+            // 当前临时退化为同步调用，保留 onSentence/onToken 回调在完整文本上切句推送
+            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
             StringBuilder raw = new StringBuilder();
-            AtomicLong lastEmitNanos = new AtomicLong(System.nanoTime());
-            AtomicInteger lastEmitLength = new AtomicInteger(0);
             AtomicInteger lastSentenceEnd = new AtomicInteger(0);
-            int emitIntervalMs = Math.max(80, voiceInterviewProperties.getAiStreamPushIntervalMs());
-            int minCharsDelta = Math.max(4, voiceInterviewProperties.getAiStreamMinCharsDelta());
 
-            chatClient.prompt()
-                .system(promptContext.systemPrompt())
-                .user(promptContext.userPrompt())
-                .stream()
-                .content()
-                .doOnNext(token -> {
-                    if (token == null || token.isEmpty()) {
-                        return;
-                    }
-                    raw.append(token);
+            String content = chatModel.chat(ChatRequest.builder()
+                .messages(SystemMessage.from(promptContext.systemPrompt()),
+                          UserMessage.from(promptContext.userPrompt()))
+                .build())
+                .aiMessage().text();
+            raw.append(content == null ? "" : content);
 
-                    // 检测句子边界，回调 onSentence
-                    if (onSentence != null && hasTerminalSince(token)) {
-                        String normalized = normalizeRealtimeText(raw.toString());
-                        int currentEnd = normalized.length();
-                        if (currentEnd > lastSentenceEnd.get()) {
-                            String sentence = normalized.substring(lastSentenceEnd.get()).trim();
-                            if (!sentence.isEmpty()) {
-                                onSentence.accept(sentence);
-                            }
-                            lastSentenceEnd.set(currentEnd);
-                        }
+            // 在完整文本上切句子回调（流式语义降级：不再逐句实时，而是一次性切分）
+            if (onSentence != null) {
+                String normalized = normalizeRealtimeText(raw.toString());
+                int currentEnd = normalized.length();
+                if (currentEnd > lastSentenceEnd.get()) {
+                    String sentence = normalized.substring(lastSentenceEnd.get()).trim();
+                    if (!sentence.isEmpty()) {
+                        onSentence.accept(sentence);
                     }
-
-                    // 实时文本推送
-                    if (onToken == null) {
-                        return;
-                    }
-                    long now = System.nanoTime();
-                    long elapsedMs = TimeUnit.NANOSECONDS.toMillis(now - lastEmitNanos.get());
-                    int currentLength = raw.length();
-                    boolean shouldEmit = elapsedMs >= emitIntervalMs && currentLength - lastEmitLength.get() >= minCharsDelta;
-                    if (!shouldEmit) {
-                        return;
-                    }
-                    String normalized = normalizeRealtimeText(raw.toString());
-                    if (normalized.isBlank()) {
-                        return;
-                    }
-                    onToken.accept(normalized);
-                    lastEmitNanos.set(now);
-                    lastEmitLength.set(normalized.length());
-                })
-                .blockLast();
+                    lastSentenceEnd.set(currentEnd);
+                }
+            }
 
             // 发送最后一段（可能不以终止标点结尾）
             if (onSentence != null) {
@@ -234,15 +207,6 @@ public class DashscopeLlmService {
             .replaceAll("(?m)^\\s*[-*+]\\s*", "")
             .replaceAll("\\s+", " ")
             .trim();
-    }
-
-    private boolean hasTerminalSince(String token) {
-        for (int i = 0; i < token.length(); i++) {
-            if (TERMINAL_PUNCTUATION.indexOf(token.charAt(i)) >= 0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private record PromptContext(String systemPrompt, String userPrompt) {}

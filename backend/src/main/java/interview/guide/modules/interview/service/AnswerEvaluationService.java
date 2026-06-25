@@ -11,9 +11,9 @@ import interview.guide.modules.interview.model.InterviewReportDTO.CategoryScore;
 import interview.guide.modules.interview.model.InterviewReportDTO.QuestionEvaluation;
 import interview.guide.modules.interview.model.InterviewReportDTO.ReferenceAnswer;
 import interview.guide.modules.interview.skill.InterviewSkillService;
+import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -42,7 +42,7 @@ public class AnswerEvaluationService {
     /**
      * 评估完整面试并生成报告
      */
-    public InterviewReportDTO evaluateInterview(ChatClient chatClient, String sessionId, String resumeText,
+    public InterviewReportDTO evaluateInterview(ChatModel chatModel, String sessionId, String resumeText,
                                                  List<InterviewQuestionDTO> questions) {
         log.info("开始评估面试: {}, 共{}题", sessionId, questions.size());
 
@@ -60,7 +60,7 @@ public class AnswerEvaluationService {
 
             // 调用通用评估服务
             EvaluationReport report = unifiedEvaluationService.evaluate(
-                chatClient, sessionId, qaRecords, resumeText, referenceContext
+                chatModel, sessionId, qaRecords, resumeText, referenceContext
             );
 
             // 转为文字面试专用 DTO

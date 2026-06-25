@@ -21,7 +21,7 @@ import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
+import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -470,10 +470,10 @@ public class InterviewSessionService {
         if (entityOpt.isPresent()) {
             provider = entityOpt.get().getLlmProvider();
         }
-        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+        ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
 
         InterviewReportDTO report = evaluationService.evaluateInterview(
-            chatClient,
+            chatModel,
             sessionId,
             session.getResumeText(),
             questions

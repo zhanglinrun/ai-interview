@@ -14,7 +14,7 @@ import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.StreamMessageId;
-import org.springframework.ai.chat.client.ChatClient;
+import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -126,10 +126,10 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         // 获取 LLM 客户端
         String provider = session.getLlmProvider();
-        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+        ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
-        InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
+        InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
         persistenceService.saveReport(sessionId, report);
     }
 
