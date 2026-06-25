@@ -7,7 +7,7 @@ import AnalysisPanel from '../components/AnalysisPanel';
 import InterviewPanel from '../components/InterviewPanel';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
 import LoadingButtonContent from '../components/LoadingButtonContent';
-import {EmptyState, LoadingState} from '../components/PageState';
+import {ErrorState, LoadingState} from '../components/PageState';
 import {formatDateOnly} from '../utils/date';
 import {downloadBlob} from '../utils/download';
 import {shouldPollAnalyzeResult} from '../utils/analyzeStatus';
@@ -204,10 +204,9 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
 
   if (!resume) {
     return (
-      <EmptyState
+      <ErrorState
         title="加载失败，请返回重试"
         className="text-center py-20"
-        titleClassName="text-red-500 mb-4"
         action={
         <button onClick={onBack} className="px-6 py-2 bg-primary-500 text-white rounded-lg">返回列表</button>
         }

@@ -1,6 +1,6 @@
 import type {ComponentType, ReactNode} from 'react';
 import {motion} from 'framer-motion';
-import {Loader2} from 'lucide-react';
+import {AlertCircle, Loader2} from 'lucide-react';
 
 interface LoadingStateProps {
   label?: ReactNode;
@@ -71,5 +71,32 @@ export function EmptyState({
       {description && <p className={descriptionClassName}>{description}</p>}
       {action}
     </motion.div>
+  );
+}
+
+interface ErrorStateProps extends Omit<EmptyStateProps, 'icon' | 'iconNode'> {
+  title?: ReactNode;
+}
+
+export function ErrorState({
+  title = '加载失败',
+  description,
+  action,
+  className = 'min-h-[50vh] flex flex-col items-center justify-center text-center',
+  iconClassName = 'w-12 h-12 text-red-500 dark:text-red-400 mb-4',
+  titleClassName = 'text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2',
+  descriptionClassName = 'text-sm text-slate-500 dark:text-slate-400 mb-6',
+}: ErrorStateProps) {
+  return (
+    <EmptyState
+      icon={AlertCircle}
+      title={title}
+      description={description}
+      action={action}
+      className={className}
+      iconClassName={iconClassName}
+      titleClassName={titleClassName}
+      descriptionClassName={descriptionClassName}
+    />
   );
 }

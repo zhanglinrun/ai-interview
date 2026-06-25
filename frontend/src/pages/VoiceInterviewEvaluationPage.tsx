@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { EvaluationStatusResponse, VoiceEvaluationDetail, voiceInterviewApi } from '../api/voiceInterview';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
-import { EmptyState, LoadingState } from '../components/PageState';
+import { ErrorState, LoadingState } from '../components/PageState';
 import {getErrorMessage} from '../api/request';
 import type { EvaluateStatus, InterviewDetail } from '../api/history';
 import {
@@ -162,14 +162,10 @@ export default function VoiceInterviewEvaluationPage() {
   // Error state
   if (error && !evaluation) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
-        <EmptyState
-          title="评估报告生成失败"
-          description={error}
-          className="text-center"
-          titleClassName="text-slate-600 dark:text-slate-300 text-lg mb-2"
-          descriptionClassName="text-slate-400 text-sm mb-6"
-          action={
+      <ErrorState
+        title="评估报告生成失败"
+        description={error}
+        action={
           <div className="flex items-center gap-3 justify-center">
             <button
               onClick={handleRetry}
@@ -185,9 +181,8 @@ export default function VoiceInterviewEvaluationPage() {
               返回列表
             </button>
           </div>
-          }
-        />
-      </div>
+        }
+      />
     );
   }
 

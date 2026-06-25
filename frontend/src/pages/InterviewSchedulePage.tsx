@@ -13,7 +13,7 @@ import { InterviewFormModal } from '../components/interviewschedule/InterviewFor
 import { CalendarErrorBoundary } from '../components/interviewschedule/CalendarErrorBoundary';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
-import { EmptyState, LoadingState } from '../components/PageState';
+import { ErrorState, LoadingState } from '../components/PageState';
 import type { InterviewSchedule, InterviewFormData, InterviewStatus } from '../types/interviewSchedule';
 
 function buildRescheduledInterview(
@@ -175,10 +175,9 @@ export const InterviewSchedulePage: React.FC = () => {
 
   if (error) {
     return (
-      <EmptyState
+      <ErrorState
         title={error}
         className="text-center py-12"
-        titleClassName="text-red-500"
       />
     );
   }

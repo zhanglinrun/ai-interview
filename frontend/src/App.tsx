@@ -5,7 +5,7 @@ import { historyApi, type InterviewDetail } from './api/history';
 import type { UploadKnowledgeBaseResponse } from './api/knowledgebase';
 import type { Difficulty } from './components/UnifiedInterviewModal';
 import type { CategoryDTO } from './api/skill';
-import { EmptyState, LoadingState } from './components/PageState';
+import { ErrorState, LoadingState } from './components/PageState';
 import { ROUTES } from './constants/routes';
 import { ArrowLeft } from 'lucide-react';
 import { formatShortId } from './utils/format';
@@ -284,21 +284,17 @@ function InterviewDetailPageWrapper() {
 
   if (error || !interview || !sessionId) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
-        <EmptyState
-          title={error || '面试记录不存在'}
-          className="text-center"
-          titleClassName="text-red-500 mb-4"
-          action={
+      <ErrorState
+        title={error || '面试记录不存在'}
+        action={
           <button
             onClick={() => navigate('/interviews')}
             className="px-5 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
           >
             返回面试记录
           </button>
-          }
-        />
-      </div>
+        }
+      />
     );
   }
 
