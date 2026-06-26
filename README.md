@@ -3,7 +3,7 @@
 **智能 AI 面试官平台** - 基于大语言模型的简历分析、模拟面试和 RAG 知识库系统
 
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.6-green?logo=springboot)](https://spring.io/projects/spring-boot)
 [![React](https://img.shields.io/badge/React-18.3-blue?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791?logo=postgresql)](https://www.postgresql.org/)
@@ -46,7 +46,7 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 
 | 技术                  | 版本  | 说明                          |
 | --------------------- | ----- | ----------------------------- |
-| Spring Boot           | 4.0.1 | 应用框架                      |
+| Spring Boot           | 3.5.6 | 应用框架                      |
 | Java                  | 21    | 开发语言（虚拟线程）          |
 | LangChain4j           | 1.11.0 | AI 编排框架（替代 Spring AI，对齐 know-engine；OpenAI 兼容模型接入、AiServices、RAG、Agent）|
 | PostgreSQL + Flyway   | 14+ / 11.x | 关系数据库 + 版本迁移 |
@@ -128,9 +128,11 @@ InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音�
 
 ### 知识库管理模块
 
-- **三表 + 版本管理**：文档主表 + 版本表 + 分段表（对齐 know-engine），支持语义版本号、版本切换、激活/失效、旧版本自动清理。
-- **文档智能处理**：MinerU 解析 PDF/DOC/HTML 为 Markdown（保留标题层级/表格/公式，Tika fallback），MarkdownHeaderBrotherTextSplitter 按标题切块。
+- **三表 + 版本管理**：文档主表 + 版本表 + 分段表（对齐 know-engine），支持语义版本号、版本热切换、激活/失效、旧版本自动清理。
+- **文档智能处理**：MinerU 解析 PDF/DOC/HTML 为 Markdown（保留标题层级/表格/公式，Tika fallback），MarkdownHeaderBrotherTextSplitter 按标题切块（父子/兄弟关系写入 segment 表 parent/brother 列）。
+- **父子/兄弟上下文扩展**：检索命中 chunk 后按 parent/brother 关系补全更完整上下文（small-to-big，对齐 know-engine），由 `app.ai.rag.parent-expand` 开关控制。
 - **Spring 事件异步向量化**：切块完成发布 `DocumentChunkedEvent`，`@Async` + `AFTER_COMMIT` 异步嵌入写 Elasticsearch；失败由 `@Scheduled` 补偿任务重试。
+- **分布式锁保护**：上传/切块/重新向量化/版本切换等关键写操作用 `@DistributeLock`（Redisson）防并发竞态。
 - **RAG 检索增强**：Elasticsearch 向量存储 + LangChain4j `DefaultRetrievalAugmentor`（`ContentRetriever`/`ContentAggregator`/`QueryTransformer`/`QueryRouter`），查询改写 + RRF 融合 + Rerank 提升 AI 问答准确性与专业度。
 - **流式响应交互**：基于 SSE（Server-Sent Events）技术实现打字机式流式响应。
 - **智能问答对话**：支持会话管理、置顶、多知识库关联、Markdown 展示和虚拟列表渲染。
@@ -201,19 +203,23 @@ Skill 出题 + JD 解析：
 ## 项目结构
 
 ```
-interview-guide/
+ai-interview/
 ├── backend/                          # 后端 Maven 模块
-│   ├── src/main/java/interview/guide/
+│   ├── src/main/java/com/linrun/interview/
 │   │   ├── App.java                  # 主启动类
 │   │   ├── common/                   # 通用基础能力
 │   │   │   ├── ai/                   # LLM Provider、结构化输出、Prompt 安全
-│   │   │   ├── annotation/           # @RateLimit 可重复限流注解
-│   │   │   ├── aspect/               # RateLimitAspect + Redis Lua 限流
+│   │   │   ├── annotation/           # @RateLimit 限流 + @DistributeLock 分布式锁注解
+│   │   │   ├── aspect/               # RateLimitAspect（Redis Lua 限流）+ DistributeLockAspect（Redisson 分布式锁）
 │   │   │   ├── async/                # Redis Stream 生产者/消费者模板
 │   │   │   ├── config/               # CORS、S3、OpenAPI、Jackson 等配置
 │   │   │   ├── evaluation/           # 文字/语音共用的统一评估引擎
 │   │   │   ├── exception/            # 业务异常与全局异常处理
-│   │   │   └── result/               # 统一响应 Result<T>
+│   │   │   ├── id/                   # SnowflakeIdGenerator 雪花 ID
+│   │   │   ├── model/                # AsyncTaskStatus 等通用模型
+│   │   │   ├── result/               # 统一响应 Result<T>
+│   │   │   ├── security/             # JWT 鉴权（JwtInterceptor、JwtUtil、UserContext）
+│   │   │   └── web/                  # 附件响应构建等 Web 工具
 │   │   ├── infrastructure/           # 基础设施
 │   │   │   ├── export/               # PDF 导出
 │   │   │   ├── file/                 # 文件解析、校验、清洗、S3 存储
@@ -227,18 +233,17 @@ interview-guide/
 │   │       │   └── service/          # 会话管理、出题、追问、评估
 │   │       ├── interviewschedule/    # 面试安排模块
 │   │       ├── knowledgebase/        # 知识库模块（三表 + 版本管理 + Spring 事件向量化 + RAG）
-│   │       │   ├── constant/         # DocumentStatus/SegmentStatus/SplitType/FileType 状态机
+│   │       │   ├── constant/         # DocumentStatus/SegmentStatus/FileType 状态机
 │   │       │   ├── config/           # ElasticSearchConfiguration、MineruProperties
 │   │       │   ├── event/            # DocumentChunkedEvent + DocumentEventListener（@Async+AFTER_COMMIT）
 │   │       │   ├── job/              # DocumentCompensationJob（@Scheduled 向量化补偿 + 旧版本清理）
-│   │       │   ├── model/            # KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）
+│   │       │   ├── model/            # KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）+ KnowledgeBaseVersionDTO
 │   │       │   ├── rag/              # ContentRetriever/Aggregator/QueryTransformer/QueryRouter（对齐 know-engine）
 │   │       │   ├── repository/       # KnowledgeBase + Version + Segment Repository
 │   │       │   ├── service/          # DocumentProcessService 编排、版本管理、分段、VectorStore、RAG 查询、Rerank
 │   │       │   │   └── parse/        # FileProcessService 工厂 + MineruProcessService + MarkdownProcessService
-│   │       │   └── service/splitter/ # MarkdownHeaderParent/BrotherTextSplitter
+│   │       │   └── service/splitter/ # MarkdownHeaderBrotherTextSplitter（按标题父子/兄弟切块）
 │   │       ├── llmprovider/          # 多模型 Provider 与语音配置
-│   │       │   └── service/          # API Key 加密、连通性测试、启动加载
 │   │       ├── resume/               # 简历模块
 │   │       │   └── service/          # 上传、解析、评分、去重、历史记录
 │   │       └── voiceinterview/       # 语音面试模块
@@ -484,7 +489,7 @@ jpa:
 知识库向量化已从 pgvector 迁移到 Elasticsearch + Spring 事件编排（对齐 know-engine）。排查思路：
 
 1. **Elasticsearch 连通性**：检查 `elasticsearch.host` 配置和 ES 服务是否启动，向量索引（默认 `interview-guide-vector`）是否就绪。
-2. **状态机**：文档/版本状态 `CONVERTED → CHUNKED → VECTOR_STORED`。停在 `CHUNKED` 表示向量化未完成，`@Scheduled` 补偿任务（每 5 分钟）会自动重试；也可手动调 `POST /api/document/activate-version`。
+2. **状态机**：文档/版本状态 `CONVERTED → CHUNKED → VECTOR_STORED`。停在 `CHUNKED` 表示向量化未完成，`@Scheduled` 补偿任务（每 5 分钟）会自动重试；也可手动调 `POST /api/knowledgebase/{id}/revectorize` 重新切块向量化，或在版本管理页切换/激活已完成的版本（`POST /api/knowledgebase/{id}/versions/{versionId}/switch`）。
 3. **MinerU 解析**：`file.parse.mineru.enabled=false` 或 MinerU 服务不可达时自动降级 Tika；若 Markdown 解析为空，检查原文件格式。
 4. **Embedding 模型**：向量化用 `LlmProviderRegistry.getDefaultEmbeddingModel()`（DashScope text-embedding-v3，1024 维），确认默认 Provider 的 embedding 模型配置正确。
 

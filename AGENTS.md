@@ -1,6 +1,6 @@
 # AI Interview Platform 编码规范
 
-Spring Boot 4.0 + Java 21 + LangChain4j + Elasticsearch + React 面试平台。写代码时遵守以下规则。
+Spring Boot 3.5.6 + Java 21 + LangChain4j + Elasticsearch + React 面试平台。写代码时遵守以下规则。
 
 ---
 
@@ -13,21 +13,25 @@ com.linrun.interview/
 ├── App.java                          # @SpringBootApplication + @EnableScheduling
 │
 ├── common/                           # 通用基础能力
-│   ├── annotation/                   #   @RateLimit（可重复注解，滑动窗口限流）
-│   ├── aspect/                       #   RateLimitAspect（AOP + Redis Lua 限流）
 │   ├── ai/                           #   StructuredOutputInvoker（结构化输出重试）
 │   │                                 #   LlmProviderRegistry（多 LLM Provider 注册与缓存）
 │   │                                 #   PromptSanitizer（Prompt 注入防御）
 │   │                                 #   ApiPathResolver（多 Provider API 路径适配）
+│   ├── annotation/                   #   @RateLimit（可重复限流）+ @DistributeLock（分布式锁）
+│   ├── aspect/                       #   RateLimitAspect（AOP + Redis Lua 限流）
+│   │                                 #   DistributeLockAspect（Redisson 分布式锁，@Order(HIGHEST_PRECEDENCE) 先于 @Transactional）
 │   ├── async/                        #   AbstractStreamConsumer/Producer（Redis Stream 模板）
-│   ├── config/                       #   配置类（CORS、S3、ObjectMapper、OpenAPI、LlmEmbedding）
+│   ├── config/                       #   配置类（CORS、S3、ObjectMapper、OpenAPI、LlmProviderProperties）
 │   ├── constant/                     #   CommonConstants、AsyncTaskStreamConstants
 │   ├── evaluation/                   #   UnifiedEvaluationService（统一评估引擎）
 │   │                                 #   QaRecord、EvaluationReport（文字/语音共用）
 │   ├── exception/                    #   ErrorCode（10 个错误域 1xxx-10xxx）
 │   │                                 #   BusinessException、GlobalExceptionHandler
+│   ├── id/                           #   SnowflakeIdGenerator（雪花 ID）
 │   ├── model/                        #   AsyncTaskStatus
-│   └── result/                       #   Result<T>（统一响应包装）
+│   ├── result/                       #   Result<T>（统一响应包装）
+│   ├── security/                     #   JwtInterceptor、JwtUtil、UserContext（JWT 鉴权）
+│   └── web/                          #   AttachmentResponseBuilder 等 Web 工具
 │
 ├── infrastructure/                   # 技术基础设施
 │   ├── export/                       #   PdfExportService（iText 8）
@@ -42,25 +46,24 @@ com.linrun.interview/
     │   ├── skill/                    #   Skill 管理：10+ 方向、JD 解析、分类匹配
     │   └── listener/                 #   异步评估（Redis Stream 消费者）
     ├── knowledgebase/                #   知识库：三表（文档/版本/分段）+ 版本管理 + Spring 事件向量化 + RAG 查询
-    │   ├── constant/                 #   DocumentStatus/SegmentStatus/SplitType/FileType 状态机
+    │   ├── constant/                 #   DocumentStatus/SegmentStatus/FileType 状态机
     │   ├── config/                   #   ElasticSearchConfiguration、MineruProperties
     │   ├── event/                    #   DocumentChunkedEvent + DocumentEventListener（@Async+AFTER_COMMIT）
     │   ├── job/                      #   DocumentCompensationJob（@Scheduled 向量化补偿 + 旧版本清理）
-    │   ├── model/                    #   KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）
+    │   ├── model/                    #   KnowledgeBaseEntity + VersionEntity + SegmentEntity（三表）+ KnowledgeBaseVersionDTO
     │   ├── rag/                      #   ContentRetriever/Aggregator/QueryTransformer/QueryRouter（对齐 know-engine）
     │   ├── repository/               #   KnowledgeBase + Version + Segment Repository
     │   ├── service/                  #   DocumentProcessService 编排、版本管理、分段、VectorStore、RAG 查询、Rerank
     │   │   └── parse/                #   FileProcessService 工厂 + MineruProcessService + MarkdownProcessService
-    │   └── service/splitter/         #   MarkdownHeaderParent/BrotherTextSplitter（对齐 know-engine）
+    │   └── service/splitter/         #   MarkdownHeaderBrotherTextSplitter（按标题父子/兄弟切块，对齐 know-engine）
     ├── interviewschedule/            #   面试安排：日历管理、AI 解析面试邀请、提醒
     ├── voiceinterview/               #   语音面试：WebSocket 实时通话、Qwen3 ASR/TTS
     │   ├── handler/                  #   WebSocket 处理器（实时字幕、VAD 断句）
     │   └── service/                  #   语音服务（流式 TTS、并发合成）
-    └── llmprovider/                  #   多模型管理：Provider 配置、默认模型切换
-        └── service/                  #   API Key 加密、连通性测试、启动加载
+    └── llmprovider/                  #   多模型管理：Provider 配置、默认模型切换、API Key 加密、连通性测试、启动加载
 ```
 
-**技术栈**：Spring Boot 4.0.1 / Java 21（虚拟线程）/ LangChain4j 1.11.0（替代 Spring AI，对齐 know-engine）/ JPA + PostgreSQL + Flyway / Elasticsearch（向量存储，替代 pgvector）/ Redisson 3.50.0 / Redis Stream（简历/面试评估）+ Spring 事件（知识库向量化）/ MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 + MinerU（文档解析，Tika fallback）/ DashScope SDK 2.22.7（ASR/TTS）
+**技术栈**：Spring Boot 3.5.6 / Java 21（虚拟线程）/ LangChain4j 1.11.0（替代 Spring AI，对齐 know-engine）/ JPA + PostgreSQL + Flyway / Elasticsearch（向量存储，替代 pgvector）/ Redisson 3.50.0 / Redis Stream（简历/面试评估）+ Spring 事件（知识库向量化）/ MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 + MinerU（文档解析，Tika fallback）/ DashScope SDK 2.22.7（ASR/TTS）
 
 **前端**：React 18.3 + TypeScript 5.6 + Vite 5.4 + Tailwind CSS 4.1 + React Router 7.11 + Framer Motion 12.23（`frontend/` 目录）
 
@@ -137,7 +140,9 @@ Controller → Service → Repository
 
 ---
 
-## 五、限流组件
+## 五、限流与分布式锁
+
+### 限流（@RateLimit）
 
 ```java
 // 每个 @RateLimit 对应一个维度，各自独立的 count/interval/timeUnit
@@ -150,6 +155,20 @@ public Result<QueryResponse> queryKnowledgeBase(...) { ... }
 - Lua 脚本：`resources/scripts/rate_limit_single.lua`，滑动时间窗口
 - Redis Key 设计：`ratelimit:{ClassName:MethodName}:dimension`（Hash Tag 分组）
 - 维度：`GLOBAL`（全局限流）、`IP`（按 IP）、`USER`（按用户）
+
+### 分布式锁（@DistributeLock）
+
+```java
+// key 支持 SpEL 读方法参数；不填则按「类名#方法名」全局互斥
+@DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 120)
+public int split(Long docId) { ... }
+```
+
+- 注解：`common/annotation/DistributeLock`，AOP 切面 `DistributeLockAspect` 基于 Redisson `RLock`
+- 参数：`key`（SpEL）、`waitTime`（0=不等待，拿不到立即失败）、`leaseTime`（持锁上限，防宕机死锁，默认 120s）、`unit`、`message`（拿锁失败提示）
+- 切面 `@Order(Ordered.HIGHEST_PRECEDENCE)`，先于 `@Transactional` 执行，避免锁内开事务
+- 拿锁失败抛 `BusinessException(RATE_LIMIT_EXCEEDED, message)`
+- 用于知识库写操作互斥：`upload`/`uploadNewVersion`/`split`/`rechunk`/`switchVersion`，防并发产生重复版本号、重复切块、向量化脏数据
 
 ---
 
@@ -195,6 +214,8 @@ public void onDocumentChunked(DocumentChunkedEvent event) { ... }
 - **重新向量化**：`DocumentProcessService.rechunk(docId)` 删当前版本 segment → 降 CONVERTED → 重新 split 发事件
 - **删除级联**：`KnowledgeDocumentService.removeDocumentWithSegments` 一次清 ES 向量 + segment + version + 主表 + RustFS 文件 + RAG 会话关联，Controller 只委托
 - **版本切换**：`uploadNewVersion` 上传新版本时即时 `deactivateVersion` 旧版本（清旧向量），不等补偿任务
+- **版本热切换**：`DocumentProcessService.switchVersion(docId, versionId)` 把当前激活版本切到指定版本（先 deactivate 旧激活版本清向量，再 activate 目标版本），`@DistributeLock` 防并发；对应 `POST /api/knowledgebase/{id}/versions/{versionId}/switch`
+- **父子/兄弟上下文扩展**：切块时 `MarkdownHeaderBrotherTextSplitter` 把 parent/brother 关系写入 `knowledge_base_segment` 的 `parent_chunk_id`/`brother_chunk_id`/`brother_chunk_index` 列；检索期 `InterviewElasticsearchContentRetriever` 命中 chunk 后按这层关系 small-to-big 补全更完整上下文（对齐 know-engine），由 `app.ai.rag.parent-expand.enabled` 开关控制（默认开），关闭则只返回命中 chunk
 
 ---
 
