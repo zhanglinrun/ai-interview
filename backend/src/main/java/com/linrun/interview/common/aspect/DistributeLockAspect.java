@@ -42,10 +42,11 @@ public class DistributeLockAspect {
     private final ExpressionParser parser = new SpelExpressionParser();
     private final DefaultParameterNameDiscoverer discoverer = new DefaultParameterNameDiscoverer();
 
-    @Around("@annotation(distributeLock)")
-    public Object around(ProceedingJoinPoint joinPoint, DistributeLock distributeLock) throws Throwable {
+    @Around("@annotation(com.linrun.interview.common.annotation.DistributeLock)")
+    public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         Method method = signature.getMethod();
+        DistributeLock distributeLock = method.getAnnotation(DistributeLock.class);
         String lockKey = LOCK_PREFIX + resolveKey(distributeLock, method, joinPoint.getArgs());
 
         RLock lock = redissonClient.getLock(lockKey);
