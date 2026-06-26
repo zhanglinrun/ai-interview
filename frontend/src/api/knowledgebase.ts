@@ -45,12 +45,23 @@ export interface UploadKnowledgeBaseResponse {
     category: string;
     fileSize: number;
     contentLength: number;
+    docStatus: DocStatus;
   };
   storage: {
     fileKey: string;
     fileUrl: string;
   };
   duplicate: boolean;
+}
+
+// 知识库版本（对齐后端 KnowledgeBaseVersionDTO）
+export interface KnowledgeBaseVersion {
+  versionId: number;
+  version: string;
+  status: DocStatus;
+  uploadUser: string | null;
+  changelog: string | null;
+  createdAt: string;
 }
 
 export interface QueryRequest {
@@ -220,6 +231,22 @@ export const knowledgeBaseApi = {
    */
   async revectorize(id: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/revectorize`);
+  },
+
+  // ========== 版本管理 ==========
+
+  /**
+   * 查询知识库所有版本（降序，最新在前）
+   */
+  async listVersions(id: number): Promise<KnowledgeBaseVersion[]> {
+    return request.get<KnowledgeBaseVersion[]>(`/api/knowledgebase/${id}/versions`);
+  },
+
+  /**
+   * 切换当前激活版本（已向量化版本零重建热切换，未向量化版本先激活再切换）
+   */
+  async switchVersion(id: number, versionId: number): Promise<void> {
+    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/switch`);
   },
 
   /**

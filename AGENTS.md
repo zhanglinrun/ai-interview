@@ -9,7 +9,7 @@ Spring Boot 4.0 + Java 21 + LangChain4j + Elasticsearch + React 面试平台。�
 Maven 多模块项目，后端位于 `backend` 模块，按功能分包：
 
 ```
-interview.guide/
+com.linrun.interview/
 ├── App.java                          # @SpringBootApplication + @EnableScheduling
 │
 ├── common/                           # 通用基础能力

@@ -9,13 +9,14 @@ import {
   Eye,
   FileText,
   HardDrive,
+  History,
   MessageSquare,
   RefreshCw,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import {knowledgeBaseApi, KnowledgeBaseItem, KnowledgeBaseStats, SortOption,} from '../api/knowledgebase';
+import {knowledgeBaseApi, KnowledgeBaseItem, KnowledgeBaseStats, KnowledgeBaseVersion, SortOption,} from '../api/knowledgebase';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import LoadingButtonContent from '../components/LoadingButtonContent';
@@ -53,6 +54,12 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
 
   // 重新向量化状态
   const [revectorizing, setRevectorizing] = useState<number | null>(null);
+
+  // 版本管理状态
+  const [versionModalKb, setVersionModalKb] = useState<KnowledgeBaseItem | null>(null);
+  const [versions, setVersions] = useState<KnowledgeBaseVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [switchingVersionId, setSwitchingVersionId] = useState<number | null>(null);
 
   const fetchPageData = useCallback(async () => {
     const kbListPromise = searchKeyword
@@ -121,6 +128,43 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       console.error('重新向量化失败:', error);
     } finally {
       setRevectorizing(null);
+    }
+  };
+
+  // 打开版本管理弹窗
+  const handleShowVersions = async (kb: KnowledgeBaseItem) => {
+    setVersionModalKb(kb);
+    try {
+      setVersionsLoading(true);
+      setVersions(await knowledgeBaseApi.listVersions(kb.id));
+    } catch (error) {
+      console.error('加载版本列表失败:', error);
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  // 关闭版本管理弹窗
+  const handleCloseVersions = () => {
+    setVersionModalKb(null);
+    setVersions([]);
+    setSwitchingVersionId(null);
+  };
+
+  // 切换当前激活版本
+  const handleSwitchVersion = async (versionId: number) => {
+    if (!versionModalKb) return;
+    try {
+      setSwitchingVersionId(versionId);
+      await knowledgeBaseApi.switchVersion(versionModalKb.id, versionId);
+      // 切换后刷新版本列表 + 主列表（currentVersionId / docStatus 可能变化）
+      setVersions(await knowledgeBaseApi.listVersions(versionModalKb.id));
+      await loadDataSilent();
+    } catch (error) {
+      console.error('切换版本失败:', error);
+    } finally {
+      setSwitchingVersionId(null);
     }
   };
 
@@ -455,6 +499,14 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {/* 版本管理按钮 */}
+                      <button
+                        onClick={() => handleShowVersions(kb)}
+                        className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                        title="版本管理"
+                      >
+                        <History className="w-4 h-4" />
+                      </button>
                       {/* 下载按钮 */}
                       <button
                         onClick={() => handleDownload(kb)}
@@ -506,6 +558,109 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
         onConfirm={handleDelete}
         onCancel={() => setDeleteItem(null)}
       />
+
+      {/* 版本管理弹窗 */}
+      <AnimatePresence>
+        {versionModalKb && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={handleCloseVersions}
+          >
+            <motion.div
+              initial={{scale: 0.95, opacity: 0}}
+              animate={{scale: 1, opacity: 1}}
+              exit={{scale: 0.95, opacity: 0}}
+              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+                    <History className="w-5 h-5 text-primary-500" />
+                    版本管理
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                    {versionModalKb.name} · 共 {versions.length} 个版本
+                  </p>
+                </div>
+                <button
+                  onClick={handleCloseVersions}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5">
+                {versionsLoading ? (
+                  <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+                    加载中...
+                  </div>
+                ) : versions.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+                    暂无版本记录
+                  </div>
+                ) : (
+                  <ul className="space-y-3">
+                    {versions.map((v) => {
+                      const isCurrent = versionModalKb.currentVersionId === v.versionId;
+                      return (
+                        <li
+                          key={v.versionId}
+                          className={`flex items-start justify-between gap-4 p-4 rounded-lg border transition-colors ${
+                            isCurrent
+                              ? 'border-primary-300 dark:border-primary-600 bg-primary-50/50 dark:bg-primary-900/20'
+                              : 'border-slate-100 dark:border-slate-700 hover:border-slate-200 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-slate-800 dark:text-white">
+                                v{v.version}
+                              </span>
+                              <VectorStatusBadge
+                                status={v.status}
+                                textClassName="text-xs text-slate-600 dark:text-slate-300"
+                              />
+                              {isCurrent && (
+                                <span className="px-1.5 py-0.5 bg-primary-500 text-white text-xs rounded">
+                                  当前
+                                </span>
+                              )}
+                            </div>
+                            {v.changelog && (
+                              <p className="text-sm text-slate-600 dark:text-slate-300 mt-1 break-words">
+                                {v.changelog}
+                              </p>
+                            )}
+                            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                              {formatDateTime(v.createdAt)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleSwitchVersion(v.versionId)}
+                            disabled={isCurrent || switchingVersionId !== null}
+                            className="shrink-0 px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {switchingVersionId === v.versionId
+                              ? '切换中...'
+                              : isCurrent
+                              ? '当前版本'
+                              : '切换'}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -46,7 +46,7 @@ springdoc:
     operations-sorter: alpha
   api-docs:
     path: /v3/api-docs
-  packages-to-scan: interview.guide.modules
+  packages-to-scan: com.linrun.interview.modules
 
 spring:
   config:
@@ -226,6 +226,13 @@ app:
         model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
         timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
+      # 父子/兄弟分段扩展（small-to-big）：检索命中 chunk 后，按 parentChunkId 取父块章节、
+      # 按 brotherChunkId 取同组兄弟按序拼接，给 LLM 更完整上下文（对齐 know-engine）。
+      # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
+      parent-expand:
+        enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
+        max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
+        max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:

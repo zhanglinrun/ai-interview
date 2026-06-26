@@ -1,0 +1,25 @@
+package com.linrun.interview.modules.knowledgebase.model;
+
+import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
+
+import java.time.LocalDateTime;
+
+/**
+ * 知识库列表项DTO
+ * 使用MapStruct进行转换，见KnowledgeBaseMapper
+ */
+public record KnowledgeBaseListItemDTO(
+    Long id,
+    String name,
+    String category,
+    String originalFilename,
+    Long fileSize,
+    String contentType,
+    LocalDateTime uploadedAt,
+    LocalDateTime lastAccessedAt,
+    Integer accessCount,
+    Integer questionCount,
+    DocumentStatus docStatus,
+    Long currentVersionId
+) {
+}

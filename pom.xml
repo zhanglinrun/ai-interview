@@ -11,7 +11,7 @@
     <relativePath/>
   </parent>
 
-  <groupId>com.interview</groupId>
+  <groupId>com.linrun</groupId>
   <artifactId>ai-interview</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <packaging>pom</packaging>
