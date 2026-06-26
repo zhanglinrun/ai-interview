@@ -1,0 +1,4 @@
+# 本地 ONNX reranker 模型文件（~400MB，不入 git，需手动下载）
+# 详见 src/main/resources/model/bge-reranker-model/README.md
+src/main/resources/model/bge-reranker-model/*.onnx
+src/main/resources/model/bge-reranker-model/tokenizer.json

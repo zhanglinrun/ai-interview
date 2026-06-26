@@ -1,18 +1,24 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.ai.FluxStreamingBridge;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.ai.PromptSecurityConstants;
 import com.linrun.interview.common.ai.PromptTemplate;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
+import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
+import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
+import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
+import com.linrun.interview.common.util.JsonUtil;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -43,6 +49,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * 知识库查询服务（LangChain4j RetrievalAugmentor 编排版，对齐 know-engine）。
@@ -57,7 +64,21 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 流式 {@link #answerQuestionStream} 同样手动 augment 后用 {@link FluxStreamingBridge} 流式生成，
  * 流末尾拼接 sourcesMarkdown。统一手动编排以拿到检索中间结果。
  *
- * <p>Spring AI {@link Document} 已全部替换为 LC4j {@link Content}/{@link TextSegment}。
+ * <p>已补齐 know-engine 的 3 个 RAG 编排亮点（取精华弃糟粕）：
+ * <ul>
+ *   <li><b>多轮历史喂生成</b>：{@code generateAnswer}/{@code streamGenerate} 把历史 {@code ChatMessage}
+ *       拼进 {@link ChatRequest#messages()}（System + history + outcome.chatMessage），追问指代不再丢失</li>
+ *   <li><b>流式进度回调</b>：{@link InterviewQueryTransformer}/{@link InterviewElasticsearchContentRetriever}/
+ *       {@link InterviewReRankingContentAggregator} 接 {@code progressCallback}，SSE data 以
+ *       {@code progress:} / {@code reference:} / 普通文本 前缀分流</li>
+ *   <li><b>改写结果回写</b>：{@link InterviewQueryTransformer} 改写完用虚拟线程异步回写
+ *       {@code rag_chat_messages.transform_content}（弃静态 ApplicationContext 反模式，Spring 注入 repository）</li>
+ *   <li><b>意图识别兜底</b>（亮点4）：{@link #answerQuestionStream} 前置 {@link IntentRecognitionService}
+ *       判定问题相关性，不相关走 {@link CommonChatService} 通用对话（不检索），由 {@code app.ai.rag.intent-recognition.enabled} 控制开关</li>
+ *   <li><b>JSON 容错解析</b>（亮点7）：意图识别结果经 {@link JsonUtil#fixAndParse(String)} 容错解析</li>
+ * </ul>
+ *
+ * <p>Spring AI {@link org.springframework.core.io.Resource} 已全部替换为 LC4j {@link Content}/{@link TextSegment}。
  */
 @Slf4j
 @Service
@@ -74,6 +95,11 @@ public class KnowledgeBaseQueryService {
 - 与检索内容无关的过渡或总结性语句可不标注。
 """;
     private static final String SESSION_ID_DEFAULT = "default";
+
+    /** SSE 流前缀协议：阶段进度。 */
+    static final String PROGRESS_PREFIX = "progress:";
+    /** SSE 流前缀协议：引用来源（JSON 数组，复用 {@link RagSourceDTO}）。 */
+    static final String REFERENCE_PREFIX = "reference:";
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final ElasticsearchEmbeddingStore embeddingStore;
@@ -93,7 +119,12 @@ public class KnowledgeBaseQueryService {
     private final CitationAnalyzer citationAnalyzer;
     private final int rerankTopN;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
+    private final KnowledgeBaseQueryProperties.IntentRecognition intentRecognition;
     private final MeterRegistry meterRegistry;
+    private final RagChatMessageRepository ragChatMessageRepository;
+    private final ObjectMapper objectMapper;
+    private final IntentRecognitionService intentRecognitionService;
+    private final CommonChatService commonChatService;
     private final AtomicInteger activeStreams = new AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
@@ -105,6 +136,10 @@ public class KnowledgeBaseQueryService {
             KnowledgeSegmentService segmentService,
             KnowledgeBaseQueryProperties queryProperties,
             ResourceLoader resourceLoader,
+            RagChatMessageRepository ragChatMessageRepository,
+            ObjectMapper objectMapper,
+            IntentRecognitionService intentRecognitionService,
+            CommonChatService commonChatService,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
@@ -113,6 +148,10 @@ public class KnowledgeBaseQueryService {
         this.countService = countService;
         this.rerankService = rerankService;
         this.segmentService = segmentService;
+        this.ragChatMessageRepository = ragChatMessageRepository;
+        this.objectMapper = objectMapper;
+        this.intentRecognitionService = intentRecognitionService;
+        this.commonChatService = commonChatService;
         this.meterRegistry = meterRegistry;
         this.systemPromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getSystemPromptPath())
@@ -130,6 +169,7 @@ public class KnowledgeBaseQueryService {
         this.citationAnalyzer = new CitationAnalyzer(citationCoverageWeight, citationInvalidPenalty);
         this.rerankTopN = queryProperties.getRerank().getTopN();
         this.parentExpand = queryProperties.getParentExpand();
+        this.intentRecognition = queryProperties.getIntentRecognition();
     }
 
     private ChatModel getChatModel() {
@@ -147,7 +187,7 @@ public class KnowledgeBaseQueryService {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return List.of();
         }
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of());
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null);
         return outcome.contents().stream().map(Content::textSegment).toList();
     }
 
@@ -172,13 +212,13 @@ public class KnowledgeBaseQueryService {
 
         countService.updateQuestionCounts(knowledgeBaseIds);
 
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of());
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null);
         List<Content> contents = outcome.contents();
         if (contents.isEmpty()) {
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
-        String answer = generateAnswer(knowledgeBaseIds, question, outcome);
+        String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of());
         CitationAnalyzer.CitationAnalysis citation = citationEnabled
             ? citationAnalyzer.analyze(answer, contents.size())
             : new CitationAnalyzer.CitationAnalysis(List.of(), List.of(), 0.0d);
@@ -194,46 +234,175 @@ public class KnowledgeBaseQueryService {
      * 流式查询知识库（SSE，无上下文）
      */
     public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
-        return answerQuestionStream(knowledgeBaseIds, question, List.of());
+        return answerQuestionStream(knowledgeBaseIds, question, List.of(), null);
     }
 
     /**
      * 流式查询知识库（SSE，支持多轮上下文）
      */
     public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history) {
+        return answerQuestionStream(knowledgeBaseIds, question, history, null);
+    }
+
+    /**
+     * 流式查询知识库（SSE，支持多轮上下文 + 改写回写的 assistantMessageId）。
+     *
+     * <p>SSE data 前缀协议：
+     * <ul>
+     *   <li>{@code progress:xxx} —— 阶段进度（优化问题/检索/排序/生成）</li>
+     *   <li>{@code reference:[...]} —— 引用来源 JSON 数组（{@link RagSourceDTO}）</li>
+     *   <li>无前缀 —— 回答 token（含流末尾的 sourcesMarkdown）</li>
+     * </ul>
+     *
+     * @param assistantMessageId assistant 消息 ID，非空时改写结果异步回写其 transform_content（亮点5）
+     */
+    public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question,
+                                             List<ChatMessage> history, Long assistantMessageId) {
         log.info("收到知识库流式提问: kbIds={}, question={}, historySize={}", knowledgeBaseIds, question,
                 history != null ? history.size() : 0);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return Flux.just(NO_RESULT_RESPONSE);
         }
 
-        try {
-            countService.updateQuestionCounts(knowledgeBaseIds);
-            AugmentationOutcome outcome = augment(knowledgeBaseIds, question, history);
-            List<Content> contents = outcome.contents();
-            if (contents.isEmpty()) {
-                return Flux.just(NO_RESULT_RESPONSE);
-            }
+        // 在调用线程（tomcat-handler，JwtInterceptor 已注入 ThreadLocal）提前取出 userId。
+        // Flux.create 的 sink lambda 跑在 boundedElastic 线程，此时 JwtInterceptor 的
+        // afterCompletion 已清除 ThreadLocal，sink 内任何依赖 UserContext 的调用
+        // （countService / listService.getKnowledgeBaseNameMap 等）都会抛 UNAUTHORIZED。
+        // 因此 sink 内用 setUserId 临时恢复，finally 清理，避免改动所有下游方法签名。
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return Flux.just("【错误】知识库查询失败：未登录或 token 无效");
+        }
 
-            log.debug("检索到 {} 个相关片段", contents.size());
-            Flux<String> responseFlux = streamGenerate(outcome);
+        return Flux.<String>create(sink -> {
+            try {
+                UserContext.setUserId(userId);
+                countService.updateQuestionCounts(knowledgeBaseIds);
 
-            log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
-            Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
-            String sourcesMarkdown = buildSourcesMarkdown(contents);
-            if (!sourcesMarkdown.isBlank()) {
-                normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
-            }
+                // progressCallback 把各阶段进度推到同一 sink（前缀式协议）
+                Consumer<String> progressCallback = msg -> {
+                    if (!sink.isCancelled()) {
+                        sink.next(PROGRESS_PREFIX + msg);
+                    }
+                };
 
-            return instrumentStream(normalizedFlux)
-                .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
-                .onErrorResume(e -> {
-                    log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
-                    return Flux.just("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。");
+                // 亮点4：意图识别兜底。判定问题是否与面试 / 技术知识 / 简历 / 求职等相关，
+                // 不相关走通用对话兜底（不检索知识库），避免越界问题强行检索导致幻觉。
+                // 识别失败/解析失败默认 related=true 走 RAG（兜底不阻断）。
+                if (intentRecognition.isEnabled()) {
+                    if (intentRecognition.isProgressEnabled() && !sink.isCancelled()) {
+                        sink.next(PROGRESS_PREFIX + "正在理解您的问题...");
+                    }
+                    IntentRecognitionResult intent = recognizeIntent(question);
+                    if (intent != null && !intent.related()) {
+                        log.info("意图识别判定不相关，走通用对话兜底: question='{}', reason={}",
+                            question, intent.reason());
+                        if (!sink.isCancelled()) {
+                            sink.next(PROGRESS_PREFIX + "正在生成回答...");
+                        }
+                        Flux<String> commonFlux = instrumentStream(
+                            normalizeStreamOutput(commonChatService.streamChat(question)));
+                        final reactor.core.Disposable[] innerRef = new reactor.core.Disposable[1];
+                        innerRef[0] = commonFlux.subscribe(
+                            sink::next,
+                            sink::error,
+                            sink::complete
+                        );
+                        sink.onCancel(() -> {
+                            if (innerRef[0] != null && !innerRef[0].isDisposed()) {
+                                innerRef[0].dispose();
+                            }
+                        });
+                        return;
+                    }
+                }
+
+                AugmentationOutcome outcome = augment(knowledgeBaseIds, question, history, progressCallback,
+                    assistantMessageId);
+                List<Content> contents = outcome.contents();
+                if (contents.isEmpty()) {
+                    sink.next(NO_RESULT_RESPONSE);
+                    sink.complete();
+                    return;
+                }
+
+                // augment 后推引用来源（reference: 前缀 + RagSourceDTO JSON）
+                emitReference(sink, contents);
+
+                log.debug("检索到 {} 个相关片段", contents.size());
+                Flux<String> responseFlux = streamGenerate(outcome, history);
+
+                log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
+                Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
+                String sourcesMarkdown = buildSourcesMarkdown(contents);
+                if (!sourcesMarkdown.isBlank()) {
+                    normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
+                }
+
+                Flux<String> finalFlux = instrumentStream(normalizedFlux)
+                    .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
+                    .onErrorResume(e -> {
+                        log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
+                        return Flux.just("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。");
+                    });
+
+                final reactor.core.Disposable[] innerRef = new reactor.core.Disposable[1];
+                innerRef[0] = finalFlux.subscribe(
+                    sink::next,
+                    sink::error,
+                    sink::complete
+                );
+                // 外层取消时取消内层 LLM token 流，避免回调继续写入已取消的 sink
+                sink.onCancel(() -> {
+                    if (innerRef[0] != null && !innerRef[0].isDisposed()) {
+                        innerRef[0].dispose();
+                    }
                 });
+            } catch (Exception e) {
+                log.error("知识库流式问答失败: {}", e.getMessage(), e);
+                if (!sink.isCancelled()) {
+                    sink.next("【错误】知识库查询失败：" + e.getMessage());
+                    sink.complete();
+                }
+            } finally {
+                // 清理 sink 线程临时恢复的 ThreadLocal，避免 boundedElastic 线程池复用后串号
+                UserContext.clear();
+            }
+        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+    }
+
+    /**
+     * 调用意图识别服务并容错解析结果（亮点4）。
+     *
+     * <p>用 {@link IntentRecognitionService#recognize(String)} 拿原始 JSON 字符串，经
+     * {@link JsonUtil#fixAndParse(String)} 容错解析为 {@link IntentRecognitionResult}。
+     * 任何异常（LLM 调用失败 / 解析失败 / 字段缺失）都返回 null，由调用方按"相关"兜底走 RAG，
+     * 不阻断主流程。
+     */
+    private IntentRecognitionResult recognizeIntent(String question) {
+        try {
+            String json = intentRecognitionService.recognize(question);
+            if (json == null || json.isBlank()) {
+                log.warn("意图识别返回空，按相关兜底走 RAG");
+                return null;
+            }
+            var node = JsonUtil.fixAndParse(json);
+            if (node == null || node.isMissingNode() || node.isNull()) {
+                log.warn("意图识别解析为空节点，按相关兜底走 RAG: raw={}", json);
+                return null;
+            }
+            var relatedNode = node.get("related");
+            if (relatedNode == null || !relatedNode.isBoolean()) {
+                log.warn("意图识别缺少 related 布尔字段，按相关兜底走 RAG: raw={}", json);
+                return null;
+            }
+            boolean related = relatedNode.asBoolean();
+            String reason = node.hasNonNull("reason") ? node.get("reason").asText() : null;
+            log.debug("意图识别结果: related={}, reason={}", related, reason);
+            return new IntentRecognitionResult(related, reason);
         } catch (Exception e) {
-            log.error("知识库流式问答失败: {}", e.getMessage(), e);
-            return Flux.just("【错误】知识库查询失败：" + e.getMessage());
+            log.warn("意图识别失败，按相关兜底走 RAG: error={}", e.getMessage(), e);
+            return null;
         }
     }
 
@@ -241,27 +410,38 @@ public class KnowledgeBaseQueryService {
 
     /**
      * 构建 RetrievalAugmentor 并执行 augment，返回检索到的 contents 与注入后的 chatMessage。
+     *
+     * @param progressCallback 进度回调（null 安全），注入改写/检索/rerank 各阶段
+     * @param assistantMessageId assistant 消息 ID，非空时改写结果异步回写（亮点5）
      */
-    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history) {
-        RetrievalAugmentor augmentor = buildAugmentor(knowledgeBaseIds, history);
+    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
+                                        Consumer<String> progressCallback, Long assistantMessageId) {
+        RetrievalAugmentor augmentor = buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         dev.langchain4j.rag.AugmentationResult result =
             augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata));
+        // 生成前发一次"正在生成回答"进度
+        if (progressCallback != null) {
+            progressCallback.accept("正在生成回答...");
+        }
         return new AugmentationOutcome(result.contents(), result.chatMessage());
     }
 
-    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history) {
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId) {
         InterviewElasticsearchContentRetriever retriever = new InterviewElasticsearchContentRetriever(
             embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore,
-            knowledgeBaseIds, segmentService, parentExpand);
+            knowledgeBaseIds, segmentService, parentExpand, progressCallback);
         InterviewQueryTransformer transformer = new InterviewQueryTransformer(
-            getChatModel(), rewritePromptTemplate, rewriteEnabled);
+            getChatModel(), rewritePromptTemplate, rewriteEnabled, progressCallback,
+            assistantMessageId, ragChatMessageRepository);
         InterviewReRankingContentAggregator aggregator = rerankEnabled && rerankService.isEnabled()
             ? InterviewReRankingContentAggregator.builder()
                 .scoringModel(rerankService)
                 .maxResults(rerankTopN > 0 ? rerankTopN : null)
                 .querySelector(qtc -> qtc.keySet().iterator().next())
+                .progressCallback(progressCallback)
                 .build()
             : null;
         ContentInjector contentInjector = new DefaultContentInjector();
@@ -278,11 +458,10 @@ public class KnowledgeBaseQueryService {
 
     // ========== 生成 ==========
 
-    private String generateAnswer(List<Long> knowledgeBaseIds, String question, AugmentationOutcome outcome) {
+    private String generateAnswer(List<Long> knowledgeBaseIds, String question, AugmentationOutcome outcome,
+                                  List<ChatMessage> history) {
         try {
-            String answer = getChatModel().chat(ChatRequest.builder()
-                    .messages(SystemMessage.from(buildSystemPrompt()), outcome.chatMessage())
-                    .build())
+            String answer = getChatModel().chat(buildGenerateRequest(outcome, history))
                 .aiMessage().text();
             answer = normalizeAnswer(answer);
             log.info("知识库问答完成: kbIds={}", knowledgeBaseIds);
@@ -294,11 +473,22 @@ public class KnowledgeBaseQueryService {
         }
     }
 
-    private Flux<String> streamGenerate(AugmentationOutcome outcome) {
-        return FluxStreamingBridge.stream(getStreamingChatModel(),
-            ChatRequest.builder()
-                .messages(SystemMessage.from(buildSystemPrompt()), outcome.chatMessage())
-                .build());
+    private Flux<String> streamGenerate(AugmentationOutcome outcome, List<ChatMessage> history) {
+        return FluxStreamingBridge.stream(getStreamingChatModel(), buildGenerateRequest(outcome, history));
+    }
+
+    /**
+     * 构造生成请求 messages：SystemMessage + 历史 ChatMessage + 注入检索内容后的 outcome.chatMessage()。
+     * （亮点1：把多轮历史喂给生成模型，追问指代不再丢失）
+     */
+    private ChatRequest buildGenerateRequest(AugmentationOutcome outcome, List<ChatMessage> history) {
+        List<ChatMessage> messages = new ArrayList<>(2 + (history == null ? 0 : history.size()));
+        messages.add(SystemMessage.from(buildSystemPrompt()));
+        if (history != null && !history.isEmpty()) {
+            messages.addAll(history);
+        }
+        messages.add(outcome.chatMessage());
+        return ChatRequest.builder().messages(messages).build();
     }
 
     private String buildSystemPrompt() {
@@ -363,6 +553,24 @@ public class KnowledgeBaseQueryService {
             sb.append("\n\n   > ").append(source.snippet()).append("\n\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * 把检索来源序列化为 {@code reference:} 前缀事件推到流（亮点2，复用 {@link RagSourceDTO}）。
+     */
+    private void emitReference(reactor.core.publisher.FluxSink<String> sink, List<Content> contents) {
+        try {
+            List<RagSourceDTO> sources = buildSources(contents, null);
+            if (sources.isEmpty()) {
+                return;
+            }
+            String json = objectMapper.writeValueAsString(sources);
+            if (!sink.isCancelled()) {
+                sink.next(REFERENCE_PREFIX + json);
+            }
+        } catch (Exception e) {
+            log.warn("序列化引用来源失败，跳过 reference 事件: {}", e.getMessage());
+        }
     }
 
     private String buildSourceDisplayTitle(RagSourceDTO source) {

@@ -18,6 +18,8 @@ public class KnowledgeBaseQueryProperties {
     private Hyde hyde = new Hyde();
     private Fusion fusion = new Fusion();
     private ParentExpand parentExpand = new ParentExpand();
+    private IntentRecognition intentRecognition = new IntentRecognition();
+    private TitleSummary titleSummary = new TitleSummary();
     private int chunkOverlapChars = 80;
     private String chunkStrategy = "hybrid";
     private int chunkSizeChars = 800;
@@ -65,12 +67,14 @@ public class KnowledgeBaseQueryProperties {
     }
 
     /**
-     * 重排配置：调用 DashScope gte-rerank 对融合候选重排。
+     * 重排配置：默认本地 ONNX BGE-RERANKER 进程内精排，加载失败/无模型文件时自动降级 DashScope gte-rerank 云端。
      */
     @Data
     public static class Rerank {
         /** 是否启用重排；关闭或失败时退回 RRF 融合排序 */
         private boolean enabled = true;
+        /** 重排实现：local（本地 ONNX BGE）或 cloud（DashScope gte-rerank）；默认 local */
+        private String provider = "local";
         /** 重排服务 baseUrl（DashScope 默认 https://dashscope.aliyuncs.com） */
         private String baseUrl = "https://dashscope.aliyuncs.com";
         /** 重排模型名 */
@@ -79,6 +83,18 @@ public class KnowledgeBaseQueryProperties {
         private int topN = 6;
         /** 单次重排超时（毫秒） */
         private long timeoutMs = 3000;
+        /** 本地 ONNX reranker 配置（仅 provider=local 时生效） */
+        private LocalOnnx local = new LocalOnnx();
+
+        @Data
+        public static class LocalOnnx {
+            /** ONNX 模型文件 classpath 路径（来自 onnx-community/bge-reranker-v2-m3-ONNX 的 model_quantized.onnx） */
+            private String modelPath = "classpath:model/bge-reranker-model/model_quantized.onnx";
+            /** tokenizer 文件 classpath 路径（来自同仓库的 tokenizer.json） */
+            private String tokenizerPath = "classpath:model/bge-reranker-model/tokenizer.json";
+            /** 模型最大序列长度（BGE-RERANKER-v2-m3 默认 8192） */
+            private int maxSequenceLength = 8192;
+        }
     }
 
     /**
@@ -138,5 +154,28 @@ public class KnowledgeBaseQueryProperties {
         private int maxChars = 1200;
         /** 最多聚合的兄弟 chunk 数 */
         private int maxSiblings = 5;
+    }
+
+    /**
+     * 意图识别兜底配置（亮点4）：流式问答前置一次意图识别，判定问题是否与面试 / 技术知识 /
+     * 简历 / 求职等场景相关。不相关走 {@link com.linrun.interview.modules.knowledgebase.service.CommonChatService}
+     * 通用对话兜底（不检索知识库），避免越界问题强行检索导致幻觉。默认开启，关闭则全部走 RAG。
+     */
+    @Data
+    public static class IntentRecognition {
+        /** 是否启用意图识别兜底；关闭则全部走 RAG（行为同批次A） */
+        private boolean enabled = true;
+        /** 是否在意图识别前推"正在理解您的问题..."进度（关闭可省 ~0.4s 前端空进度） */
+        private boolean progressEnabled = true;
+    }
+
+    /**
+     * 异步 LLM 标题生成配置（亮点6）：首问流式完成后用虚拟线程异步让 LLM 根据首问生成会话标题，
+     * 替代知识库名规则拼接。失败保留原规则标题。默认开启，关闭则保留原规则标题。
+     */
+    @Data
+    public static class TitleSummary {
+        /** 是否启用 LLM 异步标题生成；关闭则保留原规则标题（知识库名 / "N 个知识库对话"） */
+        private boolean enabled = true;
     }
 }

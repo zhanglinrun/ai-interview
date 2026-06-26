@@ -126,16 +126,24 @@ public class RagChatController {
         // 2. 获取流式响应
         StringBuilder fullContent = new StringBuilder();
 
-        return sessionService.getStreamAnswer(sessionId, request.question())
-            .doOnNext(fullContent::append)
-            // 使用 ServerSentEvent 包装，转义换行符避免破坏 SSE 格式
+        return sessionService.getStreamAnswer(sessionId, request.question(), messageId)
+            .doOnNext(chunk -> {
+                // progress:/reference: 前缀事件是元数据，不计入回答正文；
+                // 普通文本才是回答 token，累加进 fullContent 用于完成后落库
+                if (!isPrefixedEvent(chunk)) {
+                    fullContent.append(unescapeChunk(chunk));
+                }
+            })
+            // 使用 ServerSentEvent 包装；progress:/reference: 原样透传，回答 token 转义换行避免破坏 SSE
             .map(chunk -> ServerSentEvent.<String>builder()
-                .data(chunk.replace("\n", "\\n").replace("\r", "\\r"))
+                .data(isPrefixedEvent(chunk) ? chunk : escapeChunk(chunk))
                 .build())
             .doOnComplete(() -> {
                 // 3. 流式完成后更新消息内容
                 sessionService.completeStreamMessage(messageId, fullContent.toString());
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
+                // 4. 异步 LLM 标题生成（亮点6）：首问完成后用虚拟线程根据首问生成摘要标题
+                sessionService.maybeGenerateTitleAsync(sessionId, request.question());
             })
             .doOnError(e -> {
                 // 错误时也保存已接收的内容
@@ -145,5 +153,19 @@ public class RagChatController {
                 sessionService.completeStreamMessage(messageId, content);
                 log.error("RAG 聊天流式错误: sessionId={}", sessionId, e);
             });
+    }
+
+    /** progress:/reference: 前缀事件（元数据），原样透传不转义、不计入回答正文。 */
+    private static boolean isPrefixedEvent(String chunk) {
+        return chunk != null
+            && (chunk.startsWith("progress:") || chunk.startsWith("reference:"));
+    }
+
+    private static String escapeChunk(String chunk) {
+        return chunk.replace("\n", "\\n").replace("\r", "\\r");
+    }
+
+    private static String unescapeChunk(String chunk) {
+        return chunk.replace("\\n", "\n").replace("\\r", "\r");
     }
 }

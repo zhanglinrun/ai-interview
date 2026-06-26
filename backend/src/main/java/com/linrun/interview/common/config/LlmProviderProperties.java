@@ -19,6 +19,7 @@ public class LlmProviderProperties {
     private String configYamlPath;
     private String configEnvPath;
     private SecurityConfig security = new SecurityConfig();
+    private ThinkingConfig thinking = new ThinkingConfig();
 
     @Data
     public static class ProviderConfig {
@@ -35,6 +36,18 @@ public class LlmProviderProperties {
     public static class SecurityConfig {
         private String apiKeyEncryptionKey;
         private boolean requireEncryptionKey = false;
+    }
+
+    /**
+     * LLM 思考模式（reasoning）开关。DashScope 的 qwen3.5-flash 等模型默认开启 thinking，
+     * 会对查询改写等简单任务产生上千 token 的思考过程，导致单次调用 16-40 秒。
+     * 默认关闭 thinking（通过 OpenAI 兼容接口的 enable_thinking=false 透传），
+     * 显著降低延迟；需要深度推理的场景可在 application.yml 设 app.ai.thinking.enabled=true 开启。
+     * 非 reasoning 模型会忽略该参数，无副作用。
+     */
+    @Data
+    public static class ThinkingConfig {
+        private boolean enabled = false;
     }
 
     @Data

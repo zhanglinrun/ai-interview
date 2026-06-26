@@ -137,16 +137,13 @@ public class LlmProviderRegistry {
 
     private ChatModel createChatModel(String providerId) {
         ProviderSnapshot config = loadProviderOrThrow(providerId);
-        log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}",
-                 providerId, config.baseUrl(), config.model());
+        log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
+                 providerId, config.baseUrl(), config.model(), properties.getThinking().isEnabled());
 
         ChatModel raw = OpenAiChatModel.builder()
                 .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
                 .apiKey(config.apiKey())
-                .defaultRequestParameters(OpenAiChatRequestParameters.builder()
-                        .modelName(config.model())
-                        .temperature(config.temperature() != null ? config.temperature() : 0.2)
-                        .build())
+                .defaultRequestParameters(buildChatRequestParameters(config))
                 .maxRetries(1)
                 .build();
         return new SafeGuardChatModel(raw, properties.getAdvisors());
@@ -154,18 +151,32 @@ public class LlmProviderRegistry {
 
     private StreamingChatModel createStreamingChatModel(String providerId) {
         ProviderSnapshot config = loadProviderOrThrow(providerId);
-        log.info("[LlmProviderRegistry] Building StreamingChatModel - Provider: {}, BaseUrl: {}, Model: {}",
-                 providerId, config.baseUrl(), config.model());
+        log.info("[LlmProviderRegistry] Building StreamingChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
+                 providerId, config.baseUrl(), config.model(), properties.getThinking().isEnabled());
 
         StreamingChatModel raw = OpenAiStreamingChatModel.builder()
                 .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
                 .apiKey(config.apiKey())
-                .defaultRequestParameters(OpenAiChatRequestParameters.builder()
-                        .modelName(config.model())
-                        .temperature(config.temperature() != null ? config.temperature() : 0.2)
-                        .build())
+                .defaultRequestParameters(buildChatRequestParameters(config))
                 .build();
         return new SafeGuardStreamingChatModel(raw, properties.getAdvisors());
+    }
+
+    /**
+     * 构造 OpenAiChatRequestParameters，含模型名、温度以及（默认关闭的）thinking 开关。
+     * <p>DashScope 的 qwen3.5-flash 等 reasoning 模型默认开启 thinking，对查询改写、评估等
+     * 简单任务会先生成上千 token 的思考过程，导致单次调用 16-40 秒。通过 customParameters
+     * 透传 {@code enable_thinking=false} 关闭思考；非 reasoning 模型会忽略该参数，无副作用。
+     * 如需深度推理，可在 application.yml 设 {@code app.ai.thinking.enabled=true}。
+     */
+    private OpenAiChatRequestParameters buildChatRequestParameters(ProviderSnapshot config) {
+        OpenAiChatRequestParameters.Builder builder = OpenAiChatRequestParameters.builder()
+                .modelName(config.model())
+                .temperature(config.temperature() != null ? config.temperature() : 0.2);
+        if (!properties.getThinking().isEnabled()) {
+            builder.customParameters(Map.of("enable_thinking", false));
+        }
+        return builder.build();
     }
 
     private EmbeddingModel createEmbeddingModel(String providerId) {

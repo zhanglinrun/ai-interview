@@ -1,6 +1,10 @@
 app:
   voice-interview:
     opening:
+      # 启动时是否预热全部方向的开场白音频缓存。默认 false（懒加载）：
+      # 启动不合成，首次语音会话用到某句开场白时才合成该句并缓存，避免启动期串行合成 10+ 句
+      # 占用 ~30s 并消耗 DashScope TTS 配额。需要消除首次会话首句延迟时设 true。
+      warmup-enabled: false
       skill-questions:
         java-backend: >
           你好，我是本场面试官。第一个问题：请用 1 分钟介绍一个你深度参与的后端项目，

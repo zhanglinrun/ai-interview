@@ -9,11 +9,13 @@ import dev.langchain4j.rag.query.Metadata;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.rag.query.transformer.QueryTransformer;
 import com.linrun.interview.common.ai.PromptTemplate;
+import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static java.util.Collections.singletonList;
 
@@ -23,10 +25,12 @@ import static java.util.Collections.singletonList;
  * <p>实现 LC4j {@link QueryTransformer}，供 {@code DefaultRetrievalAugmentor} 在检索前改写 query：
  * 用 LLM 结合对话历史把用户原始问题改写成更适合知识库检索的单句查询，缩小问题表述与答案表述的语义鸿沟。
  *
- * <p>与 know-engine 的差异：
+ * <p>与 know-engine 的差异（取精华弃糟粕）：
  * <ul>
  *   <li>改写策略沿用本项目现有的 {@code knowledgebase-query-rewrite.st} 模板（面试领域），不照搬汽车领域 5 策略</li>
- *   <li>不回写改写结果到 DB（know-engine 回写 chat_message.transform_content，本项目无此表）</li>
+ *   <li><b>亮点2</b>：接 {@code progressCallback}，改写前推 {@code 正在优化您的问题...} 进度（null 安全）</li>
+ *   <li><b>亮点5</b>：改写完成用虚拟线程异步回写 {@code rag_chat_messages.transform_content}，
+ *       repository 由调用方 Spring 注入传入（弃 know-engine 静态 ApplicationContext 反模式）</li>
  *   <li>历史从 {@link Query#metadata()} 的 chatMemory 取，由 RetrievalAugmentor 在组装时注入</li>
  *   <li>关闭/失败/空 query 时返回原 query，保证检索不中断</li>
  * </ul>
@@ -35,21 +39,38 @@ import static java.util.Collections.singletonList;
 public class InterviewQueryTransformer implements QueryTransformer {
 
     private static final int MAX_HISTORY_CHARS = 200;
+    /** 改写前推给前端的进度文案（不带前缀，前缀由调用方加）。 */
+    private static final String PROGRESS_REWRITING = "正在优化您的问题...";
 
     private final ChatModel chatModel;
     private final PromptTemplate rewritePromptTemplate;
     private final boolean enabled;
+    private final Consumer<String> progressCallback;
+    private final Long assistantMessageId;
+    private final RagChatMessageRepository messageRepository;
 
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled) {
+        this(chatModel, rewritePromptTemplate, enabled, null, null, null);
+    }
+
+    public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled,
+                                     Consumer<String> progressCallback, Long assistantMessageId,
+                                     RagChatMessageRepository messageRepository) {
         this.chatModel = chatModel;
         this.rewritePromptTemplate = rewritePromptTemplate;
         this.enabled = enabled;
+        this.progressCallback = progressCallback;
+        this.assistantMessageId = assistantMessageId;
+        this.messageRepository = messageRepository;
     }
 
     @Override
     public List<Query> transform(Query query) {
         if (!enabled || query == null || query.text() == null || query.text().isBlank()) {
             return singletonList(query);
+        }
+        if (progressCallback != null) {
+            progressCallback.accept(PROGRESS_REWRITING);
         }
         try {
             Map<String, Object> variables = new HashMap<>();
@@ -66,6 +87,8 @@ public class InterviewQueryTransformer implements QueryTransformer {
             String normalized = rewritten.trim();
             log.info("[InterviewQueryTransformer] 改写: origin='{}', rewritten='{}'",
                 query.text(), normalized);
+            // 改写结果异步回写 DB（亮点5，虚拟线程）
+            persistTransformContent(normalized);
             Query rewrittenQuery = query.metadata() == null
                 ? Query.from(normalized)
                 : Query.from(normalized, query.metadata());
@@ -74,6 +97,29 @@ public class InterviewQueryTransformer implements QueryTransformer {
             log.warn("[InterviewQueryTransformer] 改写失败，使用原问题: {}", e.getMessage(), e);
             return singletonList(query);
         }
+    }
+
+    /**
+     * 虚拟线程异步回写改写结果到 assistant 消息的 transform_content（亮点5）。
+     * 失败只 warn，不影响检索主流程。
+     */
+    private void persistTransformContent(String transformed) {
+        if (assistantMessageId == null || messageRepository == null) {
+            return;
+        }
+        final Long msgId = assistantMessageId;
+        Thread.ofVirtual().name("query-transform-" + msgId).start(() -> {
+            try {
+                messageRepository.findById(msgId).ifPresent(msg -> {
+                    msg.setTransformContent(transformed);
+                    messageRepository.save(msg);
+                    log.info("[InterviewQueryTransformer] 改写结果已回写: assistantMsgId={}", msgId);
+                });
+            } catch (Exception e) {
+                log.warn("[InterviewQueryTransformer] 改写结果回写失败: assistantMsgId={}, error={}",
+                    msgId, e.getMessage(), e);
+            }
+        });
     }
 
     private String formatHistory(Metadata metadata) {

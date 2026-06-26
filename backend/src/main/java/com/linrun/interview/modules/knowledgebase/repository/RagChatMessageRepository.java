@@ -37,6 +37,12 @@ public interface RagChatMessageRepository extends JpaRepository<RagChatMessageEn
     Integer countBySessionId(@Param("sessionId") Long sessionId);
 
     /**
+     * 统计会话中指定类型的消息数（用于判断是否首问，标题生成时机）。
+     */
+    @Query("SELECT COUNT(m) FROM RagChatMessageEntity m WHERE m.session.id = :sessionId AND m.type = :type")
+    long countBySessionIdAndType(@Param("sessionId") Long sessionId, @Param("type") MessageType type);
+
+    /**
      * 查找未完成的消息（流式响应中断时清理用）
      */
     List<RagChatMessageEntity> findBySessionIdAndCompletedFalse(Long sessionId);

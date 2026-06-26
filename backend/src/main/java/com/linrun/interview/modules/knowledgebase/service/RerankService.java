@@ -5,6 +5,7 @@ import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.scoring.ScoringModel;
 import com.linrun.interview.common.config.LlmProviderProperties;
 import com.linrun.interview.common.config.LlmProviderProperties.ProviderConfig;
+import com.linrun.interview.modules.knowledgebase.rag.LocalOnnxRerankModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -17,15 +18,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 文档重排服务（LangChain4j {@link ScoringModel} 实现）：调用 DashScope gte-rerank 对候选片段重排。
+ * 文档重排服务（LangChain4j {@link ScoringModel} 实现的路由层）。
  *
- * <p>移植对齐 know-engine 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），
- * 但 know-engine 用本地 ONNX {@code BgeScoringModel}，本项目复用现有 DashScope gte-rerank 云端 API
- * （非 OpenAI 兼容格式，用 RestClient 直连 text-rerank 端点）。
+ * <p>对齐 know-engine 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），但做成
+ * <b>本地/云端可配置 + 自动降级</b>（亮点3）：
+ * <ul>
+ *   <li>{@code provider=local}（默认）：委托 {@link LocalOnnxRerankModel} 进程内跑 BGE-RERANKER，
+ *       模型缺失/加载失败时 log.warn 后降级云端，不抛异常中断 RAG</li>
+ *   <li>{@code provider=cloud}：调 DashScope gte-rerank 远程（非 OpenAI 兼容格式，RestClient 直连）</li>
+ *   <li>云端不可用（无 API Key）时退回等分（0.0）让上层退回原序</li>
+ * </ul>
  *
  * <p>实现 {@link ScoringModel#scoreAll(List, String)} 返回每个 segment 与 query 的相关性分列表
- * （顺序与输入一致），由 {@code ReRankingContentAggregator} 负责按分排序与截断；任何失败安全降级，
- * 返回等分（0.0）列表让上层退回原序。
+ * （顺序与输入一致），由 {@code ReRankingContentAggregator} 负责按分排序与截断。
  */
 @Slf4j
 @Service
@@ -34,12 +39,17 @@ public class RerankService implements ScoringModel {
     private static final int DEFAULT_TIMEOUT_MS = 3000;
     private static final String RERANK_PATH =
         "/api/v1/services/rerank/text-rerank/text-rerank";
+    private static final String PROVIDER_LOCAL = "local";
+    private static final String PROVIDER_CLOUD = "cloud";
 
     private final KnowledgeBaseQueryProperties.Rerank rerankProps;
     private final RestClient restClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String apiKey;
-    private final boolean available;
+    private final boolean cloudAvailable;
+    private final LocalOnnxRerankModel localRerankModel;
+    /** 实际生效的 provider：local 不可用时自动切 cloud。 */
+    private volatile String effectiveProvider;
 
     public RerankService(KnowledgeBaseQueryProperties queryProperties,
                          LlmProviderProperties llmProviderProperties) {
@@ -63,17 +73,44 @@ public class RerankService implements ScoringModel {
             .requestFactory(requestFactory)
             .build();
 
-        this.available = apiKey != null && !apiKey.isBlank();
-        if (!available) {
-            log.warn("[RerankService] 未找到 dashscope API Key，重排不可用，将始终退回原序");
+        this.cloudAvailable = apiKey != null && !apiKey.isBlank();
+        this.localRerankModel = new LocalOnnxRerankModel(rerankProps.getLocal());
+        this.effectiveProvider = resolveEffectiveProvider(rerankProps.getProvider());
+        if (!cloudAvailable) {
+            log.warn("[RerankService] 未找到 dashscope API Key，云端 rerank 不可用");
         }
+        log.info("[RerankService] 生效 rerank provider: {} (configured={})",
+            effectiveProvider, rerankProps.getProvider());
     }
 
     /**
-     * 是否可用（开关开启且凭证就绪）。
+     * 解析实际生效的 provider：配置 local 但本地模型不可用时降级 cloud（cloud 不可用则保持 local，
+     * 由 scoreAll 内部走等分降级）。
+     */
+    private String resolveEffectiveProvider(String configured) {
+        if (PROVIDER_CLOUD.equalsIgnoreCase(configured)) {
+            return PROVIDER_CLOUD;
+        }
+        // 默认 / local：先试本地，不可用降级 cloud
+        if (localRerankModel.isAvailable()) {
+            return PROVIDER_LOCAL;
+        }
+        if (cloudAvailable) {
+            log.warn("[RerankService] 本地 ONNX rerank 不可用，降级云端 DashScope rerank");
+            return PROVIDER_CLOUD;
+        }
+        // 两路都不可用，仍标 local，scoreAll 会走等分
+        return PROVIDER_LOCAL;
+    }
+
+    /**
+     * 是否可用（开关开启且至少一路 rerank 可用）。
      */
     public boolean isEnabled() {
-        return rerankProps.isEnabled() && available;
+        if (!rerankProps.isEnabled()) {
+            return false;
+        }
+        return PROVIDER_LOCAL.equals(effectiveProvider) || cloudAvailable;
     }
 
     @Override
@@ -81,12 +118,17 @@ public class RerankService implements ScoringModel {
         if (segments == null || segments.isEmpty()) {
             return Response.from(List.of());
         }
-        if (!isEnabled() || query == null || query.isBlank()) {
+        if (query == null || query.isBlank()) {
             return Response.from(zeroScores(segments.size()));
         }
         try {
-            List<Double> scores = scoreAllInternal(query, segments);
-            return Response.from(scores);
+            if (PROVIDER_LOCAL.equals(effectiveProvider) && localRerankModel.isAvailable()) {
+                return localRerankModel.scoreAll(segments, query);
+            }
+            if (cloudAvailable) {
+                return Response.from(scoreAllInternal(query, segments));
+            }
+            return Response.from(zeroScores(segments.size()));
         } catch (Exception e) {
             log.warn("[RerankService] scoreAll 失败，返回等分降级: {}", e.getMessage(), e);
             return Response.from(zeroScores(segments.size()));

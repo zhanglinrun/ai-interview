@@ -13,6 +13,7 @@ import com.linrun.interview.modules.knowledgebase.model.RagChatDTO.SessionDetail
 import com.linrun.interview.modules.knowledgebase.model.RagChatDTO.SessionListItemDTO;
 import com.linrun.interview.modules.knowledgebase.model.RagChatMessageEntity;
 import com.linrun.interview.modules.knowledgebase.model.RagChatSessionEntity;
+import com.linrun.interview.modules.knowledgebase.rag.TitleSummaryService;
 import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
 import com.linrun.interview.modules.knowledgebase.repository.RagChatSessionRepository;
@@ -42,6 +43,7 @@ public class RagChatSessionService {
     private final RagChatMapper ragChatMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseQueryProperties queryProperties;
+    private final TitleSummaryService titleSummaryService;
 
     @Transactional
     public SessionDTO createSession(CreateSessionRequest request) {
@@ -134,7 +136,57 @@ public class RagChatSessionService {
             messageId, content != null ? content.length() : 0);
     }
 
-    public Flux<String> getStreamAnswer(Long sessionId, String question) {
+    /**
+     * 异步 LLM 标题生成（亮点6）。
+     *
+     * <p>仅当 {@code app.ai.rag.title-summary.enabled=true} 且当前为会话首问（用户消息数 == 1）时，
+     * 用虚拟线程异步调 {@link TitleSummaryService#generateTitle(String)} 根据首问内容生成摘要标题，
+     * 更新会话标题。失败只 warn，保留原规则标题（知识库名 / "N 个知识库对话"），不抛异常。
+     *
+     * <p>复用 {@code LlmProviderRegistry.getDefaultChatModel()} 构造的 {@link TitleSummaryService}
+     * bean（弃 know-engine 每次 {@code new OpenAiChatModel}）。在流式首问完成后调用，不阻塞响应。
+     *
+     * @param sessionId 会话 ID
+     * @param firstQuestion 首问内容（用于生成标题）
+     */
+    public void maybeGenerateTitleAsync(Long sessionId, String firstQuestion) {
+        if (!queryProperties.getTitleSummary().isEnabled()) {
+            return;
+        }
+        if (firstQuestion == null || firstQuestion.isBlank()) {
+            return;
+        }
+        long userMsgCount = messageRepository.countBySessionIdAndType(sessionId,
+            RagChatMessageEntity.MessageType.USER);
+        if (userMsgCount != 1) {
+            return;
+        }
+        Thread.ofVirtual().name("title-summary-" + sessionId).start(() -> {
+            try {
+                String aiTitle = titleSummaryService.generateTitle(firstQuestion);
+                if (aiTitle == null || aiTitle.isBlank()) {
+                    log.warn("[RagChatSessionService] LLM 生成标题为空，保留原标题: sessionId={}", sessionId);
+                    return;
+                }
+                String trimmed = aiTitle.trim().replaceAll("^\"|\"$", "");
+                if (trimmed.isBlank()) {
+                    return;
+                }
+                // 虚拟线程无请求 ThreadLocal，sessionId 已在请求线程校验归属，直接按 id 更新
+                sessionRepository.findById(sessionId).ifPresent(session -> {
+                    session.setTitle(trimmed);
+                    sessionRepository.save(session);
+                    log.info("[RagChatSessionService] LLM 生成会话标题: sessionId={}, title={}",
+                        sessionId, trimmed);
+                });
+            } catch (Exception e) {
+                log.warn("[RagChatSessionService] LLM 生成标题失败，保留原标题: sessionId={}, error={}",
+                    sessionId, e.getMessage(), e);
+            }
+        });
+    }
+
+    public Flux<String> getStreamAnswer(Long sessionId, String question, Long assistantMessageId) {
         RagChatSessionEntity session = sessionRepository.findByUserIdAndIdWithKnowledgeBases(
                 UserContext.requireUserId(), sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
@@ -145,7 +197,7 @@ public class RagChatSessionService {
             : List.of();
 
         log.info("加载历史上下文: sessionId={}, historySize={}", sessionId, history.size());
-        return queryService.answerQuestionStream(kbIds, question, history);
+        return queryService.answerQuestionStream(kbIds, question, history, assistantMessageId);
     }
 
     @Transactional

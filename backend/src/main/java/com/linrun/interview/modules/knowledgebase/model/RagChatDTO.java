@@ -90,6 +90,8 @@ public class RagChatDTO {
         Long id,
         String type,  // "user" | "assistant"
         String content,
+        // 改写后的查询（亮点5）：仅 assistant 消息可能非空，前端可展示"系统将你的问题理解为 xxx"
+        String transformContent,
         LocalDateTime createdAt
     ) {}
 }

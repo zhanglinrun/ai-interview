@@ -14,6 +14,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -53,6 +55,9 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
     private final Function<Map<Query, Collection<List<Content>>>, Query> querySelector;
     private final Double minScore;
     private final Integer maxResults;
+    private final Consumer<String> progressCallback;
+    /** rerank 进度只发一次（聚合可能对多 query 多次调用 aggregate）。 */
+    private final AtomicBoolean rerankProgressSent = new AtomicBoolean(false);
 
     public InterviewReRankingContentAggregator(ScoringModel scoringModel) {
         this(scoringModel, DEFAULT_QUERY_SELECTOR, null);
@@ -68,16 +73,29 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
                                                 Function<Map<Query, Collection<List<Content>>>, Query> querySelector,
                                                 Double minScore,
                                                 Integer maxResults) {
+        this(scoringModel, querySelector, minScore, maxResults, null);
+    }
+
+    public InterviewReRankingContentAggregator(ScoringModel scoringModel,
+                                                Function<Map<Query, Collection<List<Content>>>, Query> querySelector,
+                                                Double minScore,
+                                                Integer maxResults,
+                                                Consumer<String> progressCallback) {
         this.scoringModel = ensureNotNull(scoringModel, "scoringModel");
         this.querySelector = getOrDefault(querySelector, DEFAULT_QUERY_SELECTOR);
         this.minScore = minScore;
         this.maxResults = getOrDefault(maxResults, Integer.MAX_VALUE);
+        this.progressCallback = progressCallback;
     }
 
     @Override
     public List<Content> aggregate(Map<Query, Collection<List<Content>>> queryToContents) {
         if (queryToContents.isEmpty()) {
             return Collections.emptyList();
+        }
+        // 亮点2：rerank 前推一次"正在排序筛选结果"进度
+        if (progressCallback != null && rerankProgressSent.compareAndSet(false, true)) {
+            progressCallback.accept("正在排序筛选结果...");
         }
 
         Query query = querySelector.apply(queryToContents);
@@ -143,6 +161,7 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         private Function<Map<Query, Collection<List<Content>>>, Query> querySelector;
         private Double minScore;
         private Integer maxResults;
+        private Consumer<String> progressCallback;
 
         public ReRankingContentAggregatorBuilder scoringModel(ScoringModel scoringModel) {
             this.scoringModel = scoringModel;
@@ -165,8 +184,14 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
             return this;
         }
 
+        public ReRankingContentAggregatorBuilder progressCallback(Consumer<String> progressCallback) {
+            this.progressCallback = progressCallback;
+            return this;
+        }
+
         public InterviewReRankingContentAggregator build() {
-            return new InterviewReRankingContentAggregator(scoringModel, querySelector, minScore, maxResults);
+            return new InterviewReRankingContentAggregator(scoringModel, querySelector, minScore,
+                maxResults, progressCallback);
         }
     }
 }

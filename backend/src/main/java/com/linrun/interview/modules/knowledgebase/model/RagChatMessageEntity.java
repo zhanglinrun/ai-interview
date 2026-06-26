@@ -59,6 +59,13 @@ public class RagChatMessageEntity {
     private String content;
 
     /**
+     * 改写后的查询文本（仅 ASSISTANT 消息由 InterviewQueryTransformer 异步回写），
+     * 用于排查改写质量/检索召回差异，不参与生成。可为 null。
+     */
+    @Column(name = "transform_content", columnDefinition = "TEXT")
+    private String transformContent;
+
+    /**
      * 消息顺序（用于排序）
      */
     @Column(nullable = false)

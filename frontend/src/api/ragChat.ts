@@ -1,4 +1,4 @@
-import { request } from './request';
+import { getAuthHeaders, request } from './request';
 import { API_BASE_URL, fetchTextStream } from './stream';
 
 // ========== 类型定义 ==========
@@ -47,6 +47,17 @@ export interface RagChatSessionDetail {
   updatedAt: string;
 }
 
+const PROGRESS_PREFIX = 'progress:';
+const REFERENCE_PREFIX = 'reference:';
+
+/**
+ * progress:/reference: 前缀事件是 RAG 元数据（不进回答正文），
+ * 其内容需原样保留（reference 内是 JSON，不能做 \\n→\n 转义，否则破坏 JSON）。
+ */
+function isPrefixedEvent(content: string): boolean {
+  return content.startsWith(PROGRESS_PREFIX) || content.startsWith(REFERENCE_PREFIX);
+}
+
 function extractEventContent(event: string): string | null {
   if (!event.trim()) {
     return null;
@@ -65,7 +76,12 @@ function extractEventContent(event: string): string | null {
     return null;
   }
 
-  return contentParts.join('')
+  const joined = contentParts.join('');
+  // 前缀事件原样返回，不做 \\n→\n 转义（reference 内是 JSON）
+  if (isPrefixedEvent(joined)) {
+    return joined;
+  }
+  return joined
     .replace(/\\n/g, '\n')
     .replace(/\\r/g, '\r');
 }
@@ -111,6 +127,30 @@ function processEventStreamBuffer(
 }
 
 // ========== API 函数 ==========
+
+/**
+ * SSE 流事件类型：
+ * - token：回答正文片段（无前缀）
+ * - progress：阶段进度（progress: 前缀）
+ * - reference：引用来源 JSON（reference: 前缀）
+ */
+export type RagStreamEvent =
+  | { type: 'token'; chunk: string }
+  | { type: 'progress'; text: string }
+  | { type: 'reference'; sources: RagSourceDTO[] };
+
+export interface RagSourceDTO {
+  knowledgeBaseId: number | null;
+  documentTitle: string;
+  sourceName: string;
+  category: string | null;
+  sectionTitle: string | null;
+  chunkIndex: number | null;
+  chunkCount: number | null;
+  snippet: string;
+  similarity: number | null;
+  cited: boolean;
+}
 
 export const ragChatApi = {
   /**
@@ -168,23 +208,49 @@ export const ragChatApi = {
   },
 
   /**
-   * 发送消息（流式SSE）
+   * 发送消息（流式SSE），解析 progress:/reference: 前缀事件并分流回调。
+   *
+   * @param onToken 回答 token 片段（无前缀）
+   * @param onProgress 阶段进度文案（progress: 前缀）
+   * @param onReference 引用来源（reference: 前缀，已 JSON.parse）
    */
   async sendMessageStream(
     sessionId: number,
     question: string,
-    onMessage: (chunk: string) => void,
+    onToken: (chunk: string) => void,
     onComplete: () => void,
-    onError: (error: Error) => void
+    onError: (error: Error) => void,
+    onProgress?: (text: string) => void,
+    onReference?: (sources: RagSourceDTO[]) => void
   ): Promise<void> {
     return fetchTextStream({
       url: `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
       init: {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify({ question }),
       },
-      onMessage,
+      onMessage: (raw: string) => {
+        // progress:/reference: 前缀事件是元数据，不进回答正文
+        if (raw.startsWith('progress:')) {
+          onProgress?.(raw.substring('progress:'.length));
+          return;
+        }
+        if (raw.startsWith('reference:')) {
+          const payload = raw.substring('reference:'.length);
+          try {
+            const sources = JSON.parse(payload) as RagSourceDTO[];
+            onReference?.(sources);
+          } catch {
+            // 忽略解析失败，不中断流
+          }
+          return;
+        }
+        onToken(raw);
+      },
       onComplete,
       onError,
       processBuffer: processEventStreamBuffer,

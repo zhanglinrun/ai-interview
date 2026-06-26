@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
@@ -56,6 +58,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final Filter filter;
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
+    private final Consumer<String> progressCallback;
+    /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
+    private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
 
     public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
                                                    EmbeddingModel embeddingModel,
@@ -64,6 +69,18 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    List<Long> knowledgeBaseIds,
                                                    KnowledgeSegmentService segmentService,
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
+            segmentService, parentExpand, null);
+    }
+
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   Consumer<String> progressCallback) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
@@ -71,10 +88,14 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         this.filter = buildKbFilter(knowledgeBaseIds);
         this.segmentService = segmentService;
         this.parentExpand = parentExpand;
+        this.progressCallback = progressCallback;
     }
 
     @Override
     public List<Content> retrieve(Query query) {
+        if (progressCallback != null && retrieveProgressSent.compareAndSet(false, true)) {
+            progressCallback.accept("正在检索知识库...");
+        }
         Embedding queryEmbedding = embeddingModel.embed(query.text()).content();
         var builder = EmbeddingSearchRequest.builder()
             .queryEmbedding(queryEmbedding)

@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import {knowledgeBaseApi, type KnowledgeBaseItem, type SortOption} from '../api/knowledgebase';
-import {ragChatApi, type RagChatSessionListItem} from '../api/ragChat';
+import {ragChatApi, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
 import {formatFileSize} from '../utils/format';
@@ -59,6 +59,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  // 当前流式回答的阶段进度（来自 progress: 前缀事件），显示在助手气泡上方
+  const [progressText, setProgressText] = useState('');
+  // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
+  const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
 
   // refs
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -263,6 +267,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     const userQuestion = question.trim();
     setQuestion('');
     setLoading(true);
+    setProgressText('');
+    setActiveSources(null);
 
     let sessionId = currentSessionId;
     if (!sessionId) {
@@ -324,12 +330,24 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         () => {
           setLoading(false);
+          setProgressText('');
+          setActiveSources(null);
           loadSessions();
         },
         (error: Error) => {
           console.error('流式查询失败:', error);
           updateAssistantMessage(fullContent || getErrorMessage(error, '回答失败，请重试'));
           setLoading(false);
+          setProgressText('');
+          setActiveSources(null);
+        },
+        // 阶段进度：正在优化问题 → 检索知识库 → 排序筛选 → 生成回答
+        (text: string) => {
+          setProgressText(text);
+        },
+        // 引用来源：augment 完成后推一次
+        (sources: RagSourceDTO[]) => {
+          setActiveSources(sources);
         }
       );
     } catch (err) {
@@ -549,6 +567,30 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                   </ReactMarkdown>
                                   {loading && index === messages.length - 1 && (
                                     <span className="inline-block w-0.5 h-5 bg-primary-500 ml-1 animate-pulse" />
+                                  )}
+                                  {/* 流式阶段进度气泡（来自 progress: 前缀事件） */}
+                                  {loading && index === messages.length - 1 && progressText && (
+                                    <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-full px-2.5 py-1">
+                                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />
+                                      {progressText}
+                                    </div>
+                                  )}
+                                  {/* 引用来源（来自 reference: 前缀事件，流式期间显示在助手气泡内） */}
+                                  {loading && index === messages.length - 1 && activeSources && activeSources.length > 0 && (
+                                    <div className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2 space-y-1">
+                                      <p className="text-xs text-slate-400 dark:text-slate-500">参考来源</p>
+                                      {activeSources.slice(0, 3).map((s, i) => (
+                                        <div key={i} className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                                          {i + 1}. {s.documentTitle}
+                                          {s.similarity != null && (
+                                            <span className="ml-1 text-slate-400">（相似度 {s.similarity.toFixed(2)}）</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                      {activeSources.length > 3 && (
+                                        <p className="text-xs text-slate-400">等 {activeSources.length} 个来源</p>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               )}

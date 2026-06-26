@@ -57,11 +57,18 @@ spring:
   application:
     name: ai-interview-platform
 
-  # 排除 Neo4j 向量存储自动配置（阶段9引入 graph RAG 后实际退化为单一 ES 数据源，
-  # 未使用 Neo4jEmbeddingStore；本地/部署未配 Neo4j 时其 autoconfig 会因 driver=null 失败）
+  # 排除 Neo4j 自动配置（阶段9引入 graph RAG 后实际退化为单一 ES 数据源，
+  # 业务代码未使用 @Node / Neo4jRepository / Text2Cypher，也未手动建 Neo4j bean；
+  # 本地/部署未配 Neo4j 时 driver 连 localhost:7687 失败会导致 /actuator/health 503。
+  # 后续真要用 graph RAG 再去掉这里的排除项 + 起 Neo4j 容器。）
   autoconfigure:
     exclude:
       - dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration
+      - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveRepositoriesAutoConfiguration
 
   # 启用虚拟线程 (Java 21+)
   # 显著提升 I/O 密集型场景的并发能力，特别适合 AI 调用和 SSE 长连接
@@ -142,6 +149,11 @@ app:
     security:
       api-key-encryption-key: ${APP_AI_CONFIG_ENCRYPTION_KEY:}
       require-encryption-key: ${APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY:false}
+    # LLM 思考模式开关。qwen3.5-flash 等 reasoning 模型默认开启 thinking，会对查询改写等
+    # 简单任务产生上千 token 思考过程（单次调用 16-40 秒）。默认关闭以降低延迟，需要深度
+    # 推理时设 APP_AI_THINKING_ENABLED=true 开启（非 reasoning 模型会忽略 enable_thinking）。
+    thinking:
+      enabled: ${APP_AI_THINKING_ENABLED:false}
     # 运行时可写的 Provider 配置落点（与 classpath 主 application.yml 隔离）。
     # 开发环境默认写到用户主目录下，避免污染源码目录或 jar 内 classpath 资源。
     config-yaml-path: ${APP_AI_CONFIG_YAML_PATH:${user.home}/.interview-guide/llm-providers.yml}
@@ -220,12 +232,21 @@ app:
         keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
         rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
         fusion-top-k: ${APP_AI_RAG_HYBRID_FUSION_TOPK:12}
-      # 重排：调用 DashScope gte-rerank 对融合候选精排，失败安全降级为融合排序
+      # 重排：默认本地 ONNX BGE-RERANKER 进程内精排（无网络/不计费），模型缺失自动降级 DashScope gte-rerank 云端
       rerank:
         enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
+        # provider: local（本地 ONNX BGE，默认）| cloud（DashScope gte-rerank）
+        provider: ${APP_AI_RAG_RERANK_PROVIDER:local}
         model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
         timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
+        # 本地 ONNX reranker 模型文件配置（provider=local 时生效）
+        # 模型文件不入 git，需手动下载放到 backend/src/main/resources/model/bge-reranker-model/
+        # 详见 backend/src/main/resources/model/bge-reranker-model/README.md
+        local:
+          model-path: ${APP_AI_RAG_RERANK_LOCAL_MODEL_PATH:classpath:model/bge-reranker-model/model_quantized.onnx}
+          tokenizer-path: ${APP_AI_RAG_RERANK_LOCAL_TOKENIZER_PATH:classpath:model/bge-reranker-model/tokenizer.json}
+          max-sequence-length: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:8192}
       # 父子/兄弟分段扩展（small-to-big）：检索命中 chunk 后，按 parentChunkId 取父块章节、
       # 按 brotherChunkId 取同组兄弟按序拼接，给 LLM 更完整上下文（对齐 know-engine）。
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
@@ -233,6 +254,17 @@ app:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
         max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
+      # 意图识别兜底（亮点4）：流式问答前置一次意图识别，判定问题是否与面试/技术知识/简历/求职
+      # 等场景相关。不相关走通用对话兜底（不检索知识库），避免越界问题强行检索导致幻觉。
+      # 关闭则全部走 RAG（行为同批次A）。识别本身多一次 LLM 调用（~0.4s 关 thinking 后）。
+      intent-recognition:
+        enabled: ${APP_AI_RAG_INTENT_RECOGNITION_ENABLED:true}
+        # 是否在意图识别前推"正在理解您的问题..."进度（关闭可省前端空进度）
+        progress-enabled: ${APP_AI_RAG_INTENT_RECOGNITION_PROGRESS_ENABLED:true}
+      # 异步 LLM 标题生成（亮点6）：首问流式完成后用虚拟线程异步让 LLM 根据首问生成会话标题，
+      # 替代知识库名规则拼接。失败保留原规则标题。关闭则保留原规则标题。
+      title-summary:
+        enabled: ${APP_AI_RAG_TITLE_SUMMARY_ENABLED:true}
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:
