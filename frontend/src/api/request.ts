@@ -1,4 +1,4 @@
-import axios, { AxiosRequestConfig } from 'axios';
+﻿import axios, { AxiosRequestConfig } from 'axios';
 import { clearAuthSession, getAccessToken } from './authStorage';
 
 /**
@@ -10,7 +10,7 @@ interface Result<T = unknown> {
   data: T;
 }
 
-export const API_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8080';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const AI_REQUEST_TIMEOUT_MS = 180_000;
 export const UPLOAD_REQUEST_TIMEOUT_MS = 300_000;
@@ -185,3 +185,4 @@ export function getErrorMessage(error: unknown, fallback = '未知错误'): stri
 }
 
 export default request;
+
