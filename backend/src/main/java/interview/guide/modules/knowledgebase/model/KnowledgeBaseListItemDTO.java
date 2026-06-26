@@ -1,5 +1,7 @@
 package interview.guide.modules.knowledgebase.model;
 
+import interview.guide.modules.knowledgebase.constant.DocumentStatus;
+
 import java.time.LocalDateTime;
 
 /**
@@ -17,9 +19,7 @@ public record KnowledgeBaseListItemDTO(
     LocalDateTime lastAccessedAt,
     Integer accessCount,
     Integer questionCount,
-    VectorStatus vectorStatus,
-    String vectorError,
-    Integer chunkCount
+    DocumentStatus docStatus,
+    Long currentVersionId
 ) {
 }
-

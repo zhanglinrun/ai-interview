@@ -66,16 +66,9 @@ k6 run -e KB_IDS=1 -e VUS=20 -e DURATION=2m loadtest/rag-query.js   # 再记一�
 
 两次用**相同的 VUS/DURATION**，对比 P99 和吞吐。
 
-### B. 批量向量化并行度
+### B. 批量向量化吞吐
 
-向量化消费者支持文档级并行（`app.ai.vectorize.parallelism`，默认 3）。用批量上传接口压，改并行度对比吞吐：
-
-```bash
-# 串行：APP_AI_VECTORIZE_PARALLELISM=1 重启后端，批量上传 N 个文档，记总耗时
-# 并行：APP_AI_VECTORIZE_PARALLELISM=3（默认）重启后端，同样 N 个文档，记总耗时
-```
-
-向量化是异步的，耗时从 Grafana 的「向量化文档处理延迟」面板和 Stream 积压清空速度观察，或看后端日志里每个文档的完成时间。
+知识库向量化已迁至 Spring 事件 + 补偿任务链路（`DocumentChunkedEvent` → `@Async` 嵌入写 ES），无文档级并行度可调。用批量上传接口压，从 Grafana 的「异步管道」面板观察 Stream 积压清空速度，或看后端日志里每个文档的完成时间。
 
 ## 配合监控看
 

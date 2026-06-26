@@ -5,11 +5,11 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.security.UserContext;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.mapper.KnowledgeBaseMapper;
+import interview.guide.modules.knowledgebase.constant.DocumentStatus;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import interview.guide.modules.knowledgebase.model.RagChatMessageEntity.MessageType;
-import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.RagChatMessageRepository;
 import lombok.RequiredArgsConstructor;
@@ -38,29 +38,29 @@ public class KnowledgeBaseListService {
 
     /**
      * 获取知识库列表（支持状态过滤和排序）
-     * 
-     * @param vectorStatus 向量化状态，null 表示不过滤
+     *
+     * @param docStatus 文档状态，null 表示不过滤
      * @param sortBy 排序字段，null 或 "time" 表示按时间排序
      * @return 知识库列表
      */
-    public List<KnowledgeBaseListItemDTO> listKnowledgeBases(VectorStatus vectorStatus, String sortBy) {
+    public List<KnowledgeBaseListItemDTO> listKnowledgeBases(DocumentStatus docStatus, String sortBy) {
         Long userId = UserContext.requireUserId();
         List<KnowledgeBaseEntity> entities;
-        
+
         // 如果指定了状态，按状态过滤
-        if (vectorStatus != null) {
-            entities = knowledgeBaseRepository.findByUserIdAndVectorStatusOrderByUploadedAtDesc(
-                userId, vectorStatus);
+        if (docStatus != null) {
+            entities = knowledgeBaseRepository.findByUserIdAndDocStatusOrderByUploadedAtDesc(
+                userId, docStatus);
         } else {
             // 否则获取所有知识库
             entities = knowledgeBaseRepository.findAllByUserIdOrderByUploadedAtDesc(userId);
         }
-        
+
         // 如果指定了排序字段，在内存中排序
         if (sortBy != null && !sortBy.isBlank() && !sortBy.equalsIgnoreCase("time")) {
             entities = sortEntities(entities, sortBy);
         }
-        
+
         return knowledgeBaseMapper.toListItemDTOList(entities);
     }
 
@@ -69,13 +69,6 @@ public class KnowledgeBaseListService {
      */
     public List<KnowledgeBaseListItemDTO> listKnowledgeBases() {
         return listKnowledgeBases(null, null);
-    }
-
-    /**
-     * 按向量化状态获取知识库列表（保持向后兼容）
-     */
-    public List<KnowledgeBaseListItemDTO> listKnowledgeBasesByStatus(VectorStatus vectorStatus) {
-        return listKnowledgeBases(vectorStatus, null);
     }
 
     /**
@@ -97,11 +90,12 @@ public class KnowledgeBaseListService {
      * 根据ID列表获取知识库名称列表
      */
     public List<String> getKnowledgeBaseNames(List<Long> ids) {
-        Long userId = UserContext.requireUserId();
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> nameMap = getKnowledgeBaseNameMap(ids);
         return ids.stream()
-            .map(id -> knowledgeBaseRepository.findByUserIdAndId(userId, id)
-                .map(KnowledgeBaseEntity::getName)
-                .orElse("未知知识库"))
+            .map(id -> nameMap.getOrDefault(id, "未知知识库"))
             .toList();
     }
 
@@ -208,8 +202,9 @@ public class KnowledgeBaseListService {
             knowledgeBaseRepository.countByUserId(userId),
             ragChatMessageRepository.countByTypeAndSessionUserId(MessageType.USER, userId),
             knowledgeBaseRepository.sumAccessCountByUserId(userId),
-            knowledgeBaseRepository.countByUserIdAndVectorStatus(userId, VectorStatus.COMPLETED),
-            knowledgeBaseRepository.countByUserIdAndVectorStatus(userId, VectorStatus.PROCESSING)
+            knowledgeBaseRepository.countByUserIdAndDocStatus(userId, DocumentStatus.VECTOR_STORED),
+            knowledgeBaseRepository.countByUserIdAndDocStatusIn(
+                userId, List.of(DocumentStatus.CONVERTED, DocumentStatus.CHUNKED))
         );
     }
 

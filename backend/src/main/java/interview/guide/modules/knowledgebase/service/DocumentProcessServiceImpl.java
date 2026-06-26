@@ -66,6 +66,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseChunkingService chunkingService;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final VectorStoreService vectorStoreService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
 
@@ -189,12 +190,23 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         version.setConvertedContent(markdown);
         version = versionService.save(version);
 
+        // 即时失效旧当前版本：若旧版本已向量化，主动清 ES 向量 + segment 降 STORED，不等补偿任务。
+        // 失败仅告警，不阻断新版本上传——旧版本残留向量化状态可由补偿任务兜底清理。
+        if (latest.getStatus() == DocumentStatus.VECTOR_STORED) {
+            try {
+                knowledgeDocumentService.deactivateVersion(latest.getVersionId());
+            } catch (Exception e) {
+                log.warn("新版本上传时失效旧版本失败，已继续上传新版本，旧版本留待补偿任务清理: docId={}, oldVersionId={}, error={}",
+                    docId, latest.getVersionId(), e.getMessage(), e);
+            }
+        }
+
         // 主表指向新版本，状态降回 CONVERTED（待 split 重新向量化）
         entity.setCurrentVersionId(version.getVersionId());
         entity.setDocStatus(DocumentStatus.CONVERTED);
         knowledgeBaseRepository.save(entity);
 
-        log.info("知识库新版本上传完成: docId={}, version={}, 旧版本数据保留待清理",
+        log.info("知识库新版本上传完成: docId={}, version={}, 旧版本即时失效已尝试",
             docId, newVersion);
         return version.getVersionId();
     }
@@ -240,6 +252,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             metadataMap.put(MetadataKeyConstant.FILE_NAME, entity.getName());
             metadataMap.put(MetadataKeyConstant.URL, version.getDocUrl());
             metadataMap.put(MetadataKeyConstant.VERSION, String.valueOf(version.getVersionId()));
+            metadataMap.put(MetadataKeyConstant.ACCESSIBLE_BY, String.valueOf(userId));
 
             KnowledgeBaseSegmentEntity segEntity = new KnowledgeBaseSegmentEntity();
             segEntity.setText(seg.text());
@@ -273,6 +286,36 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     public void embedAndStore(KnowledgeBaseVersionEntity version) {
         // 委托给 KnowledgeDocumentService.activateVersion，复用分页扫描嵌入逻辑
         knowledgeDocumentService.activateVersion(version);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int rechunk(Long docId) {
+        Long userId = UserContext.requireUserId();
+        log.info("重新切块请求: docId={}", docId);
+        KnowledgeBaseEntity entity = knowledgeBaseRepository.findByUserIdAndId(userId, docId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
+
+        Long versionId = entity.getCurrentVersionId();
+        if (versionId == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库无当前版本，无法重新切块: " + docId);
+        }
+        KnowledgeBaseVersionEntity version = versionService.getById(versionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本记录不存在"));
+
+        // 1. 清 ES 旧向量（按 docId+versionId，失败仅告警，不阻断重新切块）
+        vectorStoreService.removeByDocIdAndVersion(docId, versionId);
+        // 2. 物理删当前版本 segment
+        segmentService.physicalDeleteByDocumentVersion(versionId);
+        // 3. 版本降回 CONVERTED
+        version.setStatus(DocumentStatus.CONVERTED);
+        versionService.update(version);
+        // 4. 主表降回 CONVERTED
+        entity.setDocStatus(DocumentStatus.CONVERTED);
+        knowledgeBaseRepository.save(entity);
+
+        // 5. 重新切块发事件触发异步向量化
+        return split(docId, "TITLE", null, null);
     }
 
     private String nextVersion(String current) {

@@ -2,12 +2,16 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.security.UserContext;
+import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.modules.knowledgebase.constant.DocumentStatus;
 import interview.guide.modules.knowledgebase.constant.SegmentStatus;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
+import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
+import interview.guide.modules.knowledgebase.repository.RagChatSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -42,18 +46,29 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final KnowledgeDocumentVersionService versionService;
     private final KnowledgeSegmentService segmentService;
     private final VectorStoreService vectorStoreService;
+    private final FileStorageService fileStorageService;
+    private final RagChatSessionRepository sessionRepository;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void removeDocumentWithSegments(Long docId) {
+        Long userId = UserContext.requireUserId();
+        KnowledgeBaseEntity doc = knowledgeBaseRepository.findByUserIdAndId(userId, docId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
         log.info("删除知识库（级联）: docId={}", docId);
-        // 1. 按 docId 删 ES 向量（失败仅告警，不阻断 DB 删除）
+
+        // 1. 删除所有 RAG 会话中的知识库关联（必须先删关联，否则外键约束阻止删除文档）
+        removeSessionAssociations(userId, docId);
+
+        // 2. 按 docId 删 ES 向量（失败仅告警，不阻断 DB 删除）
         vectorStoreService.removeByDocId(docId);
-        // 2. 物理删 segment
+        // 3. 物理删 segment
         segmentService.physicalDeleteByDocumentId(docId);
-        // 3. 物理删 version
+        // 4. 物理删 version
         versionService.physicalDeleteByDocId(docId);
-        // 4. 物理删文档
+        // 5. 删 RustFS 原始文件（失败仅告警，不阻断删除）
+        deleteStorageFile(docId, doc.getStorageKey());
+        // 6. 物理删文档
         knowledgeBaseRepository.deleteById(docId);
         log.info("删除知识库完成: docId={}", docId);
     }
@@ -64,14 +79,52 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         if (docIds == null || docIds.isEmpty()) {
             return;
         }
+        Long userId = UserContext.requireUserId();
         log.info("批量删除知识库（级联）: count={}", docIds.size());
-        vectorStoreService.removeByDocIds(docIds);
         for (Long docId : docIds) {
+            KnowledgeBaseEntity doc = knowledgeBaseRepository.findByUserIdAndId(userId, docId)
+                .orElse(null);
+            if (doc == null) {
+                log.warn("批量删除跳过不存在的知识库: docId={}", docId);
+                continue;
+            }
+            removeSessionAssociations(userId, docId);
+            vectorStoreService.removeByDocId(docId);
             segmentService.physicalDeleteByDocumentId(docId);
             versionService.physicalDeleteByDocId(docId);
+            deleteStorageFile(docId, doc.getStorageKey());
             knowledgeBaseRepository.deleteById(docId);
         }
         log.info("批量删除知识库完成: count={}", docIds.size());
+    }
+
+    /**
+     * 删除 RAG 会话中对该知识库的关联（避免外键约束阻止删除文档）。
+     */
+    private void removeSessionAssociations(Long userId, Long docId) {
+        List<RagChatSessionEntity> sessions =
+            sessionRepository.findByUserIdAndKnowledgeBaseIds(userId, List.of(docId));
+        for (RagChatSessionEntity session : sessions) {
+            session.getKnowledgeBases().removeIf(kb -> kb.getId().equals(docId));
+            sessionRepository.save(session);
+        }
+        if (!sessions.isEmpty()) {
+            log.info("已从 {} 个会话中移除知识库关联: docId={}", sessions.size(), docId);
+        }
+    }
+
+    /**
+     * 删除 RustFS 中的原始文件（失败仅告警，不阻断删除）。
+     */
+    private void deleteStorageFile(Long docId, String storageKey) {
+        if (storageKey == null || storageKey.isBlank()) {
+            return;
+        }
+        try {
+            fileStorageService.deleteKnowledgeBase(storageKey);
+        } catch (Exception e) {
+            log.warn("删除RustFS文件失败，继续删除知识库记录: docId={}, error={}", docId, e.getMessage(), e);
+        }
     }
 
     @Override

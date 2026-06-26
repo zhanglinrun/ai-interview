@@ -2,7 +2,6 @@ package interview.guide.modules.knowledgebase.repository;
 
 import interview.guide.modules.knowledgebase.constant.DocumentStatus;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
-import interview.guide.modules.knowledgebase.model.VectorStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -127,21 +126,24 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
     long sumAccessCountByUserId(@Param("userId") Long userId);
 
     /**
-     * 按向量化状态统计数量
-     */
-    long countByVectorStatus(VectorStatus vectorStatus);
-
-    long countByUserId(Long userId);
-
-    long countByUserIdAndVectorStatus(Long userId, VectorStatus vectorStatus);
-
-    /**
      * 按向量化状态查找知识库（按上传时间倒序）
      */
-    List<KnowledgeBaseEntity> findByVectorStatusOrderByUploadedAtDesc(VectorStatus vectorStatus);
+    long countByUserId(Long userId);
 
-    List<KnowledgeBaseEntity> findByUserIdAndVectorStatusOrderByUploadedAtDesc(Long userId,
-                                                                               VectorStatus vectorStatus);
+    long countByUserIdAndDocStatus(Long userId, DocumentStatus docStatus);
+
+    /**
+     * 按文档状态机查找知识库（按上传时间倒序）
+     */
+    List<KnowledgeBaseEntity> findByUserIdAndDocStatusOrderByUploadedAtDesc(Long userId,
+                                                                            DocumentStatus docStatus);
+
+    /**
+     * 按多个文档状态统计数量（处理中：CONVERTED/CHUNKED）
+     */
+    @Query("SELECT COUNT(k) FROM KnowledgeBaseEntity k WHERE k.userId = :userId AND k.docStatus IN :statuses")
+    long countByUserIdAndDocStatusIn(@Param("userId") Long userId,
+                                     @Param("statuses") List<DocumentStatus> statuses);
 
     /** 按文档状态机查询（三表重构后用，如扫 VECTOR_STORED 文档做旧版本清理）。 */
     List<KnowledgeBaseEntity> findByDocStatusAndCurrentVersionIdNotNull(DocumentStatus docStatus);

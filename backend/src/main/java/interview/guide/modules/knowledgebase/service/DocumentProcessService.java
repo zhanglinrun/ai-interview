@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
  * <ul>
  *   <li>{@link #upload}：校验→解析为 Markdown→存 RustFS→落库版本 v1→状态 UPLOADED/CONVERTED。</li>
  *   <li>{@link #split}：按 splitType 切块→落 segment 表→状态 CHUNKED→发布 {@code DocumentChunkedEvent}。</li>
+ *   <li>{@link #rechunk}：删当前版本 segment→降状态 CONVERTED→重新 split，用于重新向量化。</li>
  *   <li>{@link #embedAndStore}：分页扫待向量化 segment→嵌入写 ES→回写 embeddingId→升 VECTOR_STORED。</li>
  * </ul>
  */
@@ -45,6 +46,15 @@ public interface DocumentProcessService {
      * @return 分段数
      */
     int split(Long docId, String splitType, Integer chunkSize, Integer overlap);
+
+    /**
+     * 重新切块并重新向量化：删当前版本 segment、降 docStatus 为 CONVERTED，再 split 重新发事件触发异步向量化。
+     * 用于「重新向量化」手动重试入口。
+     *
+     * @param docId 知识库 ID
+     * @return 重新切块后的分段数
+     */
+    int rechunk(Long docId);
 
     /**
      * 向量化指定版本：分页扫 STORED + skipEmbedding=0 + embeddingId IS NULL 的 segment，

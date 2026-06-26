@@ -75,18 +75,6 @@ public class KnowledgeBaseEntity {
     // 问题数量（用户针对此知识库提问的次数）
     private Integer questionCount = 0;
 
-    // 向量化状态（新上传时为 PENDING，异步处理完成后变为 COMPLETED）
-    @Enumerated(EnumType.STRING)
-    @Column(length = 20)
-    private VectorStatus vectorStatus = VectorStatus.PENDING;
-
-    // 向量化错误信息（失败时记录）
-    @Column(length = 500)
-    private String vectorError;
-
-    // 向量分块数量
-    private Integer chunkCount = 0;
-
     // 当前激活版本 ID（指向 knowledge_base_version.version_id），三表重构后向量状态由版本承载
     private Long currentVersionId;
 
@@ -94,7 +82,7 @@ public class KnowledgeBaseEntity {
     @Column(length = 500)
     private String description;
 
-    // 文档状态机（对齐 know-engine DocumentStatus；过渡期与 vectorStatus 共存，后续清理旧字段）
+    // 文档状态机（对齐 know-engine DocumentStatus）
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private DocumentStatus docStatus;
@@ -227,30 +215,6 @@ public class KnowledgeBaseEntity {
 
     public void setCategory(String category) {
         this.category = category;
-    }
-
-    public VectorStatus getVectorStatus() {
-        return vectorStatus;
-    }
-
-    public void setVectorStatus(VectorStatus vectorStatus) {
-        this.vectorStatus = vectorStatus;
-    }
-
-    public String getVectorError() {
-        return vectorError;
-    }
-
-    public void setVectorError(String vectorError) {
-        this.vectorError = vectorError;
-    }
-
-    public Integer getChunkCount() {
-        return chunkCount;
-    }
-
-    public void setChunkCount(Integer chunkCount) {
-        this.chunkCount = chunkCount;
     }
 
     public Long getCurrentVersionId() {

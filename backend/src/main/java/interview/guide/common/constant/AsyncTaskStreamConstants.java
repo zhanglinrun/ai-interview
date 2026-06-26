@@ -2,7 +2,7 @@ package interview.guide.common.constant;
 
 /**
  * 异步任务 Redis Stream 通用常量
- * 包含知识库向量化和简历分析两个异步任务的配置
+ * 包含简历分析、面试评估、语音面试评估三个异步任务的配置
  */
 public final class AsyncTaskStreamConstants {
 
@@ -114,28 +114,6 @@ public final class AsyncTaskStreamConstants {
      * Stream 最大长度（自动裁剪旧消息，防止无限增长）
      */
     public static final int STREAM_MAX_LEN = 1000;
-
-    // ========== 知识库向量化 Stream 配置 ==========
-
-    /**
-     * 知识库向量化 Stream Key
-     */
-    public static final String KB_VECTORIZE_STREAM_KEY = "knowledgebase:vectorize:stream";
-
-    /**
-     * 知识库向量化 Consumer Group 名称
-     */
-    public static final String KB_VECTORIZE_GROUP_NAME = "vectorize-group";
-
-    /**
-     * 知识库向量化 Consumer 名称前缀
-     */
-    public static final String KB_VECTORIZE_CONSUMER_PREFIX = "vectorize-consumer-";
-
-    /**
-     * 知识库ID字段
-     */
-    public static final String FIELD_KB_ID = "kbId";
 
     // ========== 简历分析 Stream 配置 ==========
 

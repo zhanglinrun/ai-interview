@@ -105,9 +105,9 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     loadData();
   }, [loadData]);
 
-  // 轮询：当有 PENDING 或 PROCESSING 状态时，每5秒刷新一次
+  // 轮询：当有处理中文档时，每5秒刷新一次
   const hasPendingItems = knowledgeBases.some(
-    kb => isVectorStatusProcessing(kb.vectorStatus)
+    kb => isVectorStatusProcessing(kb.docStatus)
   );
   useConditionalPolling(hasPendingItems && !loading, loadDataSilent, NORMAL_POLLING_INTERVAL_MS);
 
@@ -443,7 +443,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </td>
                   <td className="px-6 py-4">
                     <VectorStatusBadge
-                      status={kb.vectorStatus}
+                      status={kb.docStatus}
                       textClassName="text-sm text-slate-600 dark:text-slate-300"
                     />
                   </td>
@@ -463,8 +463,8 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       >
                         <Download className="w-4 h-4" />
                       </button>
-                      {/* 重新向量化按钮（仅 FAILED 状态显示） */}
-                      {isVectorStatusFailed(kb.vectorStatus) && (
+                      {/* 重新向量化按钮（卡在 CHUNKED 可手动重试） */}
+                      {isVectorStatusFailed(kb.docStatus) && (
                         <button
                           onClick={() => handleRevectorize(kb.id)}
                           disabled={revectorizing === kb.id}

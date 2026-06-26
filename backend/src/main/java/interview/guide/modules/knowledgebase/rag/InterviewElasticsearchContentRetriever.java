@@ -93,7 +93,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     }
 
     /**
-     * 构建 kb_id metadata filter（任一知识库命中）。与 KnowledgeBaseVectorService.buildKbFilter 一致。
+     * 构建 kb_id metadata filter（任一知识库命中）。
      */
     private Filter buildKbFilter(List<Long> knowledgeBaseIds) {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {

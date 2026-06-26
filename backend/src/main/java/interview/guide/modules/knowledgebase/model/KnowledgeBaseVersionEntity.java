@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
  * 知识库文档版本实体（对齐 know-engine KnowledgeDocumentVersion）。
  *
  * <p>与 {@link KnowledgeBaseEntity} 一对多：一个知识库可有多个版本，每个版本独立存储原始文件 URL、
- * 转换后 Markdown URL、内容哈希与状态。{@link KnowledgeBaseEntity#getCurrentVersionId()} 指向当前激活版本。
+ * 转换后 Markdown 文本内容、内容哈希与状态。{@link KnowledgeBaseEntity#getCurrentVersionId()} 指向当前激活版本。
  */
 @Entity
 @Table(name = "knowledge_base_version", indexes = {
@@ -43,10 +43,6 @@ public class KnowledgeBaseVersionEntity {
     /** 原始文件 URL（RustFS）。 */
     @Column(length = 1000)
     private String docUrl;
-
-    /** 转换后 Markdown 文件 URL（RustFS，可选；若为空则用 convertedContent）。 */
-    @Column(length = 1000)
-    private String convertedDocUrl;
 
     /** 转换后 Markdown 文本内容（解析产物，split 时直接取，省存储往返）。 */
     @Column(columnDefinition = "TEXT")
@@ -115,14 +111,6 @@ public class KnowledgeBaseVersionEntity {
 
     public void setDocUrl(String docUrl) {
         this.docUrl = docUrl;
-    }
-
-    public String getConvertedDocUrl() {
-        return convertedDocUrl;
-    }
-
-    public void setConvertedDocUrl(String convertedDocUrl) {
-        this.convertedDocUrl = convertedDocUrl;
     }
 
     public String getConvertedContent() {

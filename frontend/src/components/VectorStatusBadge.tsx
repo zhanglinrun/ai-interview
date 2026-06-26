@@ -1,32 +1,51 @@
-import {AlertCircle, CheckCircle, Clock, Loader2} from 'lucide-react';
-import type {VectorStatus} from '../api/knowledgebase';
+import {CheckCircle, Clock, Loader2} from 'lucide-react';
+import type {DocStatus} from '../api/knowledgebase';
 
-const VECTOR_STATUS_CONFIG = {
-  COMPLETED: {
+// 文档状态展示配置（对齐后端 DocumentStatus 状态机）
+const DOC_STATUS_CONFIG = {
+  VECTOR_STORED: {
     text: '已完成',
     icon: CheckCircle,
     className: 'text-green-500',
     spinning: false,
   },
-  PROCESSING: {
+  STORED: {
+    text: '已完成',
+    icon: CheckCircle,
+    className: 'text-green-500',
+    spinning: false,
+  },
+  CONVERTING: {
     text: '处理中',
     icon: Loader2,
     className: 'text-blue-500',
     spinning: true,
   },
-  PENDING: {
+  CONVERTED: {
+    text: '处理中',
+    icon: Loader2,
+    className: 'text-blue-500',
+    spinning: true,
+  },
+  CHUNKED: {
+    text: '处理中',
+    icon: Loader2,
+    className: 'text-blue-500',
+    spinning: true,
+  },
+  UPLOADED: {
     text: '待处理',
     icon: Clock,
     className: 'text-yellow-500',
     spinning: false,
   },
-  FAILED: {
-    text: '失败',
-    icon: AlertCircle,
-    className: 'text-red-500',
+  INIT: {
+    text: '待处理',
+    icon: Clock,
+    className: 'text-yellow-500',
     spinning: false,
   },
-} satisfies Record<VectorStatus, {
+} satisfies Record<DocStatus, {
   text: string;
   icon: React.ComponentType<{ className?: string }>;
   className: string;
@@ -34,12 +53,12 @@ const VECTOR_STATUS_CONFIG = {
 }>;
 
 interface VectorStatusBadgeProps {
-  status: VectorStatus;
+  status: DocStatus;
   textClassName?: string;
 }
 
-function VectorStatusIcon({ status }: { status: VectorStatus }) {
-  const config = VECTOR_STATUS_CONFIG[status];
+function VectorStatusIcon({ status }: { status: DocStatus }) {
+  const config = DOC_STATUS_CONFIG[status];
   const Icon = config.icon;
   const className = `w-4 h-4 ${config.className}${config.spinning ? ' animate-spin' : ''}`;
   return <Icon className={className} />;
@@ -49,7 +68,7 @@ export default function VectorStatusBadge({
   status,
   textClassName = 'text-sm text-slate-600',
 }: VectorStatusBadgeProps) {
-  const config = VECTOR_STATUS_CONFIG[status];
+  const config = DOC_STATUS_CONFIG[status];
 
   return (
     <div className="flex items-center gap-2">

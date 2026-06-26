@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Redis Stream 可观测性指标采集。
  * <p>
- * 周期性把四条异步管道的积压情况上报为 Micrometer Gauge，让 Prometheus 能采集、Grafana 能画图：
+ * 周期性把三条异步管道的积压情况上报为 Micrometer Gauge，让 Prometheus 能采集、Grafana 能画图：
  * <ul>
  *   <li>{@code app.async.stream.length}：Stream 当前长度（积压消息总数）</li>
  *   <li>{@code app.async.stream.pending}：消费者组待确认数（PEL），持续偏高说明消费滞后或处理失败</li>
@@ -43,9 +43,6 @@ public class StreamMetricsReporter {
     private record Pipeline(String name, String streamKey, String groupName) {}
 
     private static final List<Pipeline> PIPELINES = List.of(
-        new Pipeline("vectorize",
-            AsyncTaskStreamConstants.KB_VECTORIZE_STREAM_KEY,
-            AsyncTaskStreamConstants.KB_VECTORIZE_GROUP_NAME),
         new Pipeline("resume-analyze",
             AsyncTaskStreamConstants.RESUME_ANALYZE_STREAM_KEY,
             AsyncTaskStreamConstants.RESUME_ANALYZE_GROUP_NAME),

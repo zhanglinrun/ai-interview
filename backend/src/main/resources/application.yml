@@ -226,12 +226,6 @@ app:
         model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
         timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
-    # 向量化并行与限流：文档级并行加速批量入库，全局信号量保护 DashScope embedding 配额
-    vectorize:
-      parallelism: ${APP_AI_VECTORIZE_PARALLELISM:3}
-      queue-capacity: ${APP_AI_VECTORIZE_QUEUE_CAPACITY:100}
-      embedding-concurrency: ${APP_AI_VECTORIZE_EMBEDDING_CONCURRENCY:3}
-      permit-wait-seconds: ${APP_AI_VECTORIZE_PERMIT_WAIT_SECONDS:60}
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:

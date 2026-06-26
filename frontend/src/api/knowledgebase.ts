@@ -1,8 +1,16 @@
 import { AI_REQUEST_TIMEOUT_MS, getAuthHeaders, request } from './request';
 import { API_BASE_URL, fetchTextStream } from './stream';
 
-// 向量化状态
-export type VectorStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+// 文档状态机（对齐后端 DocumentStatus）
+// INIT/UPLOADED：待处理；CONVERTING/CONVERTED/CHUNKED：处理中；VECTOR_STORED/STORED：已完成
+export type DocStatus =
+  | 'INIT'
+  | 'UPLOADED'
+  | 'CONVERTING'
+  | 'CONVERTED'
+  | 'CHUNKED'
+  | 'VECTOR_STORED'
+  | 'STORED';
 
 export interface KnowledgeBaseItem {
   id: number;
@@ -15,9 +23,8 @@ export interface KnowledgeBaseItem {
   lastAccessedAt: string;
   accessCount: number;
   questionCount: number;
-  vectorStatus: VectorStatus;
-  vectorError: string | null;
-  chunkCount: number;
+  docStatus: DocStatus;
+  currentVersionId: number | null;
 }
 
 // 统计信息
@@ -132,13 +139,13 @@ export const knowledgeBaseApi = {
   /**
    * 获取所有知识库列表
    */
-  async getAllKnowledgeBases(sortBy?: SortOption, vectorStatus?: VectorStatus): Promise<KnowledgeBaseItem[]> {
+  async getAllKnowledgeBases(sortBy?: SortOption, docStatus?: DocStatus): Promise<KnowledgeBaseItem[]> {
     const params = new URLSearchParams();
     if (sortBy) {
       params.append('sortBy', sortBy);
     }
-    if (vectorStatus) {
-      params.append('vectorStatus', vectorStatus);
+    if (docStatus) {
+      params.append('docStatus', docStatus);
     }
     const queryString = params.toString();
     return request.get<KnowledgeBaseItem[]>(`/api/knowledgebase/list${queryString ? `?${queryString}` : ''}`);

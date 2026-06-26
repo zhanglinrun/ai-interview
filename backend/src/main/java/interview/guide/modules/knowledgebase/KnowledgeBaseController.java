@@ -1,17 +1,22 @@
 package interview.guide.modules.knowledgebase;
 
 import interview.guide.common.annotation.RateLimit;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
+import interview.guide.common.security.UserContext;
 import interview.guide.common.web.AttachmentResponseBuilder;
+import interview.guide.modules.knowledgebase.constant.DocumentStatus;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
-import interview.guide.modules.knowledgebase.model.VectorStatus;
-import interview.guide.modules.knowledgebase.service.KnowledgeBaseDeleteService;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
+import interview.guide.modules.knowledgebase.service.DocumentProcessService;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseListService;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService;
-import interview.guide.modules.knowledgebase.service.KnowledgeBaseUploadService;
+import interview.guide.modules.knowledgebase.service.KnowledgeDocumentService;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +34,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,10 +48,11 @@ import java.util.Map;
 @Tag(name = "知识库管理", description = "知识库上传、下载、查询、分类与向量化")
 public class KnowledgeBaseController {
 
-    private final KnowledgeBaseUploadService uploadService;
+    private final DocumentProcessService documentProcessService;
+    private final KnowledgeDocumentService knowledgeDocumentService;
     private final KnowledgeBaseQueryService queryService;
     private final KnowledgeBaseListService listService;
-    private final KnowledgeBaseDeleteService deleteService;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
 
     /**
      * 获取所有知识库列表
@@ -52,17 +60,19 @@ public class KnowledgeBaseController {
     @GetMapping("/api/knowledgebase/list")
     public Result<List<KnowledgeBaseListItemDTO>> getAllKnowledgeBases(
             @RequestParam(value = "sortBy", required = false) String sortBy,
+            @RequestParam(value = "docStatus", required = false) String docStatus,
             @RequestParam(value = "vectorStatus", required = false) String vectorStatus) {
-        
-        VectorStatus status = null;
-        if (vectorStatus != null && !vectorStatus.isBlank()) {
+
+        DocumentStatus status = null;
+        String raw = docStatus != null && !docStatus.isBlank() ? docStatus : vectorStatus;
+        if (raw != null && !raw.isBlank()) {
             try {
-                status = VectorStatus.valueOf(vectorStatus.toUpperCase());
+                status = DocumentStatus.valueOf(raw.toUpperCase());
             } catch (IllegalArgumentException e) {
-                return Result.error("无效的向量化状态: " + vectorStatus);
+                return Result.error("无效的文档状态: " + raw);
             }
         }
-        
+
         return Result.success(listService.listKnowledgeBases(status, sortBy));
     }
 
@@ -81,7 +91,7 @@ public class KnowledgeBaseController {
      */
     @DeleteMapping("/api/knowledgebase/{id}")
     public Result<Void> deleteKnowledgeBase(@PathVariable Long id) {
-        deleteService.deleteKnowledgeBase(id);
+        knowledgeDocumentService.removeDocumentWithSegments(id);
         return Result.success(null);
     }
 
@@ -146,6 +156,7 @@ public class KnowledgeBaseController {
 
     /**
      * 上传知识库文件
+     * <p>新链路：upload（解析落库）+ split（切块发事件触发异步向量化），返回结构与旧接口兼容。
      */
     @PostMapping(value = "/api/knowledgebase/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3)
@@ -154,12 +165,12 @@ public class KnowledgeBaseController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "category", required = false) String category) {
-        return Result.success(uploadService.uploadKnowledgeBase(file, name, category));
+        return Result.success(uploadSingle(file, name, category));
     }
 
     /**
      * 批量上传知识库文件
-     * 一次接收多个文件，每个文档各自入库并发送向量化任务，由多线程消费者并行处理。
+     * <p>逐个复用单文件上传逻辑，单个文件失败不影响其余，最后汇总。
      */
     @PostMapping(value = "/api/knowledgebase/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
@@ -167,7 +178,80 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> uploadKnowledgeBaseBatch(
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "category", required = false) String category) {
-        return Result.success(uploadService.uploadKnowledgeBaseBatch(files, category));
+        if (files == null || files.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
+        }
+        log.info("收到批量知识库上传请求: 文件数={}, category={}", files.size(), category);
+        long startTime = System.currentTimeMillis();
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        int success = 0;
+        int failed = 0;
+
+        for (MultipartFile file : files) {
+            String fileName = file != null ? file.getOriginalFilename() : null;
+            try {
+                Map<String, Object> result = uploadSingle(file, null, category);
+                success++;
+                items.add(Map.of(
+                    "filename", fileName != null ? fileName : "",
+                    "status", "success",
+                    "duplicate", false,
+                    "detail", result
+                ));
+            } catch (Exception e) {
+                failed++;
+                log.warn("批量上传中单个文件失败: {}, error={}", fileName, e.getMessage(), e);
+                items.add(Map.of(
+                    "filename", fileName != null ? fileName : "",
+                    "status", "failed",
+                    "error", e.getMessage() != null ? e.getMessage() : "未知错误"
+                ));
+            }
+        }
+
+        long totalTime = System.currentTimeMillis() - startTime;
+        log.info("批量知识库上传完成: 总数={}, 成功={}, 失败={}, 耗时={}ms",
+            files.size(), success, failed, totalTime);
+
+        return Result.success(Map.of(
+            "total", files.size(),
+            "success", success,
+            "failed", failed,
+            "duplicate", 0,
+            "items", items
+        ));
+    }
+
+    /**
+     * 单文件上传内部逻辑：upload + split，返回与旧接口兼容的结构。
+     */
+    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category) {
+        String fileName = file.getOriginalFilename();
+        log.info("收到知识库上传请求: {}, 大小: {} bytes, category: {}", fileName, file.getSize(), category);
+
+        Long docId = documentProcessService.upload(file, name, category);
+        documentProcessService.split(docId, "TITLE", null, null);
+
+        KnowledgeBaseEntity entity = knowledgeBaseRepository
+            .findByUserIdAndId(UserContext.requireUserId(), docId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR, "上传后知识库记录丢失"));
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("knowledgeBase", Map.of(
+            "id", docId,
+            "name", entity.getName(),
+            "category", entity.getCategory() != null ? entity.getCategory() : "",
+            "fileSize", file.getSize(),
+            "contentLength", 0,
+            "vectorStatus", "PENDING"
+        ));
+        result.put("storage", Map.of(
+            "fileKey", entity.getStorageKey() != null ? entity.getStorageKey() : "",
+            "fileUrl", entity.getStorageUrl() != null ? entity.getStorageUrl() : ""
+        ));
+        result.put("duplicate", false);
+        return result;
     }
 
     /**
@@ -208,13 +292,13 @@ public class KnowledgeBaseController {
 
     /**
      * 重新向量化知识库（手动重试）
-     * 用于向量化失败后的重试
+     * <p>走新链路 rechunk：删当前版本 segment + 清 ES 向量 + 降状态，再 split 重新发事件向量化。
      */
     @PostMapping("/api/knowledgebase/{id}/revectorize")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
     public Result<Void> revectorize(@PathVariable Long id) {
-        uploadService.revectorize(id);
+        documentProcessService.rechunk(id);
         return Result.success(null);
     }
 

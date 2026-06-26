@@ -6,8 +6,7 @@ package interview.guide.modules.knowledgebase.constant;
  * <p>流转：{@link #INIT} → {@link #UPLOADED} → {@link #CONVERTING} → {@link #CONVERTED}
  * → {@link #CHUNKED} → {@link #VECTOR_STORED}。无需向量存储的走 {@link #STORED}。
  *
- * <p>与旧 {@code VectorStatus}（PENDING/PROCESSING/COMPLETED/FAILED）不同：本状态机无显式
- * FAILED，失败靠文档停在 {@link #CHUNKED} 由 {@code @Scheduled} 补偿任务重试。
+ * <p>本状态机无显式 FAILED，失败靠文档停在 {@link #CHUNKED} 由 {@code @Scheduled} 补偿任务重试。
  */
 public enum DocumentStatus {
     /** 初始状态。 */
