@@ -178,8 +178,8 @@ public class UnifiedEvaluationService {
         } catch (Exception e) {
             log.error("批次评估失败: sessionId={}, batchSize={}, error={}",
                 sessionId, batch.size(), e.getMessage(), e);
-            // 返回空报告，让合并逻辑用零分兜底
-            return null;
+            // 返回零分空报告（不返回 null），让合并逻辑按 0 分兜底
+            return new BatchReportDTO(0, "批次评估失败，已按 0 分兜底。", List.of(), List.of(), List.of());
         }
     }
 
@@ -327,12 +327,22 @@ public class UnifiedEvaluationService {
             ))
             .collect(Collectors.toList());
 
+        int totalQuestions = qaRecords.size();
         int overallScore = answeredCount == 0 ? 0
-            : (int) questionDetails.stream().mapToInt(QuestionEvaluation::score).average().orElse(0);
+            : (int) questionDetails.stream()
+                .filter(q -> q.userAnswer() != null && !q.userAnswer().isBlank())
+                .mapToInt(QuestionEvaluation::score)
+                .average().orElse(0);
+
+        String feedbackWithRate = overallFeedback;
+        if (answeredCount < totalQuestions) {
+            feedbackWithRate = String.format("作答率 %d/%d。\n%s", answeredCount, totalQuestions,
+                overallFeedback != null ? overallFeedback : "");
+        }
 
         return new EvaluationReport(
-            sessionId, qaRecords.size(), overallScore, categoryScores, questionDetails,
-            overallFeedback,
+            sessionId, totalQuestions, (int) answeredCount, overallScore, categoryScores, questionDetails,
+            feedbackWithRate,
             strengths != null ? strengths : List.of(),
             improvements != null ? improvements : List.of(),
             referenceAnswers
