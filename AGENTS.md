@@ -169,7 +169,7 @@ public class ResumeAnalyzeStreamProducer extends AbstractStreamProducer<ResumeAn
 public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluatePayload> { ... }
 ```
 
-- 两条管道：简历分析、面试评估（知识库向量化已迁至 Spring 事件，见下）
+- 两条管道：简历分析、面试评估（知识库向量化走 Spring 事件，见下，不走 Redis Stream）
 - 常量定义在 `AsyncTaskStreamConstants`
 - 消费者实现 `processMessage()` 方法
 - **失败重试**：最大 3 次，超过后标记 FAILED
@@ -191,6 +191,10 @@ public void onDocumentChunked(DocumentChunkedEvent event) { ... }
 - 线程池 `eventListenerExecutor`（`AsyncConfig`，ThreadPoolTaskExecutor 核心4/最大8/队列50/CallerRunsPolicy）
 - **无显式 FAILED**：失败靠版本停在 `CHUNKED`，由 `DocumentCompensationJob`（`@Scheduled`）兜底重试
 - **补偿任务**：`@Scheduled` 替代 XXL-Job（向量化补偿扫 CHUNKED 重试 + 旧版本清理扫残留 segment）
+- **状态机统一**：知识库文档状态用 `DocumentStatus`（INIT/UPLOADED/CONVERTING/CONVERTED/CHUNKED/VECTOR_STORED/STORED），主表 `KnowledgeBaseEntity.docStatus` + `currentVersionId` 指向当前版本；旧 `VectorStatus`（PENDING/PROCESSING/COMPLETED/FAILED）已删除
+- **重新向量化**：`DocumentProcessService.rechunk(docId)` 删当前版本 segment → 降 CONVERTED → 重新 split 发事件
+- **删除级联**：`KnowledgeDocumentService.removeDocumentWithSegments` 一次清 ES 向量 + segment + version + 主表 + RustFS 文件 + RAG 会话关联，Controller 只委托
+- **版本切换**：`uploadNewVersion` 上传新版本时即时 `deactivateVersion` 旧版本（清旧向量），不等补偿任务
 
 ---
 

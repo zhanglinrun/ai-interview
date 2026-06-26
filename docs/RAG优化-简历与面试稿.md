@@ -119,14 +119,14 @@ AI 面试助手平台（Spring Boot + Spring AI + PostgreSQL + pgvector）
 > - `app.ai.rag.retrieval.fused_count`：融合后的候选数
 > - `app.ai.rag.retrieval.latency`：检索端到端耗时（timer 类型）
 >
-> **向量化侧**：
-> - `app.ai.vectorize.documents{status=success/failed}`：文档向量化计数，按成功/失败打标签
-> - `app.ai.vectorize.document_latency`：单文档向量化耗时
-> - `app.ai.vectorize.embedding_inflight`：当前在飞的 embedding 调用数（gauge 类型，可以看并发水位）
+> **向量化侧**（知识库向量化走 Spring 事件 + 补偿任务，无独立向量化指标）：
+> - `app.async.stream.length{pipeline=...}`：各 Redis Stream 管道积压长度（gauge，简历分析/面试评估/语音评估三条管道，知识库不走 Stream）
+> - `app.async.stream.pending{pipeline=...}`：消费者组待确认数（PEL），持续偏高说明消费滞后或处理失败
+> - 知识库向量化进度靠 `docStatus` 状态机观察（`KnowledgeBaseEntity.docStatus`：CONVERTED→CHUNKED→VECTOR_STORED），失败停在 CHUNKED 由 `@Scheduled` 补偿任务重试
 >
 > **实际用法**：
 > - 命中率低了就去看是向量通道还是关键词通道的问题，调 topK 或 threshold
-> - 向量化耗时高了就看 `embedding_inflight`，如果一直没到配置上限，说明可以调大 `embeddingConcurrency`；如果已经打满了，就是下游 API 的瓶颈，只能等或者换更高配额的 API
+> - 知识库向量化卡住就看有没有文档长期停在 CHUNKED，查补偿任务日志和 ES 连通性
 > - 失败率高了就去看日志，通常是 API 429（配额不够）或者网络超时
 
 ---
