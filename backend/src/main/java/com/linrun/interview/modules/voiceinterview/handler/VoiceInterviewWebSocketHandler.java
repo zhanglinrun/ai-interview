@@ -107,12 +107,13 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @PostConstruct
     void warmupOpeningAudioCache() {
+        VoiceInterviewProperties.OpeningConfig opening = voiceInterviewProperties.getOpening();
+        if (opening == null || !opening.isWarmupEnabled()) {
+            log.info("Opening audio cache warmup disabled (lazy mode): first voice session will synthesize on demand");
+            return;
+        }
         voicePipelineExecutor.execute(() -> {
             try {
-                VoiceInterviewProperties.OpeningConfig opening = voiceInterviewProperties.getOpening();
-                if (opening == null) {
-                    return;
-                }
                 LinkedHashSet<String> allTemplates = new LinkedHashSet<>();
                 if (opening.getSkillQuestions() != null) {
                     allTemplates.addAll(opening.getSkillQuestions().values());

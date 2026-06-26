@@ -7,4 +7,18 @@
     <property name="CONSOLE_LOG_CHARSET" value="UTF-8"/>
     <property name="FILE_LOG_CHARSET" value="UTF-8"/>
     <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <!-- 文件日志：实时落盘，便于运行时排障（无缓冲） -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>logs/app.log</file>
+        <append>true</append>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS}  %-5level %logger{36} - %msg%n</pattern>
+            <charset>${FILE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="FILE"/>
+    </root>
 </configuration>
