@@ -19,6 +19,27 @@
 - 在流式问答中返回检索进度、引用来源和置信度信息。
 - 将 RAG 能力落到面试场景：知识库检索、简历读取、Skill 出题、追问和评估。
 
+## 简历描述
+
+**基于 RAG 的智能面试平台**
+
+**技术栈**
+
+Java 21、Spring Boot、LangChain4j、Elasticsearch、Redis、MySQL、PostgreSQL、MinIO、MinerU
+
+**项目描述**
+
+面向求职面试场景开发的智能面试平台，支持简历解析、AI 简历评分、知识库 RAG 问答、模拟面试、语音面试和结构化评估报告生成。系统基于 LangChain4j 构建 RAG 核心链路，通过多格式文档解析、智能分段、混合检索、Rerank 精排和流式 SSE 输出，提升知识问答的召回质量、回答相关性与可追溯性。
+
+**负责功能**
+
+1. 多格式文档处理：设计知识库文档接入链路，支持 PDF、Markdown、TXT、DOC/DOCX、CSV、Excel 等格式统一上传与解析，基于 MinerU 完成结构化解析，异常场景自动降级 Apache Tika，文档解析成功率从 X 提升至 X。
+2. 智能分段与上下文扩展：实现 Markdown 标题分段、滑动窗口重叠切片、父子分段和兄弟分段策略，子分段用于精准向量召回，命中后按 `parentChunkId` 和 `brotherChunkId` 回溯完整上下文，解决固定长度切片导致的语义截断问题，Top5 召回率从 X 提升至 X。
+3. Query 改写与查询路由：基于 LangChain4j 实现 `QueryTransformer` 和 `QueryRouter`，对用户问题进行语义改写、意图识别和检索路径选择，自动路由至 Elasticsearch 知识库检索或 Text2SQL 结构化查询，路由失败降级 Elasticsearch 检索，意图路由准确率达到 X。
+4. 混合检索与精排优化：基于 Elasticsearch 实现 BM25 全文检索和向量语义检索混合召回，使用 RRF 算法融合多路检索结果，并接入 Rerank 对 Top-K 候选文档进行语义重排，RAG HitRate 从 X 提升至 X，MRR 从 X 提升至 X。
+5. 流式 RAG 与引用溯源：实现端到端流式 RAG 问答链路，基于 Flux 和 SSE 混合推送 `progress`、`reference` 和 LLM token 事件，在生成过程中实时返回文档名、分段位置和相关度分数，前端展示引用卡片并支持溯源原始文档，提升回答可解释性。
+6. 异步任务与并发控制：基于 Redis Stream 封装轻量级异步任务队列，支撑简历分析、面试评估、语音评估等耗时任务异步执行，支持消费组、失败重试、Pending 消息认领和幂等状态标记；基于 Redisson 和 AOP 实现 `@DistributeLock` 声明式分布式锁，通过 SpEL 动态 Key 保障文档上传、切片、向量化和版本切换的并发安全。
+
 ## 核心功能
 
 ### RAG 知识库
@@ -116,9 +137,9 @@ flowchart LR
 | 模型接入 | OpenAI 兼容接口、DashScope、Kimi、DeepSeek、GLM、LM Studio |
 | 向量检索 | Elasticsearch 8.17、LangChain4j ElasticsearchEmbeddingStore |
 | 关系数据库 | PostgreSQL 16、Spring Data JPA、Flyway |
-| 缓存与异步 | Redis、Redisson、Redis Stream |
+| 缓存与异步 | Redis、Redis Stream |
 | 文档解析 | MinerU、Apache Tika、Apache POI |
-| 文件存储 | S3 兼容对象存储，开发依赖可用 RustFS，完整容器环境使用 MinIO |
+| 文件存储 | S3 兼容对象存储，完整容器环境使用 MinIO，开发依赖可用 RustFS |
 | 精排 | DashScope `gte-rerank-v2`，可选本地 ONNX BGE Reranker |
 | 导出 | iText 8 |
 | 监控 | Spring Boot Actuator、Micrometer、Prometheus |
@@ -336,17 +357,12 @@ APP_AI_RAG_RERANK_ENABLED=false
 
 ## 面试时可以重点讲的技术点
 
-1. 文档处理不是简单按长度切块，而是先解析为 Markdown，再按标题层级构建 parent/brother chunk 关系。
-2. 知识库向量化通过事务后事件异步触发，失败时状态停留在 `CHUNKED`，由定时补偿任务兜底。
-3. 检索不是裸向量召回，而是 ES KNN/全文检索、查询改写、候选融合、Rerank 精排和 small-to-big 上下文扩展组合。
-4. 项目提供 RAG 检索评测接口，可用 Hit@K、MRR、NDCG 量化召回效果，并保存评测 run。
-5. 多源 RAG 支持 ES 知识库和 Text2SQL，QueryRouter 可按问题类型路由到结构化数据、非结构化知识库或混合检索。
-6. Text2SQL 做了白名单 schema、当前用户隔离、SELECT 校验和只读连接，能讲清楚安全边界。
-7. CSV/Excel 表格会被转换成 Markdown 表格和行记录，适合导入题库、JD、面试记录等半结构化资料。
-8. RAG 流式问答不仅返回 token，还返回检索阶段进度和引用来源，前端可以展示更透明的生成过程。
-9. 知识库支持版本切换和向量清理，避免不同版本文档的向量污染。
-10. 面试 Agent 把 RAG 检索工具和简历读取工具封装为 LangChain4j `@Tool`，由模型自主决定何时调用。
-11. 多模型 Provider 做成运行时配置，可切换默认模型、Embedding 模型，并缓存模型实例。
+1. 多格式文档处理：PDF、Word、Markdown、TXT、CSV、Excel 统一接入，MinerU 解析失败自动降级 Tika。
+2. 智能分段：Markdown 标题分段、滑动窗口、父子分段和兄弟分段组合，命中小 chunk 后回溯完整上下文。
+3. Query 改写与路由：`QueryTransformer` 增强问题语义，`QueryRouter` 在 ES 知识库和 Text2SQL 之间选择检索路径。
+4. 混合检索与精排：ES KNN/全文检索、RRF 融合、Rerank 精排和 RAG 评测指标形成优化闭环。
+5. 流式 RAG 与引用溯源：SSE 同时推送进度、引用来源和 LLM token，前端可展示引用卡片。
+6. 异步与并发控制：Redis Stream 处理简历/面试评估任务，Redisson + AOP 的 `@DistributeLock` 保障切片、向量化和版本切换安全。
 
 ## 测试与构建
 
