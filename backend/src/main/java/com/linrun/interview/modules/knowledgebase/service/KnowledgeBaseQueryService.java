@@ -13,10 +13,12 @@ import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
+import com.linrun.interview.modules.knowledgebase.rag.InterviewHybridContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
+import com.linrun.interview.modules.knowledgebase.rag.InterviewSqlContentRetriever;
 import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
 import com.linrun.interview.common.util.JsonUtil;
 import dev.langchain4j.data.message.ChatMessage;
@@ -41,6 +43,7 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -119,12 +122,15 @@ public class KnowledgeBaseQueryService {
     private final CitationAnalyzer citationAnalyzer;
     private final int rerankTopN;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
+    private final KnowledgeBaseQueryProperties.Hybrid hybrid;
+    private final KnowledgeBaseQueryProperties.Sql sql;
     private final KnowledgeBaseQueryProperties.IntentRecognition intentRecognition;
     private final MeterRegistry meterRegistry;
     private final RagChatMessageRepository ragChatMessageRepository;
     private final ObjectMapper objectMapper;
     private final IntentRecognitionService intentRecognitionService;
     private final CommonChatService commonChatService;
+    private final DataSource dataSource;
     private final AtomicInteger activeStreams = new AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
@@ -140,6 +146,7 @@ public class KnowledgeBaseQueryService {
             ObjectMapper objectMapper,
             IntentRecognitionService intentRecognitionService,
             CommonChatService commonChatService,
+            DataSource dataSource,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
@@ -152,6 +159,7 @@ public class KnowledgeBaseQueryService {
         this.objectMapper = objectMapper;
         this.intentRecognitionService = intentRecognitionService;
         this.commonChatService = commonChatService;
+        this.dataSource = dataSource;
         this.meterRegistry = meterRegistry;
         this.systemPromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getSystemPromptPath())
@@ -169,6 +177,8 @@ public class KnowledgeBaseQueryService {
         this.citationAnalyzer = new CitationAnalyzer(citationCoverageWeight, citationInvalidPenalty);
         this.rerankTopN = queryProperties.getRerank().getTopN();
         this.parentExpand = queryProperties.getParentExpand();
+        this.hybrid = queryProperties.getHybrid();
+        this.sql = queryProperties.getSql();
         this.intentRecognition = queryProperties.getIntentRecognition();
     }
 
@@ -187,7 +197,7 @@ public class KnowledgeBaseQueryService {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return List.of();
         }
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null);
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, true);
         return outcome.contents().stream().map(Content::textSegment).toList();
     }
 
@@ -416,7 +426,14 @@ public class KnowledgeBaseQueryService {
      */
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
                                         Consumer<String> progressCallback, Long assistantMessageId) {
-        RetrievalAugmentor augmentor = buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId);
+        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, false);
+    }
+
+    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
+                                        Consumer<String> progressCallback, Long assistantMessageId,
+                                        boolean knowledgeBaseOnly) {
+        RetrievalAugmentor augmentor = buildAugmentor(
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, knowledgeBaseOnly);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         dev.langchain4j.rag.AugmentationResult result =
@@ -430,9 +447,18 @@ public class KnowledgeBaseQueryService {
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId) {
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId, false);
+    }
+
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId,
+                                              boolean knowledgeBaseOnly) {
         InterviewElasticsearchContentRetriever retriever = new InterviewElasticsearchContentRetriever(
             embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore,
-            knowledgeBaseIds, segmentService, parentExpand, progressCallback);
+            knowledgeBaseIds, segmentService, parentExpand, hybrid, progressCallback);
+        InterviewSqlContentRetriever sqlRetriever = sql.isEnabled() && !knowledgeBaseOnly
+            ? new InterviewSqlContentRetriever(dataSource, getChatModel(), retriever)
+            : null;
         InterviewQueryTransformer transformer = new InterviewQueryTransformer(
             getChatModel(), rewritePromptTemplate, rewriteEnabled, progressCallback,
             assistantMessageId, ragChatMessageRepository);
@@ -445,13 +471,19 @@ public class KnowledgeBaseQueryService {
                 .build()
             : null;
         ContentInjector contentInjector = new DefaultContentInjector();
+        var finalAggregator = sql.isEnabled() && !knowledgeBaseOnly
+            ? new InterviewHybridContentAggregator(aggregator)
+            : aggregator;
 
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
-            .queryRouter(new InterviewQueryRouter(retriever))
+            .queryRouter(knowledgeBaseOnly
+                ? new InterviewQueryRouter(retriever)
+                : new InterviewQueryRouter(retriever, sqlRetriever, getChatModel(),
+                    sql.isEnabled() && sql.isRouterEnabled(), progressCallback))
             .queryTransformer(transformer)
             .contentInjector(contentInjector);
-        if (aggregator != null) {
-            builder.contentAggregator(aggregator);
+        if (finalAggregator != null) {
+            builder.contentAggregator(finalAggregator);
         }
         return builder.build();
     }

@@ -56,8 +56,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final int maxResults;
     private final double minScore;
     private final Filter filter;
+    private final Set<String> knowledgeBaseIdSet;
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
+    private final KnowledgeBaseQueryProperties.Hybrid hybrid;
     private final Consumer<String> progressCallback;
     /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
     private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
@@ -70,7 +72,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    KnowledgeSegmentService segmentService,
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand) {
         this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, null);
+            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), null);
     }
 
     public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
@@ -81,13 +83,31 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    KnowledgeSegmentService segmentService,
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand,
                                                    Consumer<String> progressCallback) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
+            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), progressCallback);
+    }
+
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
+                                                   Consumer<String> progressCallback) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
         this.minScore = minScore;
         this.filter = buildKbFilter(knowledgeBaseIds);
+        this.knowledgeBaseIdSet = knowledgeBaseIds == null ? Set.of() : knowledgeBaseIds.stream()
+            .filter(Objects::nonNull)
+            .map(String::valueOf)
+            .collect(Collectors.toUnmodifiableSet());
         this.segmentService = segmentService;
         this.parentExpand = parentExpand;
+        this.hybrid = hybrid;
         this.progressCallback = progressCallback;
     }
 
@@ -107,9 +127,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             builder.filter(filter);
         }
 
-        EmbeddingSearchResult<TextSegment> result = embeddingStore.search(builder.build());
+        EmbeddingSearchResult<TextSegment> result = search(builder.build(), query.text());
         List<Content> contents = result.matches().stream()
             .map(this::toContent)
+            .filter(this::matchesKnowledgeBaseFilter)
             .collect(Collectors.toList());
 
         List<Content> expanded = parentExpand != null && parentExpand.isEnabled()
@@ -118,6 +139,39 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         log.info("[InterviewElasticsearchContentRetriever] 检索完成: query='{}', 命中 {} 条, 扩展后 {} 条",
             query.text(), contents.size(), expanded.size());
         return expanded;
+    }
+
+    private EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request, String queryText) {
+        String mode = hybrid != null && hybrid.getMode() != null ? hybrid.getMode() : "hybrid";
+        try {
+            return switch (mode) {
+                case "vector" -> embeddingStore.search(request);
+                case "full_text" -> fullTextSearch(queryText);
+                default -> hybrid.isEnabled()
+                    ? embeddingStore.hybridSearch(request, queryText)
+                    : embeddingStore.search(request);
+            };
+        } catch (Exception e) {
+            log.warn("[InterviewElasticsearchContentRetriever] {} 检索失败，降级向量检索: {}",
+                mode, e.getMessage(), e);
+            return embeddingStore.search(request);
+        }
+    }
+
+    private EmbeddingSearchResult<TextSegment> fullTextSearch(String queryText) {
+        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.fullTextSearch(queryText).stream()
+            .limit(Math.max(maxResults, 1))
+            .map(segment -> new EmbeddingMatch<>(1.0, null, null, segment))
+            .toList();
+        return new EmbeddingSearchResult<>(matches);
+    }
+
+    private boolean matchesKnowledgeBaseFilter(Content content) {
+        if (knowledgeBaseIdSet.isEmpty()) {
+            return true;
+        }
+        String docId = content.textSegment().metadata().getString(MetadataKeyConstant.DOC_ID);
+        return knowledgeBaseIdSet.contains(docId);
     }
 
     /**
@@ -237,12 +291,14 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         TextSegment segment = match.embedded();
         Metadata metadata = segment.metadata();
         // 检索器写入 SCORE/EMBEDDING_ID，供 Aggregator 融合/rerank 与 DefaultContent 去重使用
-        Metadata enriched = metadata.put(ContentMetadata.SCORE.name(), match.score())
-            .put(MetadataKeyConstant.EMBEDDING_ID, match.embeddingId());
+        Metadata enriched = metadata.copy().put(ContentMetadata.SCORE.name(), match.score());
+        if (match.embeddingId() != null && !match.embeddingId().isBlank()) {
+            enriched.put(MetadataKeyConstant.EMBEDDING_ID, match.embeddingId());
+        }
         TextSegment scored = new TextSegment(segment.text(), enriched);
         return Content.from(scored, Map.of(
             ContentMetadata.SCORE, match.score(),
-            ContentMetadata.EMBEDDING_ID, match.embeddingId()));
+            ContentMetadata.EMBEDDING_ID, match.embeddingId() != null ? match.embeddingId() : ""));
     }
 
     /**

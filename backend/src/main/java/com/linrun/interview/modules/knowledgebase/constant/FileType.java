@@ -8,7 +8,9 @@ public enum FileType {
     DOC("doc"),
     TXT("txt"),
     HTML("html"),
-    MARKDOWN("markdown");
+    MARKDOWN("markdown"),
+    CSV("csv"),
+    EXCEL("excel");
 
     private final String type;
 

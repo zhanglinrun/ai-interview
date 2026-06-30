@@ -31,6 +31,12 @@ public class FileTypeResolver {
         if (isMarkdown(ext, lowerCt)) {
             return FileType.MARKDOWN;
         }
+        if (isCsv(ext, lowerCt)) {
+            return FileType.CSV;
+        }
+        if (isExcel(ext, lowerCt)) {
+            return FileType.EXCEL;
+        }
         if (isHtml(ext, lowerCt)) {
             return FileType.HTML;
         }
@@ -65,6 +71,16 @@ public class FileTypeResolver {
 
     private boolean isHtml(String ext, String ct) {
         return "html".equals(ext) || "htm".equals(ext) || ct.contains("html");
+    }
+
+    private boolean isCsv(String ext, String ct) {
+        return "csv".equals(ext) || "tsv".equals(ext)
+            || ct.contains("text/csv") || ct.contains("tab-separated-values");
+    }
+
+    private boolean isExcel(String ext, String ct) {
+        return "xls".equals(ext) || "xlsx".equals(ext)
+            || ct.contains("spreadsheetml") || ct.contains("application/vnd.ms-excel");
     }
 
     private boolean isText(String ext, String ct) {

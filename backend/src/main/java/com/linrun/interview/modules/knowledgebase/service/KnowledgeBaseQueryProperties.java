@@ -19,6 +19,7 @@ public class KnowledgeBaseQueryProperties {
     private Fusion fusion = new Fusion();
     private ParentExpand parentExpand = new ParentExpand();
     private IntentRecognition intentRecognition = new IntentRecognition();
+    private Sql sql = new Sql();
     private TitleSummary titleSummary = new TitleSummary();
     private int chunkOverlapChars = 80;
     private String chunkStrategy = "hybrid";
@@ -50,12 +51,14 @@ public class KnowledgeBaseQueryProperties {
     }
 
     /**
-     * 混合检索配置：向量通道 + 关键词通道（pg_trgm），RRF 融合。
+     * 混合检索配置：ES 向量通道 + 全文通道。
      */
     @Data
     public static class Hybrid {
         /** 是否启用混合检索；关闭时退回纯向量检索 */
         private boolean enabled = true;
+        /** 检索模式：hybrid / vector / full_text */
+        private String mode = "hybrid";
         /** 关键词通道单独召回的候选数 */
         private int keywordTopK = 20;
         /** 关键词通道 word_similarity 最低阈值，过滤弱相关 */
@@ -167,6 +170,15 @@ public class KnowledgeBaseQueryProperties {
         private boolean enabled = true;
         /** 是否在意图识别前推"正在理解您的问题..."进度（关闭可省 ~0.4s 前端空进度） */
         private boolean progressEnabled = true;
+    }
+
+    /**
+     * Text2SQL 结构化检索：查询当前用户的简历、面试记录、评分和日程。
+     */
+    @Data
+    public static class Sql {
+        private boolean enabled = true;
+        private boolean routerEnabled = true;
     }
 
     /**

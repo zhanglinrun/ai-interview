@@ -23,13 +23,14 @@
     <module>backend</module>
   </modules>
 
-  <properties>
+    <properties>
     <java.version>21</java.version>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
     <tika.version>2.9.2</tika.version>
+    <poi.version>5.2.5</poi.version>
     <lombok.version>1.18.36</lombok.version>
     <!-- JUnit 版本不再手动钉死，交由 spring-boot-starter-parent 统一管理。
          钉成旧版（如 5.12.0 / platform 1.12.0）会与 Spring Boot / Spring Framework 的

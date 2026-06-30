@@ -37,7 +37,7 @@ public class InterviewDefaultContent extends DefaultContent {
 
     @Override
     public int hashCode() {
-        return Objects.requireNonNull(embeddingId()).hashCode();
+        return Objects.requireNonNull(identity()).hashCode();
     }
 
     @Override
@@ -45,10 +45,18 @@ public class InterviewDefaultContent extends DefaultContent {
         if (!(o instanceof InterviewDefaultContent other)) {
             return false;
         }
-        return Objects.equals(this.embeddingId(), other.embeddingId());
+        return Objects.equals(this.identity(), other.identity());
     }
 
-    private String embeddingId() {
-        return textSegment().metadata().getString(MetadataKeyConstant.EMBEDDING_ID);
+    private String identity() {
+        String embeddingId = textSegment().metadata().getString(MetadataKeyConstant.EMBEDDING_ID);
+        if (embeddingId != null && !embeddingId.isBlank()) {
+            return embeddingId;
+        }
+        String chunkId = textSegment().metadata().getString(MetadataKeyConstant.CHUNK_ID);
+        if (chunkId != null && !chunkId.isBlank()) {
+            return chunkId;
+        }
+        return textSegment().text();
     }
 }

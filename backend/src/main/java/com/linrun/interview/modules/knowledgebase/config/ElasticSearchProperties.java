@@ -30,4 +30,7 @@ public class ElasticSearchProperties {
 
     /** 向量维度（须与 embedding model 输出维度一致，DashScope text-embedding-v3 为 1024） */
     private int dimensions = 1024;
+
+    /** ES hybrid 检索的 KNN 候选数。 */
+    private int numCandidates = 100;
 }

@@ -181,7 +181,11 @@ public class StructuredOutputInvoker {
                     firstError.addSuppressed(repairError);
                 }
             }
-            throw new RuntimeException("结构化 JSON 解析失败: " + firstError.getMessage(), firstError);
+            throw new BusinessException(
+                ErrorCode.AI_SERVICE_ERROR,
+                "结构化 JSON 解析失败: " + firstError.getMessage(),
+                firstError
+            );
         }
     }
 

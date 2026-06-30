@@ -13,12 +13,15 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionDTO;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
+import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
+import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
 import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import com.linrun.interview.modules.knowledgebase.service.DocumentProcessService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentVersionService;
+import com.linrun.interview.modules.knowledgebase.service.RagEvaluationService;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +57,7 @@ public class KnowledgeBaseController {
     private final KnowledgeDocumentService knowledgeDocumentService;
     private final KnowledgeDocumentVersionService versionService;
     private final KnowledgeBaseQueryService queryService;
+    private final RagEvaluationService ragEvaluationService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
@@ -116,6 +120,16 @@ public class KnowledgeBaseController {
         log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
             request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
         return queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question());
+    }
+
+    /**
+     * RAG 检索评测：计算 Hit@K / MRR / NDCG，不调用生成模型。
+     */
+    @PostMapping("/api/knowledgebase/evaluate-retrieval")
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    public Result<RagEvalResponse> evaluateRetrieval(@Valid @RequestBody RagEvalRequest request) {
+        return Result.success(ragEvaluationService.evaluate(request));
     }
 
     // ========== 分类管理 API ==========

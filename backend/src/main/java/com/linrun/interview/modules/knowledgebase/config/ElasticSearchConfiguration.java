@@ -1,6 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.config;
 
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
+import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchConfigurationHybrid;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.HttpHost;
 import org.elasticsearch.client.RestClient;
@@ -41,6 +42,10 @@ public class ElasticSearchConfiguration {
         return ElasticsearchEmbeddingStore.builder()
             .restClient(restClient)
             .indexName(properties.getIndexName())
+            .dimension(properties.getDimensions())
+            .configuration(ElasticsearchConfigurationHybrid.builder()
+                .numCandidates(properties.getNumCandidates())
+                .build())
             .build();
     }
 }
