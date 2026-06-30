@@ -15,13 +15,16 @@ import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
+import com.linrun.interview.modules.knowledgebase.model.RagQueryTraceDTO;
 import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import com.linrun.interview.modules.knowledgebase.service.DocumentProcessService;
+import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseDataTableService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentVersionService;
 import com.linrun.interview.modules.knowledgebase.service.RagEvaluationService;
+import com.linrun.interview.modules.knowledgebase.service.RagQueryTraceService;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -58,6 +61,8 @@ public class KnowledgeBaseController {
     private final KnowledgeDocumentVersionService versionService;
     private final KnowledgeBaseQueryService queryService;
     private final RagEvaluationService ragEvaluationService;
+    private final RagQueryTraceService ragQueryTraceService;
+    private final KnowledgeBaseDataTableService dataTableService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
@@ -130,6 +135,20 @@ public class KnowledgeBaseController {
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
     public Result<RagEvalResponse> evaluateRetrieval(@Valid @RequestBody RagEvalRequest request) {
         return Result.success(ragEvaluationService.evaluate(request));
+    }
+
+    /**
+     * 最近 RAG 查询 Trace：查看改写、路由、召回、排序和最终引用。
+     */
+    @GetMapping("/api/knowledgebase/traces")
+    public Result<List<RagQueryTraceDTO>> listTraces(
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+        return Result.success(ragQueryTraceService.listRecent(limit));
+    }
+
+    @GetMapping("/api/knowledgebase/traces/{traceId}")
+    public Result<RagQueryTraceDTO> getTrace(@PathVariable String traceId) {
+        return Result.success(ragQueryTraceService.get(traceId));
     }
 
     // ========== 分类管理 API ==========
@@ -236,6 +255,14 @@ public class KnowledgeBaseController {
             "duplicate", 0,
             "items", items
         ));
+    }
+
+    @GetMapping("/api/knowledgebase/{id}/data/preview")
+    public Result<KnowledgeBaseDataTableService.PreviewResponse> previewDataTable(
+            @PathVariable Long id,
+            @RequestParam(value = "page", required = false, defaultValue = "1") int page,
+            @RequestParam(value = "size", required = false, defaultValue = "50") int size) {
+        return Result.success(dataTableService.preview(UserContext.requireUserId(), id, page, size));
     }
 
     /**

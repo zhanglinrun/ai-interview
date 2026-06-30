@@ -27,6 +27,26 @@ type VoiceConfig = {
   llmProvider?: string;
 };
 
+const buildSameOriginWebSocketUrl = (sessionId: number) => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws/voice-interview/${sessionId}`;
+};
+
+const normalizeVoiceWebSocketUrl = (url: string | undefined, sessionId: number) => {
+  if (!url) {
+    return buildSameOriginWebSocketUrl(sessionId);
+  }
+
+  try {
+    const parsed = new URL(url);
+    parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    parsed.host = window.location.host;
+    return parsed.toString();
+  } catch {
+    return buildSameOriginWebSocketUrl(sessionId);
+  }
+};
+
 export default function VoiceInterviewPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -548,8 +568,10 @@ export default function VoiceInterviewPage() {
       setSessionId(session.sessionId);
       setCurrentPhase(session.currentPhase);
 
-      const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
-      connectWithHandlers(session.sessionId, wsUrl);
+      connectWithHandlers(
+        session.sessionId,
+        normalizeVoiceWebSocketUrl(session.webSocketUrl, session.sessionId)
+      );
     } catch (error) {
       const errorMessage = getErrorMessage(error, '创建面试会话失败，请重试');
       setError(errorMessage);
@@ -608,8 +630,10 @@ export default function VoiceInterviewPage() {
       }
       setMessages(restored);
 
-      const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
-      connectWithHandlers(session.sessionId, wsUrl);
+      connectWithHandlers(
+        session.sessionId,
+        normalizeVoiceWebSocketUrl(session.webSocketUrl, session.sessionId)
+      );
     } catch (error) {
       setError(getErrorMessage(error, '恢复会话失败'));
       setConnectionStatus('disconnected');

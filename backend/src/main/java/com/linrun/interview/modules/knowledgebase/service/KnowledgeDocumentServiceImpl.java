@@ -51,6 +51,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final VectorStoreService vectorStoreService;
     private final FileStorageService fileStorageService;
     private final RagChatSessionRepository sessionRepository;
+    private final KnowledgeBaseDataTableService dataTableService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -62,11 +63,13 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
         // 1. 删除所有 RAG 会话中的知识库关联（必须先删关联，否则外键约束阻止删除文档）
         removeSessionAssociations(userId, docId);
-        // 2. 物理删 segment
+        // 2. 删除动态数据表（Excel/CSV DATA_QUERY）
+        dataTableService.deleteByDoc(userId, docId);
+        // 3. 物理删 segment
         segmentService.physicalDeleteByDocumentId(docId);
-        // 3. 物理删 version
+        // 4. 物理删 version
         versionService.physicalDeleteByDocId(docId);
-        // 4. 物理删文档
+        // 5. 物理删文档
         knowledgeBaseRepository.deleteById(docId);
         log.info("删除知识库 DB 记录完成: docId={}", docId);
 
@@ -90,6 +93,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 continue;
             }
             removeSessionAssociations(userId, docId);
+            dataTableService.deleteByDoc(userId, docId);
             segmentService.physicalDeleteByDocumentId(docId);
             versionService.physicalDeleteByDocId(docId);
             knowledgeBaseRepository.deleteById(docId);

@@ -16,10 +16,34 @@ interface MicVadConfig {
   onSpeechEnd: () => void;
 }
 
-// Declare global vad object (loaded via script tag in index.html)
+const ONNX_RUNTIME_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js';
+const VAD_BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js';
+
+const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+  const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+  if (existing) {
+    resolve();
+    return;
+  }
+  const script = document.createElement('script');
+  script.src = src;
+  script.onload = () => resolve();
+  script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+  document.head.appendChild(script);
+});
+
+const loadVad = async () => {
+  if (window.vad?.MicVAD) {
+    return;
+  }
+  await loadScript(ONNX_RUNTIME_URL);
+  await loadScript(VAD_BUNDLE_URL);
+};
+
+// Declare global vad object (loaded on demand by AudioRecorder)
 declare global {
   interface Window {
-    vad: {
+    vad?: {
       MicVAD: {
         new: (config: MicVadConfig) => Promise<MicVadInstance>;
       };
@@ -173,6 +197,7 @@ export default function AudioRecorder({
       mediaStreamRef.current = stream;
 
       // Step 2: Initialize VAD with shared stream
+      await loadVad();
       if (!window.vad || !window.vad.MicVAD) {
         throw new Error('VAD library not loaded. Please refresh the page.');
       }

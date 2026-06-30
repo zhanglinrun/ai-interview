@@ -3,7 +3,12 @@ import {AnimatePresence, motion} from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
-import {knowledgeBaseApi, type KnowledgeBaseItem, type SortOption} from '../api/knowledgebase';
+import {
+  knowledgeBaseApi,
+  type KnowledgeBaseItem,
+  type RagEvalResponse,
+  type SortOption
+} from '../api/knowledgebase';
 import {ragChatApi, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
@@ -12,7 +17,7 @@ import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import CodeBlock from '../components/CodeBlock';
 import {EmptyState, LoadingState} from '../components/PageState';
-import {ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2,} from 'lucide-react';
+import {BarChart3, ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2, X,} from 'lucide-react';
 
 interface KnowledgeBaseQueryPageProps {
   onBack: () => void;
@@ -63,6 +68,11 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [progressText, setProgressText] = useState('');
   // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
   const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
+  const [evalOpen, setEvalOpen] = useState(false);
+  const [evalInput, setEvalInput] = useState('');
+  const [evalResult, setEvalResult] = useState<RagEvalResponse | null>(null);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalError, setEvalError] = useState('');
 
   // refs
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -357,6 +367,33 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     }
   };
 
+  const handleRunEval = async () => {
+    if (selectedKbIds.size === 0 || !evalInput.trim()) return;
+    setEvalLoading(true);
+    setEvalError('');
+    try {
+      const parsed = JSON.parse(evalInput);
+      const items = Array.isArray(parsed) ? parsed : parsed.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('请输入至少一条评测用例');
+      }
+      const k = Array.isArray(parsed) ? 5 : parsed.k;
+      const title = Array.isArray(parsed) ? '手动 RAG 评测' : parsed.title;
+      setEvalResult(await knowledgeBaseApi.evaluateRetrieval({
+        knowledgeBaseIds: Array.from(selectedKbIds),
+        items,
+        k,
+        title,
+      }));
+    } catch (err) {
+      console.error('RAG 评测失败:', err);
+      setEvalError(getErrorMessage(err, '评测 JSON 格式不正确'));
+      setEvalResult(null);
+    } finally {
+      setEvalLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto pt-8 pb-10 px-4">
       {/* 头部 */}
@@ -373,6 +410,15 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
             whileTap={{ scale: 0.98 }}
           >
             上传知识库
+          </motion.button>
+          <motion.button
+            onClick={() => setEvalOpen(true)}
+            disabled={selectedKbIds.size === 0}
+            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm disabled:opacity-50"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            RAG 评测
           </motion.button>
           <motion.button
             onClick={onBack}
@@ -847,6 +893,81 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
               </motion.div>
             </div>
           </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {evalOpen && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setEvalOpen(false)}
+          >
+            <motion.div
+              initial={{opacity: 0, scale: 0.95, y: 20}}
+              animate={{opacity: 1, scale: 1, y: 0}}
+              exit={{opacity: 0, scale: 0.95, y: 20}}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-primary-500" />
+                  RAG 评测
+                </h3>
+                <button
+                  onClick={() => setEvalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <textarea
+                value={evalInput}
+                onChange={(e) => setEvalInput(e.target.value)}
+                placeholder='[{"question":"JVM GC 是什么？","expectedKeywords":["垃圾回收"],"expectedChunkIds":[]}]'
+                className="w-full h-44 px-4 py-3 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-mono"
+              />
+              {evalError && (
+                <p className="mt-2 text-sm text-red-500">{evalError}</p>
+              )}
+              {evalResult && (
+                <div className="grid grid-cols-5 gap-2 my-4 text-center">
+                  {[
+                    ['Hit@K', evalResult.hitRate],
+                    ['MRR', evalResult.mrr],
+                    ['NDCG', evalResult.ndcg],
+                    ['引用命中', evalResult.citationHitRate],
+                    ['覆盖率', evalResult.citationCoverage],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg bg-slate-50 dark:bg-slate-700 p-3">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
+                      <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                        {Number(value).toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-end gap-3 mt-4">
+                <button
+                  onClick={() => setEvalOpen(false)}
+                  className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+                >
+                  关闭
+                </button>
+                <button
+                  onClick={handleRunEval}
+                  disabled={evalLoading || !evalInput.trim()}
+                  className="px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+                >
+                  {evalLoading ? '评测中...' : '开始评测'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

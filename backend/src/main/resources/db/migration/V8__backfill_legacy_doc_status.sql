@@ -1,0 +1,11 @@
+UPDATE knowledge_bases
+SET doc_status = CASE vector_status
+  WHEN 'COMPLETED' THEN 'VECTOR_STORED'
+  WHEN 'PROCESSING' THEN 'CONVERTING'
+  WHEN 'PENDING' THEN 'UPLOADED'
+  ELSE 'INIT'
+END
+WHERE doc_status IS NULL;
+
+ALTER TABLE knowledge_bases
+  ALTER COLUMN doc_status SET DEFAULT 'INIT';

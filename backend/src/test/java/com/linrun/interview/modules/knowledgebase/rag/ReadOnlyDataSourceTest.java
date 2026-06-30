@@ -5,7 +5,11 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,5 +27,40 @@ class ReadOnlyDataSourceTest {
         new ReadOnlyDataSource(target).getConnection();
 
         verify(connection).setReadOnly(true);
+    }
+
+    @Test
+    @DisplayName("SQL 安全校验应拒绝写操作和非白名单表")
+    void rejectsUnsafeSql() throws Exception {
+        assertThatThrownBy(() -> SqlSafety.validate("delete from resumes", Set.of("resumes")))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate("select * from users", Set.of("resumes")))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate("select * from resumes; drop table resumes", Set.of("resumes")))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate("select version()", Set.of("resumes")))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate("select * from resumes, users", Set.of("resumes")))
+            .isInstanceOf(SQLException.class);
+
+        SqlSafety.validate("with recent as (select * from resumes) select * from recent", Set.of("resumes"));
+    }
+
+    @Test
+    @DisplayName("安全连接应设置 SQL 超时和最大返回行数")
+    void setsTimeoutAndMaxRows() throws Exception {
+        Connection target = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(target.createStatement()).thenReturn(statement);
+
+        Connection safe = SqlSafety.proxy(target, Set.of("resumes"), 3, 25);
+        safe.createStatement();
+
+        verify(statement).setQueryTimeout(3);
+        verify(statement).setMaxRows(25);
     }
 }

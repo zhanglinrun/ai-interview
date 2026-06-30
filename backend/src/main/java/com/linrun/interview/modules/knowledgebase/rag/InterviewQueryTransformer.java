@@ -48,6 +48,7 @@ public class InterviewQueryTransformer implements QueryTransformer {
     private final Consumer<String> progressCallback;
     private final Long assistantMessageId;
     private final RagChatMessageRepository messageRepository;
+    private final RagQueryTrace trace;
 
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled) {
         this(chatModel, rewritePromptTemplate, enabled, null, null, null);
@@ -56,12 +57,20 @@ public class InterviewQueryTransformer implements QueryTransformer {
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled,
                                      Consumer<String> progressCallback, Long assistantMessageId,
                                      RagChatMessageRepository messageRepository) {
+        this(chatModel, rewritePromptTemplate, enabled, progressCallback, assistantMessageId,
+            messageRepository, null);
+    }
+
+    public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled,
+                                     Consumer<String> progressCallback, Long assistantMessageId,
+                                     RagChatMessageRepository messageRepository, RagQueryTrace trace) {
         this.chatModel = chatModel;
         this.rewritePromptTemplate = rewritePromptTemplate;
         this.enabled = enabled;
         this.progressCallback = progressCallback;
         this.assistantMessageId = assistantMessageId;
         this.messageRepository = messageRepository;
+        this.trace = trace;
     }
 
     @Override
@@ -87,6 +96,9 @@ public class InterviewQueryTransformer implements QueryTransformer {
             String normalized = rewritten.trim();
             log.info("[InterviewQueryTransformer] 改写: origin='{}', rewritten='{}'",
                 query.text(), normalized);
+            if (trace != null) {
+                trace.rewrittenQuestion(normalized);
+            }
             // 改写结果异步回写 DB（亮点5，虚拟线程）
             persistTransformContent(normalized);
             Query rewrittenQuery = query.metadata() == null

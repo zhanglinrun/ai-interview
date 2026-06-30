@@ -8,6 +8,7 @@ import com.linrun.interview.common.ai.PromptTemplate;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.security.UserContext;
+import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
@@ -19,6 +20,7 @@ import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewSqlContentRetriever;
+import com.linrun.interview.modules.knowledgebase.rag.RagQueryTrace;
 import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
 import com.linrun.interview.common.util.JsonUtil;
 import dev.langchain4j.data.message.ChatMessage;
@@ -38,6 +40,7 @@ import dev.langchain4j.rag.query.Metadata;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.elasticsearch.client.RestClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
@@ -106,6 +109,8 @@ public class KnowledgeBaseQueryService {
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final ElasticsearchEmbeddingStore embeddingStore;
+    private final RestClient restClient;
+    private final ElasticSearchProperties elasticSearchProperties;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
     private final RerankService rerankService;
@@ -131,11 +136,15 @@ public class KnowledgeBaseQueryService {
     private final IntentRecognitionService intentRecognitionService;
     private final CommonChatService commonChatService;
     private final DataSource dataSource;
+    private final KnowledgeBaseDataTableService dataTableService;
+    private final RagQueryTraceService traceService;
     private final AtomicInteger activeStreams = new AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
             LlmProviderRegistry llmProviderRegistry,
             ElasticsearchEmbeddingStore embeddingStore,
+            RestClient restClient,
+            ElasticSearchProperties elasticSearchProperties,
             KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
             RerankService rerankService,
@@ -147,10 +156,14 @@ public class KnowledgeBaseQueryService {
             IntentRecognitionService intentRecognitionService,
             CommonChatService commonChatService,
             DataSource dataSource,
+            KnowledgeBaseDataTableService dataTableService,
+            RagQueryTraceService traceService,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
         this.embeddingStore = embeddingStore;
+        this.restClient = restClient;
+        this.elasticSearchProperties = elasticSearchProperties;
         this.listService = listService;
         this.countService = countService;
         this.rerankService = rerankService;
@@ -160,6 +173,8 @@ public class KnowledgeBaseQueryService {
         this.intentRecognitionService = intentRecognitionService;
         this.commonChatService = commonChatService;
         this.dataSource = dataSource;
+        this.dataTableService = dataTableService;
+        this.traceService = traceService;
         this.meterRegistry = meterRegistry;
         this.systemPromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getSystemPromptPath())
@@ -197,7 +212,7 @@ public class KnowledgeBaseQueryService {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return List.of();
         }
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, true);
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, null, true);
         return outcome.contents().stream().map(Content::textSegment).toList();
     }
 
@@ -222,9 +237,13 @@ public class KnowledgeBaseQueryService {
 
         countService.updateQuestionCounts(knowledgeBaseIds);
 
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null);
+        long start = System.nanoTime();
+        RagQueryTrace trace = new RagQueryTrace();
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, trace);
         List<Content> contents = outcome.contents();
         if (contents.isEmpty()) {
+            traceService.save(UserContext.requireUserId(), knowledgeBaseIds, question, trace, List.of(),
+                NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
@@ -237,6 +256,8 @@ public class KnowledgeBaseQueryService {
                 contents.stream().map(this::extractSimilarity).toList(), citation)
             : null;
         List<RagSourceDTO> sources = buildSources(contents, Set.copyOf(citation.citedIndexes()));
+        traceService.save(UserContext.requireUserId(), knowledgeBaseIds, question, trace, sources, answer,
+            confidence, citation.invalidIndexes(), elapsedMillis(start));
         return new QueryResponse(answer, primaryKbId, kbNamesStr, sources, confidence, citation.invalidIndexes());
     }
 
@@ -327,17 +348,22 @@ public class KnowledgeBaseQueryService {
                     }
                 }
 
+                long start = System.nanoTime();
+                RagQueryTrace trace = new RagQueryTrace();
                 AugmentationOutcome outcome = augment(knowledgeBaseIds, question, history, progressCallback,
-                    assistantMessageId);
+                    assistantMessageId, trace);
                 List<Content> contents = outcome.contents();
                 if (contents.isEmpty()) {
+                    traceService.save(userId, knowledgeBaseIds, question, trace, List.of(),
+                        NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
                     sink.next(NO_RESULT_RESPONSE);
                     sink.complete();
                     return;
                 }
 
                 // augment 后推引用来源（reference: 前缀 + RagSourceDTO JSON）
-                emitReference(sink, contents);
+                List<RagSourceDTO> traceSources = buildSources(contents, null);
+                emitReference(sink, traceSources);
 
                 log.debug("检索到 {} 个相关片段", contents.size());
                 Flux<String> responseFlux = streamGenerate(outcome, history);
@@ -349,8 +375,12 @@ public class KnowledgeBaseQueryService {
                     normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
                 }
 
+                StringBuilder answerBuffer = new StringBuilder();
                 Flux<String> finalFlux = instrumentStream(normalizedFlux)
+                    .doOnNext(answerBuffer::append)
                     .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
+                    .doOnComplete(() -> traceService.save(userId, knowledgeBaseIds, question, trace,
+                        traceSources, answerBuffer.toString(), null, List.of(), elapsedMillis(start)))
                     .onErrorResume(e -> {
                         log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
                         return Flux.just("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。");
@@ -426,14 +456,20 @@ public class KnowledgeBaseQueryService {
      */
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
                                         Consumer<String> progressCallback, Long assistantMessageId) {
-        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, false);
+        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, null, false);
     }
 
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
                                         Consumer<String> progressCallback, Long assistantMessageId,
-                                        boolean knowledgeBaseOnly) {
+                                        RagQueryTrace trace) {
+        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, trace, false);
+    }
+
+    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
+                                        Consumer<String> progressCallback, Long assistantMessageId,
+                                        RagQueryTrace trace, boolean knowledgeBaseOnly) {
         RetrievalAugmentor augmentor = buildAugmentor(
-            knowledgeBaseIds, history, progressCallback, assistantMessageId, knowledgeBaseOnly);
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         dev.langchain4j.rag.AugmentationResult result =
@@ -447,27 +483,33 @@ public class KnowledgeBaseQueryService {
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId) {
-        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId, false);
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId, null, false);
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
-                                              boolean knowledgeBaseOnly) {
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly) {
         InterviewElasticsearchContentRetriever retriever = new InterviewElasticsearchContentRetriever(
             embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore,
-            knowledgeBaseIds, segmentService, parentExpand, hybrid, progressCallback);
+            knowledgeBaseIds, segmentService, parentExpand, hybrid, progressCallback, trace,
+            restClient, elasticSearchProperties.getIndexName(), objectMapper);
         InterviewSqlContentRetriever sqlRetriever = sql.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewSqlContentRetriever(dataSource, getChatModel(), retriever)
+            ? new InterviewSqlContentRetriever(dataSource, getChatModel(), retriever,
+                dataTableService.databaseStructure(UserContext.requireUserId()),
+                dataTableService.allowedDynamicTables(UserContext.requireUserId()),
+                sql.getQueryTimeoutSeconds(),
+                sql.getMaxRows())
             : null;
         InterviewQueryTransformer transformer = new InterviewQueryTransformer(
             getChatModel(), rewritePromptTemplate, rewriteEnabled, progressCallback,
-            assistantMessageId, ragChatMessageRepository);
+            assistantMessageId, ragChatMessageRepository, trace);
         InterviewReRankingContentAggregator aggregator = rerankEnabled && rerankService.isEnabled()
             ? InterviewReRankingContentAggregator.builder()
                 .scoringModel(rerankService)
                 .maxResults(rerankTopN > 0 ? rerankTopN : null)
                 .querySelector(qtc -> qtc.keySet().iterator().next())
                 .progressCallback(progressCallback)
+                .trace(trace)
                 .build()
             : null;
         ContentInjector contentInjector = new DefaultContentInjector();
@@ -479,7 +521,7 @@ public class KnowledgeBaseQueryService {
             .queryRouter(knowledgeBaseOnly
                 ? new InterviewQueryRouter(retriever)
                 : new InterviewQueryRouter(retriever, sqlRetriever, getChatModel(),
-                    sql.isEnabled() && sql.isRouterEnabled(), progressCallback))
+                    sql.isEnabled() && sql.isRouterEnabled(), progressCallback, trace))
             .queryTransformer(transformer)
             .contentInjector(contentInjector);
         if (finalAggregator != null) {
@@ -590,9 +632,8 @@ public class KnowledgeBaseQueryService {
     /**
      * 把检索来源序列化为 {@code reference:} 前缀事件推到流（亮点2，复用 {@link RagSourceDTO}）。
      */
-    private void emitReference(reactor.core.publisher.FluxSink<String> sink, List<Content> contents) {
+    private void emitReference(reactor.core.publisher.FluxSink<String> sink, List<RagSourceDTO> sources) {
         try {
-            List<RagSourceDTO> sources = buildSources(contents, null);
             if (sources.isEmpty()) {
                 return;
             }
@@ -766,6 +807,10 @@ public class KnowledgeBaseQueryService {
 
     private String normalizeQuestion(String question) {
         return question == null ? "" : question.trim();
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
     /** augment 结果：检索到的 contents 与注入检索内容后的 chatMessage（供 LLM 生成）。 */

@@ -42,11 +42,14 @@ public class RagEvaluationService {
         double hitRate = total == 0 ? 0 : results.stream().filter(RagEvalResponse.ItemResult::hit).count() * 1.0 / total;
         double mrr = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::reciprocalRank).average().orElse(0);
         double ndcg = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::ndcg).average().orElse(0);
+        double citationHitRate = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::citationHitRate).average().orElse(0);
+        double citationCoverage = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::citationCoverage).average().orElse(0);
         RagEvalResponse response = new RagEvalResponse(null, total, k, round(hitRate), round(mrr),
-            round(ndcg), results);
+            round(ndcg), round(citationHitRate), round(citationCoverage), results);
         String runId = saveRun(request, response);
         return new RagEvalResponse(runId, response.total(), response.k(), response.hitRate(),
-            response.mrr(), response.ndcg(), response.items());
+            response.mrr(), response.ndcg(), response.citationHitRate(), response.citationCoverage(),
+            response.items());
     }
 
     private String saveRun(RagEvalRequest request, RagEvalResponse response) {
@@ -61,12 +64,17 @@ public class RagEvaluationService {
                 .casesJson(objectMapper.writeValueAsString(Map.of(
                     "requestItems", request.items(),
                     "results", response.items(),
-                    "ndcg", response.ndcg()
+                    "ndcg", response.ndcg(),
+                    "citationHitRate", response.citationHitRate(),
+                    "citationCoverage", response.citationCoverage()
                 )))
                 .totalCases(response.total())
                 .hitCount(hitCount)
                 .hitRate(response.hitRate())
                 .meanReciprocalRank(response.mrr())
+                .ndcg(response.ndcg())
+                .citationHitRate(response.citationHitRate())
+                .citationCoverage(response.citationCoverage())
                 .topk(response.k())
                 .build());
             return runId;
@@ -92,28 +100,41 @@ public class RagEvaluationService {
 
         int firstHitRank = 0;
         List<String> chunkIds = new ArrayList<>();
+        List<RagEvalResponse.RetrievedSegment> retrievedSegments = new ArrayList<>();
         double dcg = 0.0;
+        int matchedEvidenceCount = 0;
         for (int i = 0; i < retrieved.size(); i++) {
             TextSegment segment = retrieved.get(i);
             String chunkId = segment.metadata().getString(MetadataKeyConstant.CHUNK_ID);
             chunkIds.add(chunkId);
+            retrievedSegments.add(new RagEvalResponse.RetrievedSegment(
+                i + 1,
+                chunkId,
+                parseLong(segment.metadata().getString(MetadataKeyConstant.DOC_ID)),
+                snippet(segment.text()),
+                parseDouble(segment.metadata().getString("SCORE"))));
             if (matches(segment, expectedChunkIds, expectedKeywords)) {
                 int rank = i + 1;
                 if (firstHitRank == 0) {
                     firstHitRank = rank;
                 }
+                matchedEvidenceCount++;
                 dcg += 1.0 / log2(rank + 1);
             }
         }
-        int idealHits = Math.min(k, Math.max(1, expectedChunkIds.size() + expectedKeywords.size()));
+        int expectedEvidenceCount = expectedEvidenceCount(expectedChunkIds, expectedKeywords);
+        int idealHits = Math.min(k, Math.max(1, expectedEvidenceCount));
         double idcg = 0.0;
         for (int i = 1; i <= idealHits; i++) {
             idcg += 1.0 / log2(i + 1);
         }
         double reciprocalRank = firstHitRank == 0 ? 0 : 1.0 / firstHitRank;
         double ndcg = idcg == 0 ? 0 : dcg / idcg;
+        double citationHitRate = expectedEvidenceCount == 0 ? 0 : Math.min(1.0, matchedEvidenceCount * 1.0 / expectedEvidenceCount);
+        double citationCoverage = retrieved.isEmpty() ? 0 : matchedEvidenceCount * 1.0 / retrieved.size();
         return new RagEvalResponse.ItemResult(
-            item.question(), firstHitRank > 0, firstHitRank, round(reciprocalRank), round(ndcg), chunkIds);
+            item.question(), firstHitRank > 0, firstHitRank, round(reciprocalRank), round(ndcg),
+            round(citationHitRate), round(citationCoverage), chunkIds, retrievedSegments);
     }
 
     private boolean matches(TextSegment segment, Set<String> expectedChunkIds, List<String> expectedKeywords) {
@@ -126,6 +147,38 @@ public class RagEvaluationService {
             .filter(keyword -> keyword != null && !keyword.isBlank())
             .map(keyword -> keyword.toLowerCase(Locale.ROOT))
             .anyMatch(text::contains);
+    }
+
+    private int expectedEvidenceCount(Set<String> expectedChunkIds, List<String> expectedKeywords) {
+        int chunkCount = expectedChunkIds == null ? 0 : expectedChunkIds.size();
+        int keywordCount = expectedKeywords == null ? 0 : (int) expectedKeywords.stream()
+            .filter(keyword -> keyword != null && !keyword.isBlank())
+            .count();
+        return chunkCount + keywordCount;
+    }
+
+    private String snippet(String text) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 220 ? normalized : normalized.substring(0, 220) + "...";
+    }
+
+    private Long parseLong(String value) {
+        try {
+            return value == null || value.isBlank() ? null : Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Double parseDouble(String value) {
+        try {
+            return value == null || value.isBlank() ? null : round(Double.parseDouble(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private double log2(double value) {

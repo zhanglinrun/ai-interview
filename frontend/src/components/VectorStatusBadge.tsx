@@ -52,13 +52,24 @@ const DOC_STATUS_CONFIG = {
   spinning: boolean;
 }>;
 
+const UNKNOWN_STATUS_CONFIG = {
+  text: '未知状态',
+  icon: Clock,
+  className: 'text-slate-400',
+  spinning: false,
+};
+
 interface VectorStatusBadgeProps {
-  status: DocStatus;
+  status?: DocStatus | null;
   textClassName?: string;
 }
 
-function VectorStatusIcon({ status }: { status: DocStatus }) {
-  const config = DOC_STATUS_CONFIG[status];
+function getStatusConfig(status?: DocStatus | null) {
+  return status ? DOC_STATUS_CONFIG[status] ?? UNKNOWN_STATUS_CONFIG : UNKNOWN_STATUS_CONFIG;
+}
+
+function VectorStatusIcon({ status }: { status?: DocStatus | null }) {
+  const config = getStatusConfig(status);
   const Icon = config.icon;
   const className = `w-4 h-4 ${config.className}${config.spinning ? ' animate-spin' : ''}`;
   return <Icon className={className} />;
@@ -68,7 +79,7 @@ export default function VectorStatusBadge({
   status,
   textClassName = 'text-sm text-slate-600',
 }: VectorStatusBadgeProps) {
-  const config = DOC_STATUS_CONFIG[status];
+  const config = getStatusConfig(status);
 
   return (
     <div className="flex items-center gap-2">

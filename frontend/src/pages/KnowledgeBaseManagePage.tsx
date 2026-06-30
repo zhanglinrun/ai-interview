@@ -16,7 +16,15 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import {knowledgeBaseApi, KnowledgeBaseItem, KnowledgeBaseStats, KnowledgeBaseVersion, SortOption,} from '../api/knowledgebase';
+import {
+  DataTablePreview,
+  knowledgeBaseApi,
+  KnowledgeBaseItem,
+  KnowledgeBaseStats,
+  KnowledgeBaseVersion,
+  RagQueryTrace,
+  SortOption,
+} from '../api/knowledgebase';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import LoadingButtonContent from '../components/LoadingButtonContent';
@@ -60,6 +68,12 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [versions, setVersions] = useState<KnowledgeBaseVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [switchingVersionId, setSwitchingVersionId] = useState<number | null>(null);
+  const [previewKb, setPreviewKb] = useState<KnowledgeBaseItem | null>(null);
+  const [dataPreview, setDataPreview] = useState<DataTablePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [traces, setTraces] = useState<RagQueryTrace[]>([]);
+  const [tracesLoading, setTracesLoading] = useState(false);
 
   const fetchPageData = useCallback(async () => {
     const kbListPromise = searchKeyword
@@ -168,6 +182,32 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     }
   };
 
+  const handlePreviewData = async (kb: KnowledgeBaseItem) => {
+    setPreviewKb(kb);
+    setPreviewLoading(true);
+    try {
+      setDataPreview(await knowledgeBaseApi.previewDataTable(kb.id));
+    } catch (error) {
+      console.error('加载数据预览失败:', error);
+      setDataPreview(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleShowTraces = async () => {
+    setTraceOpen(true);
+    setTracesLoading(true);
+    try {
+      setTraces(await knowledgeBaseApi.listTraces(20));
+    } catch (error) {
+      console.error('加载 RAG Trace 失败:', error);
+      setTraces([]);
+    } finally {
+      setTracesLoading(false);
+    }
+  };
+
   // 删除知识库
   const handleDelete = async () => {
     if (!deleteItem) return;
@@ -258,6 +298,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
           >
             <Upload className="w-4 h-4" />
             上传知识库
+          </button>
+          <button
+            onClick={handleShowTraces}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+          >
+            <Eye className="w-4 h-4" />
+            RAG Trace
           </button>
           <button
             onClick={onChat}
@@ -500,6 +547,15 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
                       {/* 版本管理按钮 */}
+                      {kb.dataTableName && (
+                        <button
+                          onClick={() => handlePreviewData(kb)}
+                          className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                          title="预览数据表"
+                        >
+                          <Database className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleShowVersions(kb)}
                         className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
@@ -656,6 +712,138 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                     })}
                   </ul>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {previewKb && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setPreviewKb(null)}
+          >
+            <motion.div
+              initial={{scale: 0.95, opacity: 0}}
+              animate={{scale: 1, opacity: 1}}
+              exit={{scale: 0.95, opacity: 0}}
+              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-5xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+                    <Database className="w-5 h-5 text-primary-500" />
+                    数据表预览
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                    {previewKb.name} · {dataPreview?.total ?? previewKb.dataRowCount ?? 0} 行
+                  </p>
+                </div>
+                <button
+                  onClick={() => setPreviewKb(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto p-5">
+                {previewLoading ? (
+                  <div className="py-12 text-center text-slate-400">加载中...</div>
+                ) : dataPreview ? (
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-700">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-slate-500">id</th>
+                        {dataPreview.columns.map((col) => (
+                          <th key={col.name} className="px-3 py-2 text-left text-slate-500">
+                            {col.title}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dataPreview.rows.map((row, idx) => (
+                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-700">
+                          <td className="px-3 py-2 text-slate-500">{String(row.id ?? '')}</td>
+                          {dataPreview.columns.map((col) => (
+                            <td key={col.name} className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-xs truncate">
+                              {String(row[col.name] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="py-12 text-center text-slate-400">暂无可预览数据</div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {traceOpen && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setTraceOpen(false)}
+          >
+            <motion.div
+              initial={{scale: 0.95, opacity: 0}}
+              animate={{scale: 1, opacity: 1}}
+              exit={{scale: 0.95, opacity: 0}}
+              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+                <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+                  <Eye className="w-5 h-5 text-primary-500" />
+                  RAG Trace
+                </h3>
+                <button
+                  onClick={() => setTraceOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                {tracesLoading ? (
+                  <div className="py-12 text-center text-slate-400">加载中...</div>
+                ) : traces.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400">暂无 Trace</div>
+                ) : traces.map((trace) => (
+                  <div key={trace.traceId} className="p-4 rounded-lg border border-slate-100 dark:border-slate-700">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-slate-800 dark:text-white truncate">{trace.question}</p>
+                      <span className="text-xs text-slate-400 shrink-0">{formatDateTime(trace.createdAt)}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span>路由：{trace.routeStrategy || '-'}</span>
+                      <span>耗时：{trace.latencyMs ?? '-'}ms</span>
+                      <span>置信度：{trace.confidence ?? '-'}</span>
+                    </div>
+                    {trace.rewrittenQuestion && (
+                      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                        改写：{trace.rewrittenQuestion}
+                      </p>
+                    )}
+                    {trace.routeReasoning && (
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        原因：{trace.routeReasoning}
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
             </motion.div>
           </motion.div>

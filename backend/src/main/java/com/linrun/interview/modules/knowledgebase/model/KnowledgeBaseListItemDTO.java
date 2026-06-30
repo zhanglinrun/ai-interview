@@ -20,6 +20,8 @@ public record KnowledgeBaseListItemDTO(
     Integer accessCount,
     Integer questionCount,
     DocumentStatus docStatus,
-    Long currentVersionId
+    Long currentVersionId,
+    String dataTableName,
+    Integer dataRowCount
 ) {
 }

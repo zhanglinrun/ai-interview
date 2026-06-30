@@ -24,7 +24,7 @@ services:
       # 初始化脚本：容器首次启动时会自动执行 /docker-entrypoint-initdb.d/ 下的 .sql 文件
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-25432}:5432"
     # 健康检查：
     # 后端服务(app)需要等待数据库完全启动并准备好连接后才能启动。
     # 这里通过 pg_isready 命令检测数据库状态。
@@ -49,7 +49,7 @@ services:
     image: redis:7
     container_name: interview-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-26379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -77,7 +77,7 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
+      - "${ES_HOST_PORT:-29200}:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     healthcheck:
@@ -107,8 +107,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_HOST_PORT:-29000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-29001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -171,6 +171,7 @@ services:
     environment:
       # === 数据库连接 ===
       # 使用服务名 'postgres' 作为主机名，Docker 内部 DNS 会自动解析
+      SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: interview_guide
@@ -203,7 +204,7 @@ services:
       APP_INTERVIEW_FOLLOW_UP_COUNT: ${APP_INTERVIEW_FOLLOW_UP_COUNT:-1}
       APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-8}
     ports:
-      - "8080:8080"
+      - "${APP_HOST_PORT:-28082}:8080"
 
   # =========================================
   # 7. 前端应用服务 (Vue/React + Nginx)
@@ -218,7 +219,7 @@ services:
     depends_on:
       - app
     ports:
-      - "80:80"
+      - "${FRONTEND_HOST_PORT:-28080}:80"
 
 # =========================================
 # 定义 Docker 卷 (Volumes)

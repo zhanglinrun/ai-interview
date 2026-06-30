@@ -25,6 +25,8 @@ export interface KnowledgeBaseItem {
   questionCount: number;
   docStatus: DocStatus;
   currentVersionId: number | null;
+  dataTableName: string | null;
+  dataRowCount: number | null;
 }
 
 // 统计信息
@@ -86,6 +88,55 @@ export interface QueryResponse {
   knowledgeBaseId: number;
   knowledgeBaseName: string;
   sources: RagSource[];
+}
+
+export interface RagEvalRequestItem {
+  question: string;
+  expectedKeywords: string[];
+  expectedChunkIds: string[];
+}
+
+export interface RagEvalRequest {
+  knowledgeBaseIds: number[];
+  items: RagEvalRequestItem[];
+  k?: number;
+  title?: string;
+}
+
+export interface RagEvalResponse {
+  runId: string;
+  total: number;
+  k: number;
+  hitRate: number;
+  mrr: number;
+  ndcg: number;
+  citationHitRate: number;
+  citationCoverage: number;
+}
+
+export interface DataTablePreview {
+  tableName: string;
+  logicalName: string;
+  total: number;
+  page: number;
+  size: number;
+  columns: Array<{ name: string; title: string }>;
+  rows: Array<Record<string, unknown>>;
+}
+
+export interface RagQueryTrace {
+  traceId: string;
+  question: string;
+  rewrittenQuestion: string | null;
+  routeStrategy: string | null;
+  routeReasoning: string | null;
+  retrievedJson: string | null;
+  finalSourcesJson: string | null;
+  answer: string | null;
+  confidence: number | null;
+  invalidCitationsJson: string | null;
+  latencyMs: number | null;
+  createdAt: string;
 }
 
 function extractDataLineContent(line: string): string | null {
@@ -231,6 +282,20 @@ export const knowledgeBaseApi = {
    */
   async revectorize(id: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/revectorize`);
+  },
+
+  async previewDataTable(id: number, page = 1, size = 50): Promise<DataTablePreview> {
+    return request.get<DataTablePreview>(`/api/knowledgebase/${id}/data/preview?page=${page}&size=${size}`);
+  },
+
+  async evaluateRetrieval(req: RagEvalRequest): Promise<RagEvalResponse> {
+    return request.post<RagEvalResponse>('/api/knowledgebase/evaluate-retrieval', req, {
+      timeout: AI_REQUEST_TIMEOUT_MS,
+    });
+  },
+
+  async listTraces(limit = 20): Promise<RagQueryTrace[]> {
+    return request.get<RagQueryTrace[]>(`/api/knowledgebase/traces?limit=${limit}`);
   },
 
   // ========== 版本管理 ==========

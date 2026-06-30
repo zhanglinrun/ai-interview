@@ -56,6 +56,7 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
     private final Double minScore;
     private final Integer maxResults;
     private final Consumer<String> progressCallback;
+    private final RagQueryTrace trace;
     /** rerank 进度只发一次（聚合可能对多 query 多次调用 aggregate）。 */
     private final AtomicBoolean rerankProgressSent = new AtomicBoolean(false);
 
@@ -81,11 +82,21 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
                                                 Double minScore,
                                                 Integer maxResults,
                                                 Consumer<String> progressCallback) {
+        this(scoringModel, querySelector, minScore, maxResults, progressCallback, null);
+    }
+
+    public InterviewReRankingContentAggregator(ScoringModel scoringModel,
+                                                Function<Map<Query, Collection<List<Content>>>, Query> querySelector,
+                                                Double minScore,
+                                                Integer maxResults,
+                                                Consumer<String> progressCallback,
+                                                RagQueryTrace trace) {
         this.scoringModel = ensureNotNull(scoringModel, "scoringModel");
         this.querySelector = getOrDefault(querySelector, DEFAULT_QUERY_SELECTOR);
         this.minScore = minScore;
         this.maxResults = getOrDefault(maxResults, Integer.MAX_VALUE);
         this.progressCallback = progressCallback;
+        this.trace = trace;
     }
 
     @Override
@@ -120,7 +131,11 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
             return fusedContents;
         }
 
-        return reRankAndFilter(fusedContents, query);
+        List<Content> reranked = reRankAndFilter(fusedContents, query);
+        if (trace != null) {
+            trace.recordReranked(reranked);
+        }
+        return reranked;
     }
 
     protected Map<Query, List<Content>> fuse(Map<Query, Collection<List<Content>>> queryToContents) {
@@ -162,6 +177,7 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         private Double minScore;
         private Integer maxResults;
         private Consumer<String> progressCallback;
+        private RagQueryTrace trace;
 
         public ReRankingContentAggregatorBuilder scoringModel(ScoringModel scoringModel) {
             this.scoringModel = scoringModel;
@@ -189,9 +205,14 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
             return this;
         }
 
+        public ReRankingContentAggregatorBuilder trace(RagQueryTrace trace) {
+            this.trace = trace;
+            return this;
+        }
+
         public InterviewReRankingContentAggregator build() {
             return new InterviewReRankingContentAggregator(scoringModel, querySelector, minScore,
-                maxResults, progressCallback);
+                maxResults, progressCallback, trace);
         }
     }
 }

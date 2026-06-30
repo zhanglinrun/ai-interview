@@ -20,12 +20,10 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "rag_evaluation_runs", indexes = {
-    @Index(name = "idx_rag_eval_created", columnList = "createdAt"),
-    @Index(name = "idx_rag_eval_hit_rate_created", columnList = "hitRate,createdAt"),
-    @Index(name = "idx_rag_evaluation_runs_user_id", columnList = "userId")
+@Table(name = "rag_query_traces", indexes = {
+    @Index(name = "idx_rag_query_traces_user_created", columnList = "userId,createdAt")
 })
-public class RagEvaluationRunEntity {
+public class RagQueryTraceEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -35,34 +33,38 @@ public class RagEvaluationRunEntity {
     private Long userId;
 
     @Column(nullable = false, length = 80, unique = true)
-    private String runId;
+    private String traceId;
 
-    @Column(nullable = false, length = 120)
-    private String title;
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String question;
 
     @Column(columnDefinition = "TEXT")
-    private String casesJson;
+    private String rewrittenQuestion;
+
+    @Column(length = 40)
+    private String routeStrategy;
+
+    @Column(length = 500)
+    private String routeReasoning;
 
     @Column(columnDefinition = "TEXT")
     private String knowledgeBaseIdsJson;
 
-    private Integer totalCases;
+    @Column(columnDefinition = "TEXT")
+    private String retrievedJson;
 
-    private Integer hitCount;
+    @Column(columnDefinition = "TEXT")
+    private String finalSourcesJson;
 
-    private Double hitRate;
+    @Column(columnDefinition = "TEXT")
+    private String answer;
 
-    private Double meanReciprocalRank;
+    private Double confidence;
 
-    private Double ndcg;
+    @Column(columnDefinition = "TEXT")
+    private String invalidCitationsJson;
 
-    private Double citationHitRate;
-
-    private Double citationCoverage;
-
-    private Double minScore;
-
-    private Integer topk;
+    private Long latencyMs;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

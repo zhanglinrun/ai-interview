@@ -38,6 +38,10 @@ public class SpreadsheetProcessService implements FileProcessService {
 
     @Override
     public String processDocument(byte[] fileBytes, String fileName) {
+        return parse(fileBytes, fileName).markdown();
+    }
+
+    public ParsedSpreadsheet parse(byte[] fileBytes, String fileName) {
         String lowerName = fileName == null ? "" : fileName.toLowerCase();
         if (lowerName.endsWith(".csv") || lowerName.endsWith(".tsv")) {
             return parseDelimited(fileBytes, lowerName.endsWith(".tsv") ? '\t' : ',');
@@ -47,19 +51,24 @@ public class SpreadsheetProcessService implements FileProcessService {
         } catch (Exception e) {
             log.warn("Excel 行列解析失败，降级 Tika 文本解析: fileName={}", fileName, e);
             String text = documentParseService.parseContent(fileBytes, fileName);
-            return text == null || text.isBlank() ? "" : "# 表格内容\n\n" + text.trim();
+            String markdown = text == null || text.isBlank() ? "" : "# 表格内容\n\n" + text.trim();
+            return new ParsedSpreadsheet(markdown, List.of(), List.of());
         }
     }
 
-    private String parseWorkbook(byte[] fileBytes) throws IOException {
+    private ParsedSpreadsheet parseWorkbook(byte[] fileBytes) throws IOException {
         try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(fileBytes))) {
             StringBuilder markdown = new StringBuilder("# 表格内容\n\n");
             DataFormatter formatter = new DataFormatter();
             int parsedSheets = 0;
+            List<List<String>> firstRows = List.of();
             for (Sheet sheet : workbook) {
                 List<List<String>> rows = readSheet(sheet, formatter);
                 if (rows.isEmpty()) {
                     continue;
+                }
+                if (firstRows.isEmpty()) {
+                    firstRows = rows;
                 }
                 if (parsedSheets > 0) {
                     markdown.append('\n');
@@ -68,7 +77,9 @@ public class SpreadsheetProcessService implements FileProcessService {
                 appendRows(markdown, rows);
                 parsedSheets++;
             }
-            return parsedSheets == 0 ? "" : markdown.toString();
+            return parsedSheets == 0
+                ? new ParsedSpreadsheet("", List.of(), List.of())
+                : toParsed(markdown.toString(), firstRows);
         }
     }
 
@@ -86,15 +97,24 @@ public class SpreadsheetProcessService implements FileProcessService {
         return rows;
     }
 
-    private String parseDelimited(byte[] fileBytes, char delimiter) {
+    private ParsedSpreadsheet parseDelimited(byte[] fileBytes, char delimiter) {
         String text = decode(fileBytes);
         List<List<String>> rows = parseRows(text, delimiter);
         if (rows.isEmpty()) {
-            return "";
+            return new ParsedSpreadsheet("", List.of(), List.of());
         }
         StringBuilder markdown = new StringBuilder("# 表格内容\n\n");
         appendRows(markdown, rows);
-        return markdown.toString();
+        return toParsed(markdown.toString(), rows);
+    }
+
+    private ParsedSpreadsheet toParsed(String markdown, List<List<String>> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return new ParsedSpreadsheet(markdown, List.of(), List.of());
+        }
+        List<String> headers = rows.getFirst();
+        List<List<String>> dataRows = rows.stream().skip(1).toList();
+        return new ParsedSpreadsheet(markdown, headers, dataRows);
     }
 
     private void appendRows(StringBuilder markdown, List<List<String>> rows) {
@@ -220,4 +240,10 @@ public class SpreadsheetProcessService implements FileProcessService {
         }
         sb.append('\n');
     }
+
+    public record ParsedSpreadsheet(
+        String markdown,
+        List<String> headers,
+        List<List<String>> rows
+    ) {}
 }

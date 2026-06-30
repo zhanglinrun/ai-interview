@@ -20,6 +20,7 @@ import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseReposi
 import com.linrun.interview.modules.knowledgebase.service.parse.FileProcessService;
 import com.linrun.interview.modules.knowledgebase.service.parse.FileProcessServiceFactory;
 import com.linrun.interview.modules.knowledgebase.service.parse.FileTypeResolver;
+import com.linrun.interview.modules.knowledgebase.service.parse.SpreadsheetProcessService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import lombok.RequiredArgsConstructor;
@@ -67,6 +68,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseChunkingService chunkingService;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final KnowledgeBaseDataTableService dataTableService;
     private final VectorStoreService vectorStoreService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
@@ -82,8 +84,10 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
         String contentType = contentTypeDetectionService.detectContentType(file);
         if (!fileValidationService.isKnowledgeBaseMimeType(contentType)
-            && !fileValidationService.isMarkdownExtension(fileName)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD 等");
+            && !fileValidationService.isMarkdownExtension(fileName)
+            && !fileValidationService.isSpreadsheetExtension(fileName)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel 等");
         }
 
         // 2. 内容哈希去重（跨版本）
@@ -106,7 +110,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED,
                 "读取上传文件失败: " + e.getMessage(), e);
         }
-        String markdown = processor.processDocument(fileBytes, fileName);
+        SpreadsheetProcessService.ParsedSpreadsheet spreadsheet = null;
+        String markdown;
+        if (processor instanceof SpreadsheetProcessService spreadsheetProcessService) {
+            spreadsheet = spreadsheetProcessService.parse(fileBytes, fileName);
+            markdown = spreadsheet.markdown();
+        } else {
+            markdown = processor.processDocument(fileBytes, fileName);
+        }
         if (markdown == null || markdown.isBlank()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED, "文件解析结果为空");
         }
@@ -138,6 +149,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
 
         // 7. 主表回填 currentVersionId
         entity.setCurrentVersionId(version.getVersionId());
+        if (spreadsheet != null) {
+            var dataTable = dataTableService.createForSpreadsheet(entity, spreadsheet);
+            if (dataTable != null) {
+                entity.setDataTableName(dataTable.getPhysicalTableName());
+                entity.setDataSchemaJson(dataTable.getColumnsJson());
+                entity.setDataRowCount(dataTable.getRowCount());
+            }
+        }
         knowledgeBaseRepository.save(entity);
 
         log.info("知识库上传完成: docId={}, versionId={}, markdownChars={}",
@@ -156,6 +175,12 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         String fileName = file.getOriginalFilename();
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
         String contentType = contentTypeDetectionService.detectContentType(file);
+        if (!fileValidationService.isKnowledgeBaseMimeType(contentType)
+            && !fileValidationService.isMarkdownExtension(fileName)
+            && !fileValidationService.isSpreadsheetExtension(fileName)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel 等");
+        }
 
         // 版本号自增：取当前最新版本号 +1
         KnowledgeBaseVersionEntity latest = versionService.findLatestByDocId(docId)
@@ -179,7 +204,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED,
                 "读取上传文件失败: " + e.getMessage(), e);
         }
-        String markdown = processor.processDocument(fileBytes, fileName);
+        SpreadsheetProcessService.ParsedSpreadsheet spreadsheet = null;
+        String markdown;
+        if (processor instanceof SpreadsheetProcessService spreadsheetProcessService) {
+            spreadsheet = spreadsheetProcessService.parse(fileBytes, fileName);
+            markdown = spreadsheet.markdown();
+        } else {
+            markdown = processor.processDocument(fileBytes, fileName);
+        }
         if (markdown == null || markdown.isBlank()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED, "文件解析结果为空");
         }
@@ -209,6 +241,19 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         // 主表指向新版本，状态降回 CONVERTED（待 split 重新向量化）
         entity.setCurrentVersionId(version.getVersionId());
         entity.setDocStatus(DocumentStatus.CONVERTED);
+        if (spreadsheet != null) {
+            var dataTable = dataTableService.createForSpreadsheet(entity, spreadsheet);
+            if (dataTable != null) {
+                entity.setDataTableName(dataTable.getPhysicalTableName());
+                entity.setDataSchemaJson(dataTable.getColumnsJson());
+                entity.setDataRowCount(dataTable.getRowCount());
+            }
+        } else {
+            entity.setDataTableName(null);
+            entity.setDataSchemaJson(null);
+            entity.setDataRowCount(null);
+            dataTableService.deleteByDoc(userId, docId);
+        }
         knowledgeBaseRepository.save(entity);
 
         log.info("知识库新版本上传完成: docId={}, version={}, 旧版本即时失效已尝试",

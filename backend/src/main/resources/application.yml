@@ -226,11 +226,11 @@ app:
         topk-long: ${APP_AI_RAG_TOPK_LONG:8}
         min-score-short: ${APP_AI_RAG_MIN_SCORE_SHORT:0.18}
         min-score-default: ${APP_AI_RAG_MIN_SCORE_DEFAULT:0.28}
-      # 混合检索：ES 向量通道 + BM25 全文通道，RRF 融合两路排名
+      # 混合检索：本地 Basic 许可证不支持 RRF，默认向量；评测混合检索时显式设 hybrid
       hybrid:
         enabled: ${APP_AI_RAG_HYBRID_ENABLED:true}
         # hybrid: ES 向量 + BM25/RRF；vector: 纯向量；full_text: 纯全文
-        mode: ${APP_AI_RAG_HYBRID_MODE:hybrid}
+        mode: ${APP_AI_RAG_HYBRID_MODE:vector}
         keyword-top-k: ${APP_AI_RAG_HYBRID_KEYWORD_TOPK:20}
         keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
         rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
@@ -238,11 +238,13 @@ app:
       sql:
         enabled: ${APP_AI_RAG_SQL_ENABLED:true}
         router-enabled: ${APP_AI_RAG_SQL_ROUTER_ENABLED:true}
-      # 重排：默认本地 ONNX BGE-RERANKER 进程内精排（无网络/不计费），模型缺失自动降级 DashScope gte-rerank 云端
+        query-timeout-seconds: ${APP_AI_RAG_SQL_QUERY_TIMEOUT_SECONDS:8}
+        max-rows: ${APP_AI_RAG_SQL_MAX_ROWS:100}
+      # 重排：默认 DashScope gte-rerank 云端；本地 ONNX 模型文件存在时可切 provider=local
       rerank:
         enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
-        # provider: local（本地 ONNX BGE，默认）| cloud（DashScope gte-rerank）
-        provider: ${APP_AI_RAG_RERANK_PROVIDER:local}
+        # provider: cloud（DashScope gte-rerank，默认）| local（本地 ONNX BGE）
+        provider: ${APP_AI_RAG_RERANK_PROVIDER:cloud}
         model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
         timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
@@ -293,7 +295,7 @@ app:
   
   # CORS配置 - React前端
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:80}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:80,http://localhost:28080,http://127.0.0.1:28080}
 
   # Voice interview configuration
   voice-interview:

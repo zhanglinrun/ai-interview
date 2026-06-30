@@ -4,7 +4,7 @@
 // 这是一条 CPU + LLM 混合的写接口，和 RAG 问答互补，用来观察出题在并发下的延迟与吞吐。
 //
 // 运行：
-//   k6 run -e BASE_URL=http://localhost:8080 -e TOKEN=xxx -e SKILL_ID=java-backend loadtest/interview-create.js
+//   k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=xxx -e SKILL_ID=java-backend loadtest/interview-create.js
 //   k6 run -e TOKEN=xxx -e VUS=10 -e DURATION=1m -e SKILL_ID=java-backend loadtest/interview-create.js
 //
 // 关注指标：
@@ -18,7 +18,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const TOKEN = __ENV.TOKEN || '';
 const SKILL_ID = __ENV.SKILL_ID || 'java-backend';
 const QUESTION_COUNT = parseInt(__ENV.QUESTION_COUNT || '3', 10);

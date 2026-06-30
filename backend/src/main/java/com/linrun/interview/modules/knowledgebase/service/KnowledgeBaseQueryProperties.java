@@ -70,14 +70,14 @@ public class KnowledgeBaseQueryProperties {
     }
 
     /**
-     * 重排配置：默认本地 ONNX BGE-RERANKER 进程内精排，加载失败/无模型文件时自动降级 DashScope gte-rerank 云端。
+     * 重排配置：默认使用 DashScope gte-rerank 云端；显式 provider=local 时才启用本地 ONNX。
      */
     @Data
     public static class Rerank {
         /** 是否启用重排；关闭或失败时退回 RRF 融合排序 */
         private boolean enabled = true;
-        /** 重排实现：local（本地 ONNX BGE）或 cloud（DashScope gte-rerank）；默认 local */
-        private String provider = "local";
+        /** 重排实现：cloud（DashScope gte-rerank）或 local（本地 ONNX BGE）；默认 cloud */
+        private String provider = "cloud";
         /** 重排服务 baseUrl（DashScope 默认 https://dashscope.aliyuncs.com） */
         private String baseUrl = "https://dashscope.aliyuncs.com";
         /** 重排模型名 */
@@ -179,6 +179,8 @@ public class KnowledgeBaseQueryProperties {
     public static class Sql {
         private boolean enabled = true;
         private boolean routerEnabled = true;
+        private int queryTimeoutSeconds = 8;
+        private int maxRows = 100;
     }
 
     /**

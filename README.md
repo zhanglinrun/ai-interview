@@ -12,7 +12,7 @@
 
 - 从 PDF、Word、Markdown、TXT 等非结构化文档构建面试知识库。
 - 使用 Markdown 标题层级进行语义切块，并维护父子、兄弟 chunk 关系。
-- 基于 Elasticsearch 做向量、BM25/全文混合检索，支持多知识库 metadata 过滤。
+- 基于 Elasticsearch 做原生 KNN 向量检索和带过滤全文检索，支持多知识库 metadata 过滤。
 - 内置 RAG 检索评测接口，计算 Hit@K、MRR、NDCG 并保存评测 run。
 - 通过 Query Rewrite、RetrievalAugmentor 编排、Rerank 和上下文扩展提升回答质量。
 - 支持 Text2SQL 查询白名单业务表，把简历、面试记录、日程和评分统计纳入多源 RAG。
@@ -36,11 +36,12 @@
 - 多知识库问答：一次提问可关联多个知识库。
 - 流式输出：SSE 返回回答 token，并推送“理解问题、检索、排序、生成”等阶段进度。
 - 查询改写：结合历史对话改写用户问题，增强检索命中率。
-- 混合召回：基于 Elasticsearch hybrid search 同时走向量检索和 BM25/全文检索，支持 `hybrid`、`vector`、`full_text` 三种模式。
-- RRF 聚合：自定义内容聚合器兼容 LangChain4j 多检索源结果，并在进入 Rerank 前做排名融合。
-- Rerank 精排：默认尝试本地 ONNX BGE Reranker，模型缺失时可降级到 DashScope `gte-rerank-v2`。
-- small-to-big 上下文扩展：命中小 chunk 后补充父级章节和兄弟 chunk，减少上下文碎片化。
+- 检索模式：默认走原生 ES KNN 向量检索，支持 `vector`、`full_text`、`hybrid` 三种模式；本地 Basic 许可证不依赖 ES RRF。
+- 候选融合：自定义内容聚合器兼容 LangChain4j 多检索源结果，并在进入 Rerank 前做去重和排名融合。
+- Rerank 精排：默认使用 DashScope `gte-rerank-v2` 云端精排；显式配置 `provider=local` 时才启用本地 ONNX BGE Reranker。
+- small-to-big 上下文扩展：命中小 chunk 后优先保留命中片段，再补充邻近兄弟 chunk 和父级章节，减少上下文碎片化。
 - 引用溯源：回答末尾返回来源片段，非流式接口会返回 sources、confidence 和无效引用编号。
+- 检索 Trace：保存原问题、改写问题、路由策略、命中 chunk、rerank 后顺序、最终引用和答案。
 - 多源路由：QueryRouter 可将问题路由到知识库 ES、Text2SQL 或二者混合，结构化 SQL 结果跳过 Rerank 并置顶。
 - RAG 评测：`/api/knowledgebase/evaluate-retrieval` 复用知识库检索链路，计算 Hit@K、MRR、NDCG，结果保存到 `rag_evaluation_runs`。
 - 意图识别：非面试、非技术、非求职类问题可走通用对话兜底，避免强行检索造成幻觉。
@@ -94,13 +95,13 @@ flowchart LR
   Q["用户问题"] --> R["意图识别"]
   R --> S["查询改写"]
   S --> T["QueryRouter"]
-  T --> U1["ES hybrid: 向量 + BM25"]
+  T --> U1["ES KNN / 全文检索"]
   T --> U2["Text2SQL 白名单表"]
-  U1 --> V["HybridAggregator / RRF"]
+  U1 --> X["父子/兄弟上下文扩展"]
+  X --> V["候选融合 / 去重"]
   U2 --> V
   V --> W["Rerank 精排"]
-  W --> X["父子/兄弟上下文扩展"]
-  X --> Y["LLM 生成"]
+  W --> Y["LLM 生成"]
   Y --> Z["答案 + 引用来源"]
 ```
 
@@ -117,8 +118,8 @@ flowchart LR
 | 关系数据库 | PostgreSQL 16、Spring Data JPA、Flyway |
 | 缓存与异步 | Redis、Redisson、Redis Stream |
 | 文档解析 | MinerU、Apache Tika、Apache POI |
-| 文件存储 | S3 兼容对象存储，开发环境使用 RustFS，完整容器环境使用 MinIO |
-| 精排 | ONNX BGE Reranker、本地缺失时可降级 DashScope Rerank |
+| 文件存储 | S3 兼容对象存储，开发依赖可用 RustFS，完整容器环境使用 MinIO |
+| 精排 | DashScope `gte-rerank-v2`，可选本地 ONNX BGE Reranker |
 | 导出 | iText 8 |
 | 监控 | Spring Boot Actuator、Micrometer、Prometheus |
 
@@ -243,25 +244,45 @@ http://localhost:5174
 
 Vite 已将 `/api` 代理到 `http://localhost:8082`。
 
+### 5. 完整容器化启动
+
+如果不想分别启动前后端，可以直接使用完整 Compose：
+
+```bash
+docker compose up -d --build
+```
+
+默认宿主机端口：
+
+```text
+前端：http://localhost:28080
+后端：http://localhost:28082
+PostgreSQL：localhost:25432
+Redis：localhost:26379
+Elasticsearch：http://localhost:29200
+MinIO：http://localhost:29001
+```
+
 ## Rerank 模型说明
 
-RAG 默认配置会优先尝试本地 ONNX BGE Reranker：
-
-```text
-backend/src/main/resources/model/bge-reranker-model/
-```
-
-模型文件较大，不进入 Git。缺失时后端不会启动失败，`RerankService` 会尝试降级到 DashScope 云端 Rerank。如果你希望使用本地精排，请按该目录下的 README 下载：
-
-```text
-model_quantized.onnx
-tokenizer.json
-```
-
-也可以直接切换为云端精排：
+RAG 默认使用 DashScope 云端 `gte-rerank-v2` 精排：
 
 ```properties
 APP_AI_RAG_RERANK_PROVIDER=cloud
+```
+
+如果你希望使用本地精排，再显式切换：
+
+```properties
+APP_AI_RAG_RERANK_PROVIDER=local
+```
+
+本地模型文件较大，不进入 Git。请按该目录下的 README 下载：
+
+```text
+backend/src/main/resources/model/bge-reranker-model/
+model_quantized.onnx
+tokenizer.json
 ```
 
 或者关闭精排：
@@ -279,6 +300,8 @@ APP_AI_RAG_RERANK_ENABLED=false
 | 批量上传 | `POST /api/knowledgebase/upload/batch` |
 | RAG 问答 | `POST /api/knowledgebase/query`、`POST /api/knowledgebase/query/stream` |
 | RAG 检索评测 | `POST /api/knowledgebase/evaluate-retrieval` |
+| RAG Trace | `GET /api/knowledgebase/traces`、`GET /api/knowledgebase/traces/{traceId}` |
+| 表格数据预览 | `GET /api/knowledgebase/{id}/data/preview` |
 | RAG 会话 | `POST /api/rag-chat/sessions`、`POST /api/rag-chat/sessions/{id}/messages/stream` |
 | 知识库版本 | `GET /api/knowledgebase/{id}/versions`、`POST /api/knowledgebase/{id}/versions/{versionId}/switch` |
 | 简历 | `POST /api/resumes/upload`、`GET /api/resumes` |
@@ -300,11 +323,12 @@ APP_AI_RAG_RERANK_ENABLED=false
 | `elasticsearch.num-candidates` | ES hybrid/KNN 候选数量 |
 | `app.ai.rag.rewrite.enabled` | 是否启用查询改写 |
 | `app.ai.rag.search.*` | 召回数量和最低分阈值 |
-| `app.ai.rag.hybrid.enabled` | 是否启用 ES 混合检索 |
-| `app.ai.rag.hybrid.mode` | `hybrid` / `vector` / `full_text` |
+| `app.ai.rag.hybrid.enabled` | 是否允许混合检索链路 |
+| `app.ai.rag.hybrid.mode` | `hybrid` / `vector` / `full_text`，默认 `vector` |
 | `app.ai.rag.sql.enabled` | 是否启用 Text2SQL |
 | `app.ai.rag.sql.router-enabled` | 是否启用 LLM 多源 QueryRouter |
 | `app.ai.rag.rerank.enabled` | 是否启用 Rerank |
+| `app.ai.rag.rerank.provider` | `cloud` / `local`，默认 `cloud` |
 | `app.ai.rag.parent-expand.enabled` | 是否启用父子/兄弟上下文扩展 |
 | `app.ai.rag.intent-recognition.enabled` | 是否启用 RAG 意图识别 |
 | `app.storage.*` | S3 兼容对象存储配置 |
@@ -314,7 +338,7 @@ APP_AI_RAG_RERANK_ENABLED=false
 
 1. 文档处理不是简单按长度切块，而是先解析为 Markdown，再按标题层级构建 parent/brother chunk 关系。
 2. 知识库向量化通过事务后事件异步触发，失败时状态停留在 `CHUNKED`，由定时补偿任务兜底。
-3. 检索不是裸向量召回，而是 ES 向量 + BM25/全文混合检索、查询改写、RRF 聚合、Rerank 精排和 small-to-big 上下文扩展组合。
+3. 检索不是裸向量召回，而是 ES KNN/全文检索、查询改写、候选融合、Rerank 精排和 small-to-big 上下文扩展组合。
 4. 项目提供 RAG 检索评测接口，可用 Hit@K、MRR、NDCG 量化召回效果，并保存评测 run。
 5. 多源 RAG 支持 ES 知识库和 Text2SQL，QueryRouter 可按问题类型路由到结构化数据、非结构化知识库或混合检索。
 6. Text2SQL 做了白名单 schema、当前用户隔离、SELECT 校验和只读连接，能讲清楚安全边界。
@@ -355,6 +379,6 @@ mvn -pl backend -am package -DskipTests
 
 - 完整容器化部署可参考 `docker-compose.yml`，但日常开发更推荐 `docker-compose.dev.yml + 本机后端 + 本机前端`。
 - 语音面试依赖 ASR/TTS 和浏览器麦克风权限，属于扩展交互能力；如果只展示 RAG 项目，可以不作为主讲内容。
-- ES hybrid search 依赖 Elasticsearch 8.x 和 LangChain4j ElasticsearchEmbeddingStore 的 hybrid 配置；已有旧索引如果 mapping 不兼容，建议重建索引后重新向量化。
+- 本地 Elasticsearch Basic 许可证不支持 ES RRF，默认 `vector` 模式会绕开该限制；如需 `hybrid`，请确认许可证和索引 mapping 兼容。
 - Text2SQL 应使用生产只读数据库账号；应用层只读连接是额外保护，不替代数据库权限。
 - `V1__baseline.sql` 中保留了早期演进痕迹，当前运行态以代码、后续 Flyway 迁移和 `application.yml` 中的 Elasticsearch RAG 配置为准。

@@ -1,10 +1,10 @@
 // RAG 问答接口压测（k6）
 //
 // 压测目标：POST /api/knowledgebase/query（非流式），这是 RAG 全链路最重的同步接口，
-// 覆盖查询改写 + 混合检索（向量 + 关键词 RRF）+ rerank + LLM 生成。
+// 覆盖查询改写 + ES KNN/全文检索 + rerank + LLM 生成。
 //
 // 运行：
-//   k6 run -e BASE_URL=http://localhost:8080 -e TOKEN=xxx -e KB_IDS=1 loadtest/rag-query.js
+//   k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=xxx -e KB_IDS=1 loadtest/rag-query.js
 // 自定义负载档位（默认走下方 stages）：
 //   k6 run -e VUS=20 -e DURATION=2m loadtest/rag-query.js
 //
@@ -20,7 +20,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const TOKEN = __ENV.TOKEN || '';
 const KB_IDS = (__ENV.KB_IDS || '1')
   .split(',')

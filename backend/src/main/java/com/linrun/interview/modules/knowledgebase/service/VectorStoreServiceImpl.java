@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ public class VectorStoreServiceImpl implements VectorStoreService {
 
     private static final String DOC_ID_KEY = "docId";
     private static final String VERSION_KEY = "version";
+    private static final int EMBEDDING_BATCH_SIZE = 10;
 
     private final ElasticsearchEmbeddingStore embeddingStore;
     private final LlmProviderRegistry llmProviderRegistry;
@@ -54,9 +56,15 @@ public class VectorStoreServiceImpl implements VectorStoreService {
         if (segments == null || segments.isEmpty()) {
             return Collections.emptyList();
         }
+        EmbeddingModel model = embeddingModel();
         List<TextSegment> textSegments = segments.stream().map(this::toTextSegment).toList();
-        Response<List<Embedding>> embeddingResponse = embeddingModel().embedAll(textSegments);
-        List<String> embeddingIds = embeddingStore.addAll(embeddingResponse.content(), textSegments);
+        List<String> embeddingIds = new ArrayList<>(segments.size());
+        for (int from = 0; from < textSegments.size(); from += EMBEDDING_BATCH_SIZE) {
+            int to = Math.min(from + EMBEDDING_BATCH_SIZE, textSegments.size());
+            List<TextSegment> batch = textSegments.subList(from, to);
+            Response<List<Embedding>> embeddingResponse = model.embedAll(batch);
+            embeddingIds.addAll(embeddingStore.addAll(embeddingResponse.content(), batch));
+        }
         if (embeddingIds.size() != segments.size()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
                 "向量存储失败，向量数量(" + embeddingIds.size() + ")与分段数量(" + segments.size() + ")不一致");

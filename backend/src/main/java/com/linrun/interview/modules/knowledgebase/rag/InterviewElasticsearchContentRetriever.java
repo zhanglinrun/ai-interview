@@ -1,5 +1,10 @@
 package com.linrun.interview.modules.knowledgebase.rag;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -18,7 +23,10 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEnti
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
 import lombok.extern.slf4j.Slf4j;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.RestClient;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -61,6 +69,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
     private final KnowledgeBaseQueryProperties.Hybrid hybrid;
     private final Consumer<String> progressCallback;
+    private final RagQueryTrace trace;
+    private final RestClient restClient;
+    private final String indexName;
+    private final ObjectMapper objectMapper;
     /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
     private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
 
@@ -72,7 +84,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    KnowledgeSegmentService segmentService,
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand) {
         this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), null);
+            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), null, null);
     }
 
     public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
@@ -84,7 +96,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand,
                                                    Consumer<String> progressCallback) {
         this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), progressCallback);
+            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), progressCallback, null);
     }
 
     public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
@@ -96,6 +108,37 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    KnowledgeBaseQueryProperties.ParentExpand parentExpand,
                                                    KnowledgeBaseQueryProperties.Hybrid hybrid,
                                                    Consumer<String> progressCallback) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
+            segmentService, parentExpand, hybrid, progressCallback, null);
+    }
+
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
+                                                   Consumer<String> progressCallback,
+                                                   RagQueryTrace trace) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
+            parentExpand, hybrid, progressCallback, trace, null, null, null);
+    }
+
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
+                                                   Consumer<String> progressCallback,
+                                                   RagQueryTrace trace,
+                                                   RestClient restClient,
+                                                   String indexName,
+                                                   ObjectMapper objectMapper) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
@@ -109,6 +152,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         this.parentExpand = parentExpand;
         this.hybrid = hybrid;
         this.progressCallback = progressCallback;
+        this.trace = trace;
+        this.restClient = restClient;
+        this.indexName = indexName;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -116,18 +163,23 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         if (progressCallback != null && retrieveProgressSent.compareAndSet(false, true)) {
             progressCallback.accept("正在检索知识库...");
         }
-        Embedding queryEmbedding = embeddingModel.embed(query.text()).content();
-        var builder = EmbeddingSearchRequest.builder()
-            .queryEmbedding(queryEmbedding)
-            .maxResults(Math.max(maxResults, 1));
-        if (minScore > 0) {
-            builder.minScore(minScore);
-        }
-        if (filter != null) {
-            builder.filter(filter);
+        EmbeddingSearchResult<TextSegment> result;
+        if (isFullTextMode()) {
+            result = search(null, query.text());
+        } else {
+            Embedding queryEmbedding = embeddingModel.embed(query.text()).content();
+            var builder = EmbeddingSearchRequest.builder()
+                .queryEmbedding(queryEmbedding)
+                .maxResults(Math.max(maxResults, 1));
+            if (minScore > 0) {
+                builder.minScore(minScore);
+            }
+            if (filter != null) {
+                builder.filter(filter);
+            }
+            result = search(builder.build(), query.text());
         }
 
-        EmbeddingSearchResult<TextSegment> result = search(builder.build(), query.text());
         List<Content> contents = result.matches().stream()
             .map(this::toContent)
             .filter(this::matchesKnowledgeBaseFilter)
@@ -136,34 +188,140 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         List<Content> expanded = parentExpand != null && parentExpand.isEnabled()
             ? expandWithContext(contents)
             : contents;
+        if (trace != null) {
+            trace.recordRetrieved(expanded);
+        }
         log.info("[InterviewElasticsearchContentRetriever] 检索完成: query='{}', 命中 {} 条, 扩展后 {} 条",
             query.text(), contents.size(), expanded.size());
         return expanded;
     }
 
     private EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request, String queryText) {
-        String mode = hybrid != null && hybrid.getMode() != null ? hybrid.getMode() : "hybrid";
+        String mode = searchMode();
         try {
             return switch (mode) {
-                case "vector" -> embeddingStore.search(request);
+                case "vector" -> vectorSearch(request);
                 case "full_text" -> fullTextSearch(queryText);
                 default -> hybrid.isEnabled()
                     ? embeddingStore.hybridSearch(request, queryText)
                     : embeddingStore.search(request);
             };
         } catch (Exception e) {
-            log.warn("[InterviewElasticsearchContentRetriever] {} 检索失败，降级向量检索: {}",
+            log.warn("[InterviewElasticsearchContentRetriever] {} 检索失败，降级全文检索: {}",
                 mode, e.getMessage(), e);
-            return embeddingStore.search(request);
+            try {
+                return fullTextSearch(queryText);
+            } catch (Exception fallback) {
+                log.warn("[InterviewElasticsearchContentRetriever] 全文检索失败，返回空结果: {}",
+                    fallback.getMessage(), fallback);
+                return new EmbeddingSearchResult<>(List.of());
+            }
         }
     }
 
     private EmbeddingSearchResult<TextSegment> fullTextSearch(String queryText) {
+        if (restClient != null && objectMapper != null && indexName != null && !indexName.isBlank()) {
+            try {
+                return filteredFullTextSearch(queryText);
+            } catch (Exception e) {
+                log.warn("[InterviewElasticsearchContentRetriever] 带过滤全文检索失败，退回默认全文检索: {}",
+                    e.getMessage(), e);
+            }
+        }
+        return langChainFullTextSearch(queryText);
+    }
+
+    private EmbeddingSearchResult<TextSegment> vectorSearch(EmbeddingSearchRequest searchRequest) {
+        if (restClient != null && objectMapper != null && indexName != null && !indexName.isBlank()) {
+            try {
+                return elasticsearchVectorSearch(searchRequest);
+            } catch (Exception e) {
+                log.warn("[InterviewElasticsearchContentRetriever] 原生向量检索失败，退回默认向量检索: {}",
+                    e.getMessage(), e);
+            }
+        }
+        return embeddingStore.search(searchRequest);
+    }
+
+    private EmbeddingSearchResult<TextSegment> elasticsearchVectorSearch(
+        EmbeddingSearchRequest searchRequest) throws Exception {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("size", searchRequest.maxResults());
+        root.putArray("_source").add("text").add("metadata");
+        ObjectNode knn = root.putObject("knn");
+        knn.put("field", "vector");
+        ArrayNode vector = knn.putArray("query_vector");
+        for (float value : searchRequest.queryEmbedding().vector()) {
+            vector.add(value);
+        }
+        knn.put("k", searchRequest.maxResults());
+        knn.put("num_candidates", Math.max(searchRequest.maxResults() * 10, 100));
+        if (!knowledgeBaseIdSet.isEmpty()) {
+            ArrayNode terms = knn.putObject("filter").putObject("terms")
+                .putArray("metadata." + MetadataKeyConstant.DOC_ID + ".keyword");
+            knowledgeBaseIdSet.forEach(terms::add);
+        }
+
+        Request request = new Request("POST", "/" + indexName + "/_search");
+        request.setJsonEntity(objectMapper.writeValueAsString(root));
+        return parseSearchResponse(request, searchRequest.minScore());
+    }
+
+    private EmbeddingSearchResult<TextSegment> langChainFullTextSearch(String queryText) {
         List<EmbeddingMatch<TextSegment>> matches = embeddingStore.fullTextSearch(queryText).stream()
             .limit(Math.max(maxResults, 1))
             .map(segment -> new EmbeddingMatch<>(1.0, null, null, segment))
             .toList();
         return new EmbeddingSearchResult<>(matches);
+    }
+
+    private EmbeddingSearchResult<TextSegment> filteredFullTextSearch(String queryText) throws Exception {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("size", Math.max(maxResults, 1));
+        root.putArray("_source").add("text").add("metadata");
+        ObjectNode bool = root.putObject("query").putObject("bool");
+        bool.putArray("must").addObject().putObject("match").putObject("text").put("query", queryText);
+        if (!knowledgeBaseIdSet.isEmpty()) {
+            ArrayNode terms = bool.putArray("filter").addObject().putObject("terms")
+                .putArray("metadata." + MetadataKeyConstant.DOC_ID + ".keyword");
+            knowledgeBaseIdSet.forEach(terms::add);
+        }
+
+        Request request = new Request("POST", "/" + indexName + "/_search");
+        request.setJsonEntity(objectMapper.writeValueAsString(root));
+        return parseSearchResponse(request, 0.0);
+    }
+
+    private EmbeddingSearchResult<TextSegment> parseSearchResponse(Request request, double minScore)
+        throws Exception {
+        try (InputStream content = restClient.performRequest(request).getEntity().getContent()) {
+            JsonNode hits = objectMapper.readTree(content).path("hits").path("hits");
+            List<EmbeddingMatch<TextSegment>> matches = new ArrayList<>();
+            for (JsonNode hit : hits) {
+                double score = hit.path("_score").asDouble(1.0);
+                if (minScore > 0 && score < minScore) {
+                    continue;
+                }
+                JsonNode source = hit.path("_source");
+                String text = source.path("text").asText("");
+                if (text.isBlank()) {
+                    continue;
+                }
+                Map<String, Object> metadataMap = objectMapper.convertValue(source.path("metadata"),
+                    new TypeReference<Map<String, Object>>() {});
+                TextSegment segment = new TextSegment(text, Metadata.from(metadataMap));
+                matches.add(new EmbeddingMatch<>(score, hit.path("_id").asText(null), null, segment));
+            }
+            return new EmbeddingSearchResult<>(matches);
+        }
+    }
+
+    private boolean isFullTextMode() {
+        return "full_text".equals(searchMode());
+    }
+
+    private String searchMode() {
+        return hybrid != null && hybrid.getMode() != null ? hybrid.getMode() : "hybrid";
     }
 
     private boolean matchesKnowledgeBaseFilter(Content content) {
@@ -217,18 +375,23 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         int maxChars = parentExpand.getMaxChars() > 0 ? parentExpand.getMaxChars() : Integer.MAX_VALUE;
         int maxSiblings = parentExpand.getMaxSiblings() > 0 ? parentExpand.getMaxSiblings() : Integer.MAX_VALUE;
         List<Content> expanded = new ArrayList<>(hits.size());
+        Set<String> seenTexts = new HashSet<>();
         for (Content hit : hits) {
             TextSegment seg = hit.textSegment();
             Metadata meta = seg.metadata();
             String expandedText = buildExpandedText(
                 seg.text(), meta, parentTextByChunkId, brothersByGroupId, maxChars, maxSiblings);
+            Content expandedContent;
             if (expandedText.equals(seg.text())) {
-                expanded.add(hit);
+                expandedContent = hit;
             } else {
                 // meta 已含 SCORE/EMBEDDING_ID（toContent 写入），仅追加 expanded 标记
                 Metadata enriched = meta.put("expanded", "1");
                 TextSegment expandedSeg = new TextSegment(expandedText, enriched);
-                expanded.add(Content.from(expandedSeg, hit.metadata()));
+                expandedContent = Content.from(expandedSeg, hit.metadata());
+            }
+            if (seenTexts.add(expandedContent.textSegment().text())) {
+                expanded.add(expandedContent);
             }
         }
         return expanded;
@@ -243,8 +406,25 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                      Map<String, List<KnowledgeBaseSegmentEntity>> brothersByGroupId,
                                      int maxChars, int maxSiblings) {
         StringBuilder sb = new StringBuilder();
+        appendTruncated(sb, hitText, maxChars);
 
-        // 父块在前（更高级标题章节，提供骨架上下文）
+        // 同组兄弟围绕命中 chunk 拼接，避免大组从头拼接时把真正命中的答案截掉。
+        String bid = meta.getString(MetadataKeyConstant.BROTHER_CHUNK_ID);
+        List<KnowledgeBaseSegmentEntity> brothers = bid != null ? brothersByGroupId.get(bid) : null;
+        if (brothers != null && brothers.size() > 1) {
+            int added = 1;
+            for (KnowledgeBaseSegmentEntity b : nearbyBrothers(brothers, meta, maxSiblings)) {
+                if (added >= maxSiblings) {
+                    break;
+                }
+                if (!isHitBrother(b, meta) && b.getText() != null && !b.getText().isBlank()) {
+                    appendTruncated(sb, b.getText(), maxChars);
+                    added++;
+                }
+            }
+        }
+
+        // 父块放在命中内容之后，保留章节骨架但不抢占答案片段预算。
         String pid = meta.getString(MetadataKeyConstant.PARENT_CHUNK_ID);
         if (pid != null) {
             String parentText = parentTextByChunkId.get(pid);
@@ -253,27 +433,55 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             }
         }
 
-        // 同组兄弟按序拼接（含命中 chunk 自身）；若命中 chunk 不在兄弟组（未超长切片），单用 hitText
-        String bid = meta.getString(MetadataKeyConstant.BROTHER_CHUNK_ID);
-        List<KnowledgeBaseSegmentEntity> brothers = bid != null ? brothersByGroupId.get(bid) : null;
-        if (brothers != null && brothers.size() > 1) {
-            int added = 0;
-            for (KnowledgeBaseSegmentEntity b : brothers) {
-                if (added >= maxSiblings) {
-                    break;
-                }
-                if (b.getText() != null && !b.getText().isBlank()) {
-                    appendTruncated(sb, b.getText(), maxChars);
-                    added++;
-                }
-            }
-        } else if (sb.length() == 0) {
-            // 无父无兄弟：直接返回原文本，避免无谓拷贝
-            return hitText;
-        } else {
-            appendTruncated(sb, hitText, maxChars);
-        }
         return sb.toString();
+    }
+
+    private List<KnowledgeBaseSegmentEntity> nearbyBrothers(
+        List<KnowledgeBaseSegmentEntity> brothers, Metadata meta, int maxSiblings) {
+        int hitIndex = findHitBrotherIndex(brothers, meta);
+        if (hitIndex < 0 || maxSiblings <= 1) {
+            return List.of();
+        }
+        int maxNeighbors = maxSiblings == Integer.MAX_VALUE ? Integer.MAX_VALUE : maxSiblings - 1;
+        List<KnowledgeBaseSegmentEntity> nearby = new ArrayList<>();
+        int left = hitIndex - 1;
+        int right = hitIndex + 1;
+        while (nearby.size() < maxNeighbors && (left >= 0 || right < brothers.size())) {
+            if (right < brothers.size()) {
+                nearby.add(brothers.get(right++));
+            }
+            if (nearby.size() >= maxNeighbors) {
+                break;
+            }
+            if (left >= 0) {
+                nearby.add(brothers.get(left--));
+            }
+        }
+        return nearby;
+    }
+
+    private int findHitBrotherIndex(List<KnowledgeBaseSegmentEntity> brothers, Metadata meta) {
+        String hitChunkId = meta.getString(MetadataKeyConstant.CHUNK_ID);
+        Integer hitBrotherIndex = meta.getInteger(MetadataKeyConstant.BROTHER_CHUNK_INDEX);
+        for (int i = 0; i < brothers.size(); i++) {
+            KnowledgeBaseSegmentEntity brother = brothers.get(i);
+            if (hitChunkId != null && hitChunkId.equals(brother.getChunkId())) {
+                return i;
+            }
+            if (hitBrotherIndex != null && hitBrotherIndex.equals(brother.getBrotherChunkIndex())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isHitBrother(KnowledgeBaseSegmentEntity brother, Metadata meta) {
+        String hitChunkId = meta.getString(MetadataKeyConstant.CHUNK_ID);
+        if (hitChunkId != null && hitChunkId.equals(brother.getChunkId())) {
+            return true;
+        }
+        Integer hitBrotherIndex = meta.getInteger(MetadataKeyConstant.BROTHER_CHUNK_INDEX);
+        return hitBrotherIndex != null && hitBrotherIndex.equals(brother.getBrotherChunkIndex());
     }
 
     private void appendTruncated(StringBuilder sb, String text, int maxChars) {

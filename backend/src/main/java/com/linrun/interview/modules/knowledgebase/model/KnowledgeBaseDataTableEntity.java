@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,12 +21,10 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "rag_evaluation_runs", indexes = {
-    @Index(name = "idx_rag_eval_created", columnList = "createdAt"),
-    @Index(name = "idx_rag_eval_hit_rate_created", columnList = "hitRate,createdAt"),
-    @Index(name = "idx_rag_evaluation_runs_user_id", columnList = "userId")
+@Table(name = "knowledge_base_data_tables", indexes = {
+    @Index(name = "idx_kb_data_tables_user_doc", columnList = "userId,docId")
 })
-public class RagEvaluationRunEntity {
+public class KnowledgeBaseDataTableEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,43 +33,39 @@ public class RagEvaluationRunEntity {
     @Column(nullable = false)
     private Long userId;
 
+    @Column(nullable = false)
+    private Long docId;
+
     @Column(nullable = false, length = 80, unique = true)
-    private String runId;
+    private String physicalTableName;
 
     @Column(nullable = false, length = 120)
-    private String title;
+    private String logicalName;
 
-    @Column(columnDefinition = "TEXT")
-    private String casesJson;
+    @Column(length = 500)
+    private String description;
 
-    @Column(columnDefinition = "TEXT")
-    private String knowledgeBaseIdsJson;
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String columnsJson;
 
-    private Integer totalCases;
-
-    private Integer hitCount;
-
-    private Double hitRate;
-
-    private Double meanReciprocalRank;
-
-    private Double ndcg;
-
-    private Double citationHitRate;
-
-    private Double citationCoverage;
-
-    private Double minScore;
-
-    private Integer topk;
+    @Column(nullable = false)
+    private Integer rowCount;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(nullable = false)
+    private LocalDateTime updatedAt;
+
     @PrePersist
     protected void onCreate() {
-        if (createdAt == null) {
-            createdAt = LocalDateTime.now();
-        }
+        LocalDateTime now = LocalDateTime.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }

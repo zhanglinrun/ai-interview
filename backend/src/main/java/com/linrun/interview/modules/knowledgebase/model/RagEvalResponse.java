@@ -9,11 +9,13 @@ public record RagEvalResponse(
     double hitRate,
     double mrr,
     double ndcg,
+    double citationHitRate,
+    double citationCoverage,
     List<ItemResult> items
 ) {
     public RagEvalResponse(int total, int k, double hitRate, double mrr, double ndcg,
                            List<ItemResult> items) {
-        this(null, total, k, hitRate, mrr, ndcg, items);
+        this(null, total, k, hitRate, mrr, ndcg, 0.0, 0.0, items);
     }
 
     public record ItemResult(
@@ -22,6 +24,17 @@ public record RagEvalResponse(
         int firstHitRank,
         double reciprocalRank,
         double ndcg,
-        List<String> retrievedChunkIds
+        double citationHitRate,
+        double citationCoverage,
+        List<String> retrievedChunkIds,
+        List<RetrievedSegment> retrievedSegments
+    ) {}
+
+    public record RetrievedSegment(
+        int rank,
+        String chunkId,
+        Long docId,
+        String snippet,
+        Double score
     ) {}
 }

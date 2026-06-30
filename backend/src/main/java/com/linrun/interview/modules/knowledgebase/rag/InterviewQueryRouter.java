@@ -39,6 +39,7 @@ public class InterviewQueryRouter implements QueryRouter {
     private final ChatModel chatModel;
     private final boolean enabled;
     private final Consumer<String> progressCallback;
+    private final RagQueryTrace trace;
     private final AtomicBoolean routeProgressSent = new AtomicBoolean(false);
 
     public InterviewQueryRouter(ContentRetriever elasticsearchRetriever) {
@@ -50,11 +51,21 @@ public class InterviewQueryRouter implements QueryRouter {
                                 ChatModel chatModel,
                                 boolean enabled,
                                 Consumer<String> progressCallback) {
+        this(elasticsearchRetriever, sqlRetriever, chatModel, enabled, progressCallback, null);
+    }
+
+    public InterviewQueryRouter(ContentRetriever elasticsearchRetriever,
+                                ContentRetriever sqlRetriever,
+                                ChatModel chatModel,
+                                boolean enabled,
+                                Consumer<String> progressCallback,
+                                RagQueryTrace trace) {
         this.elasticsearchRetriever = elasticsearchRetriever;
         this.sqlRetriever = sqlRetriever;
         this.chatModel = chatModel;
         this.enabled = enabled;
         this.progressCallback = progressCallback;
+        this.trace = trace;
     }
 
     @Override
@@ -77,18 +88,28 @@ public class InterviewQueryRouter implements QueryRouter {
     private String routeStrategy(String question) {
         String rule = ruleBasedStrategy(question);
         if (rule != null) {
+            if (trace != null) {
+                trace.route(rule, "规则命中结构化查询关键词");
+            }
             return rule;
         }
         try {
             String response = chatModel.chat(ROUTE_PROMPT.apply(Map.of("query", question)).text());
             var node = JsonUtil.fixAndParse(response);
             String strategy = node.path("strategy").asText("knowledge_base");
-            return switch (strategy) {
+            String normalized = switch (strategy) {
                 case "relational_db", "hybrid" -> strategy;
                 default -> "knowledge_base";
             };
+            if (trace != null) {
+                trace.route(normalized, node.path("reasoning").asText(""));
+            }
+            return normalized;
         } catch (Exception e) {
             log.warn("[InterviewQueryRouter] LLM 路由失败，降级 ES: {}", e.getMessage(), e);
+            if (trace != null) {
+                trace.route("knowledge_base", "路由失败，降级知识库检索");
+            }
             return "knowledge_base";
         }
     }

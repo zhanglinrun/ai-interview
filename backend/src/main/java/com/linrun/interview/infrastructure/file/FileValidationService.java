@@ -105,6 +105,17 @@ public class FileValidationService {
                lowerFileName.endsWith(".markdown") ||
                lowerFileName.endsWith(".mdown");
     }
+
+    public boolean isSpreadsheetExtension(String fileName) {
+        if (fileName == null) {
+            return false;
+        }
+        String lowerFileName = fileName.toLowerCase();
+        return lowerFileName.endsWith(".csv") ||
+               lowerFileName.endsWith(".tsv") ||
+               lowerFileName.endsWith(".xls") ||
+               lowerFileName.endsWith(".xlsx");
+    }
     
     /**
      * 检查MIME类型是否为知识库支持的格式
@@ -119,9 +130,13 @@ public class FileValidationService {
                lowerContentType.contains("msword") ||
                lowerContentType.contains("wordprocessingml") ||
                lowerContentType.contains("text/plain") ||
+               lowerContentType.contains("text/csv") ||
+               lowerContentType.contains("tab-separated-values") ||
                lowerContentType.contains("text/markdown") ||
                lowerContentType.contains("text/x-markdown") ||
                lowerContentType.contains("text/x-web-markdown") ||
+               lowerContentType.contains("spreadsheetml") ||
+               lowerContentType.contains("application/vnd.ms-excel") ||
                lowerContentType.contains("application/rtf");
     }
 }

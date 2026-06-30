@@ -23,7 +23,7 @@ import java.util.Map;
  * <p>对齐 know-engine 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），但做成
  * <b>本地/云端可配置 + 自动降级</b>（亮点3）：
  * <ul>
- *   <li>{@code provider=local}（默认）：委托 {@link LocalOnnxRerankModel} 进程内跑 BGE-RERANKER，
+ *   <li>{@code provider=local}：委托 {@link LocalOnnxRerankModel} 进程内跑 BGE-RERANKER，
  *       模型缺失/加载失败时 log.warn 后降级云端，不抛异常中断 RAG</li>
  *   <li>{@code provider=cloud}：调 DashScope gte-rerank 远程（非 OpenAI 兼容格式，RestClient 直连）</li>
  *   <li>云端不可用（无 API Key）时退回等分（0.0）让上层退回原序</li>
@@ -74,8 +74,11 @@ public class RerankService implements ScoringModel {
             .build();
 
         this.cloudAvailable = apiKey != null && !apiKey.isBlank();
-        this.localRerankModel = new LocalOnnxRerankModel(rerankProps.getLocal());
-        this.effectiveProvider = resolveEffectiveProvider(rerankProps.getProvider());
+        String configuredProvider = rerankProps.getProvider();
+        this.localRerankModel = PROVIDER_CLOUD.equalsIgnoreCase(configuredProvider)
+            ? null
+            : new LocalOnnxRerankModel(rerankProps.getLocal());
+        this.effectiveProvider = resolveEffectiveProvider(configuredProvider);
         if (!cloudAvailable) {
             log.warn("[RerankService] 未找到 dashscope API Key，云端 rerank 不可用");
         }
@@ -91,8 +94,8 @@ public class RerankService implements ScoringModel {
         if (PROVIDER_CLOUD.equalsIgnoreCase(configured)) {
             return PROVIDER_CLOUD;
         }
-        // 默认 / local：先试本地，不可用降级 cloud
-        if (localRerankModel.isAvailable()) {
+        // local：先试本地，不可用降级 cloud
+        if (localRerankModel != null && localRerankModel.isAvailable()) {
             return PROVIDER_LOCAL;
         }
         if (cloudAvailable) {
@@ -122,7 +125,9 @@ public class RerankService implements ScoringModel {
             return Response.from(zeroScores(segments.size()));
         }
         try {
-            if (PROVIDER_LOCAL.equals(effectiveProvider) && localRerankModel.isAvailable()) {
+            if (PROVIDER_LOCAL.equals(effectiveProvider)
+                && localRerankModel != null
+                && localRerankModel.isAvailable()) {
                 return localRerankModel.scoreAll(segments, query);
             }
             if (cloudAvailable) {

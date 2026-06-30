@@ -29,6 +29,10 @@ export default defineConfig({
         target: 'http://localhost:8082',
         changeOrigin: true,
       },
+      '/ws': {
+        target: 'ws://localhost:8082',
+        ws: true,
+      },
     },
     // 忽略 @ricky0123/vad-web 的 sourcemap 警告
     sourcemapIgnoreList: (relativeSourcePath) => {

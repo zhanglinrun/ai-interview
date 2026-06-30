@@ -82,6 +82,14 @@ public class KnowledgeBaseEntity {
     @Column(length = 500)
     private String description;
 
+    @Column(length = 80)
+    private String dataTableName;
+
+    @Column(columnDefinition = "TEXT")
+    private String dataSchemaJson;
+
+    private Integer dataRowCount;
+
     // 文档状态机（对齐 know-engine DocumentStatus）
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
@@ -231,6 +239,30 @@ public class KnowledgeBaseEntity {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getDataTableName() {
+        return dataTableName;
+    }
+
+    public void setDataTableName(String dataTableName) {
+        this.dataTableName = dataTableName;
+    }
+
+    public String getDataSchemaJson() {
+        return dataSchemaJson;
+    }
+
+    public void setDataSchemaJson(String dataSchemaJson) {
+        this.dataSchemaJson = dataSchemaJson;
+    }
+
+    public Integer getDataRowCount() {
+        return dataRowCount;
+    }
+
+    public void setDataRowCount(Integer dataRowCount) {
+        this.dataRowCount = dataRowCount;
     }
 
     public DocumentStatus getDocStatus() {

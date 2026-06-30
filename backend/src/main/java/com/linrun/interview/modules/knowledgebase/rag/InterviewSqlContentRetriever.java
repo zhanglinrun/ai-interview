@@ -11,9 +11,17 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDate;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 面试业务 Text2SQL 检索器：只暴露白名单表结构，失败降级 ES。
@@ -81,13 +89,27 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
 
     private final SqlDatabaseContentRetriever sqlRetriever;
     private final ContentRetriever fallbackRetriever;
+    private final int maxRows;
 
     public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
                                         ContentRetriever fallbackRetriever) {
+        this(dataSource, chatModel, fallbackRetriever, "", Set.of(), 8, 100);
+    }
+
+    public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
+                                        ContentRetriever fallbackRetriever,
+                                        String dynamicDatabaseStructure,
+                                        Collection<String> dynamicTables,
+                                        int queryTimeoutSeconds,
+                                        int maxRows) {
+        this.maxRows = Math.max(maxRows, 1);
+        String databaseStructure = DATABASE_STRUCTURE
+            + (dynamicDatabaseStructure == null ? "" : dynamicDatabaseStructure);
         this.sqlRetriever = SqlDatabaseContentRetriever.builder()
-            .dataSource(new ReadOnlyDataSource(dataSource))
+            .dataSource(new SafeReadOnlyDataSource(dataSource, allowedTables(dynamicTables),
+                queryTimeoutSeconds, this.maxRows))
             .sqlDialect("PostgreSQL")
-            .databaseStructure(DATABASE_STRUCTURE)
+            .databaseStructure(databaseStructure)
             .chatModel(chatModel)
             .maxRetries(1)
             .build();
@@ -115,8 +137,9 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
         return """
             当前用户 user_id = %d。今天日期是 %s。
             只能查询上述白名单表，只能生成 SELECT 语句，并且必须在 SQL 中加入 user_id = %d 的过滤条件。
+            返回明细数据时最多返回 %d 行；需要限制明细行数时使用 LIMIT %d。
             用户问题：%s
-            """.formatted(userId, LocalDate.now(), userId, question);
+            """.formatted(userId, LocalDate.now(), userId, maxRows, maxRows, question);
     }
 
     private boolean isSqlResultEmpty(List<Content> results) {
@@ -135,6 +158,20 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
         }
         int dataStart = text.indexOf('\n', columnStart + 2);
         return dataStart < 0 || text.substring(dataStart + 1).trim().isEmpty();
+    }
+
+    private Set<String> allowedTables(Collection<String> dynamicTables) {
+        Set<String> tables = new LinkedHashSet<>(List.of(
+            "resumes",
+            "resume_analyses",
+            "interview_sessions",
+            "interview_answers",
+            "interview_schedule"
+        ));
+        if (dynamicTables != null) {
+            tables.addAll(dynamicTables);
+        }
+        return tables;
     }
 }
 
@@ -157,5 +194,162 @@ final class ReadOnlyDataSource extends DelegatingDataSource {
     private Connection readOnly(Connection connection) throws SQLException {
         connection.setReadOnly(true);
         return connection;
+    }
+}
+
+final class SafeReadOnlyDataSource extends DelegatingDataSource {
+
+    private final Set<String> allowedTables;
+    private final int queryTimeoutSeconds;
+    private final int maxRows;
+
+    SafeReadOnlyDataSource(DataSource targetDataSource, Set<String> allowedTables,
+                           int queryTimeoutSeconds, int maxRows) {
+        super(targetDataSource);
+        this.allowedTables = allowedTables;
+        this.queryTimeoutSeconds = Math.max(queryTimeoutSeconds, 1);
+        this.maxRows = Math.max(maxRows, 1);
+    }
+
+    @Override
+    public Connection getConnection() throws SQLException {
+        return wrap(super.getConnection());
+    }
+
+    @Override
+    public Connection getConnection(String username, String password) throws SQLException {
+        return wrap(super.getConnection(username, password));
+    }
+
+    private Connection wrap(Connection connection) throws SQLException {
+        connection.setReadOnly(true);
+        return SqlSafety.proxy(connection, allowedTables, queryTimeoutSeconds, maxRows);
+    }
+}
+
+final class SqlSafety {
+
+    private static final Pattern DANGEROUS = Pattern.compile(
+        "\\b(insert|update|delete|merge|create|alter|drop|truncate|grant|revoke|copy|call|execute|vacuum|analyze)\\b",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern TABLE_REF = Pattern.compile(
+        "\\b(?:from|join)\\s+\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CTE_NAME = Pattern.compile(
+        "(?:\\bwith\\s+(?:recursive\\s+)?|,\\s*)\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?\\s+as\\s*\\(",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern FROM_CLAUSE = Pattern.compile(
+        "\\bfrom\\b(.*?)(\\bwhere\\b|\\bgroup\\b|\\border\\b|\\blimit\\b|\\boffset\\b|\\bunion\\b|$)",
+        Pattern.CASE_INSENSITIVE);
+
+    private SqlSafety() {
+    }
+
+    static Connection proxy(Connection connection, Set<String> allowedTables, int timeoutSeconds, int maxRows) {
+        return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+            Connection.class.getClassLoader(),
+            new Class<?>[]{Connection.class},
+            (proxy, method, args) -> {
+                String name = method.getName();
+                boolean preparedSql = ("prepareStatement".equals(name) || "prepareCall".equals(name))
+                    && args != null && args.length > 0 && args[0] instanceof String;
+                if (preparedSql) {
+                    validate((String) args[0], allowedTables);
+                }
+                Object result = invoke(connection, method, args);
+                if ("createStatement".equals(name) && result instanceof Statement statement) {
+                    return statementProxy(statement, allowedTables, timeoutSeconds, maxRows);
+                }
+                if (preparedSql && result instanceof PreparedStatement statement) {
+                    configure(statement, timeoutSeconds, maxRows);
+                }
+                return result;
+            });
+    }
+
+    private static Statement statementProxy(Statement statement, Set<String> allowedTables,
+                                            int timeoutSeconds, int maxRows) throws SQLException {
+        configure(statement, timeoutSeconds, maxRows);
+        return (Statement) java.lang.reflect.Proxy.newProxyInstance(
+            Statement.class.getClassLoader(),
+            new Class<?>[]{Statement.class},
+            (proxy, method, args) -> {
+                if (isStatementSqlMethod(method.getName())
+                    && args != null && args.length > 0 && args[0] instanceof String sql) {
+                    validate(sql, allowedTables);
+                }
+                return invoke(statement, method, args);
+            });
+    }
+
+    private static boolean isStatementSqlMethod(String methodName) {
+        return "execute".equals(methodName)
+            || "executeQuery".equals(methodName)
+            || "executeUpdate".equals(methodName)
+            || "executeLargeUpdate".equals(methodName)
+            || "addBatch".equals(methodName);
+    }
+
+    private static void configure(Statement statement, int timeoutSeconds, int maxRows) throws SQLException {
+        statement.setQueryTimeout(Math.max(timeoutSeconds, 1));
+        statement.setMaxRows(Math.max(maxRows, 1));
+    }
+
+    private static Object invoke(Object target, java.lang.reflect.Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw e.getTargetException();
+        }
+    }
+
+    static void validate(String sql, Set<String> allowedTables) throws SQLException {
+        String normalized = stripComments(sql).trim().toLowerCase(Locale.ROOT);
+        if (!(normalized.startsWith("select ") || normalized.startsWith("with "))) {
+            throw new SQLException("Text2SQL 只允许 SELECT/WITH 查询");
+        }
+        if (normalized.contains(";") || DANGEROUS.matcher(normalized).find()) {
+            throw new SQLException("Text2SQL 查询包含危险语句");
+        }
+        if (hasCommaJoin(normalized)) {
+            throw new SQLException("Text2SQL 不允许逗号连接表，请使用显式 JOIN");
+        }
+        Set<String> cteNames = cteNames(normalized);
+        boolean sawBaseTable = false;
+        Matcher matcher = TABLE_REF.matcher(normalized);
+        while (matcher.find()) {
+            String table = matcher.group(1);
+            if (allowedTables.contains(table)) {
+                sawBaseTable = true;
+            } else if (!cteNames.contains(table)) {
+                throw new SQLException("Text2SQL 表不在白名单: " + table);
+            }
+        }
+        if (!sawBaseTable) {
+            throw new SQLException("Text2SQL 查询必须访问白名单表");
+        }
+    }
+
+    private static Set<String> cteNames(String normalizedSql) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher matcher = CTE_NAME.matcher(normalizedSql);
+        while (matcher.find()) {
+            names.add(matcher.group(1));
+        }
+        return names;
+    }
+
+    private static boolean hasCommaJoin(String normalizedSql) {
+        Matcher matcher = FROM_CLAUSE.matcher(normalizedSql);
+        while (matcher.find()) {
+            if (matcher.group(1).contains(",")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String stripComments(String sql) {
+        return sql.replaceAll("(?s)/\\*.*?\\*/", " ")
+            .replaceAll("(?m)--.*$", " ");
     }
 }

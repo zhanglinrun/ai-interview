@@ -17,7 +17,7 @@ docker run --rm -i grafana/k6 run - < loadtest/rag-query.js
 
 | 脚本 | 压的接口 | 覆盖链路 |
 | --- | --- | --- |
-| `rag-query.js` | `POST /api/knowledgebase/query` | 查询改写 + 混合检索（向量 + 关键词 RRF）+ rerank + LLM 生成 |
+| `rag-query.js` | `POST /api/knowledgebase/query` | 查询改写 + ES KNN/全文检索 + rerank + LLM 生成 |
 | `interview-create.js` | `POST /api/interview/sessions` | Skill 出题（同步生成题目） |
 
 两个脚本都支持两种负载档位：
@@ -34,14 +34,16 @@ docker run --rm -i grafana/k6 run - < loadtest/rag-query.js
 # bash: export TOKEN="你的 accessToken"
 
 # RAG 问答，默认档位
-k6 run -e BASE_URL=http://localhost:8080 -e TOKEN=$TOKEN -e KB_IDS=1 loadtest/rag-query.js
+k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=$TOKEN -e KB_IDS=1 loadtest/rag-query.js
 
 # RAG 问答，固定 20 并发压 2 分钟
-k6 run -e BASE_URL=http://localhost:8080 -e TOKEN=$TOKEN -e KB_IDS=1 -e VUS=20 -e DURATION=2m loadtest/rag-query.js
+k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=$TOKEN -e KB_IDS=1 -e VUS=20 -e DURATION=2m loadtest/rag-query.js
 
 # 面试出题
-k6 run -e BASE_URL=http://localhost:8080 -e TOKEN=$TOKEN -e SKILL_ID=java-backend loadtest/interview-create.js
+k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=$TOKEN -e SKILL_ID=java-backend loadtest/interview-create.js
 ```
+
+完整 Docker 环境则把 `BASE_URL` 换成 `http://localhost:28082`。
 
 跑完看 summary 里的 `http_req_duration`（含 p95/p99/max）和 `http_reqs`（吞吐），以及自定义的 `*_fail` 业务失败率。
 
@@ -68,7 +70,7 @@ k6 run -e KB_IDS=1 -e VUS=20 -e DURATION=2m loadtest/rag-query.js   # 再记一�
 
 ### B. 批量向量化吞吐
 
-知识库向量化已迁至 Spring 事件 + 补偿任务链路（`DocumentChunkedEvent` → `@Async` 嵌入写 ES），无文档级并行度可调。用批量上传接口压，从 Grafana 的「异步管道」面板观察 Stream 积压清空速度，或看后端日志里每个文档的完成时间。
+知识库向量化已迁至 Spring 事件 + 补偿任务链路（`DocumentChunkedEvent` → `@Async` 嵌入写 ES），不走 Redis Stream。用批量上传接口压，观察文档状态从 `CHUNKED` 到 `VECTOR_STORED` 的耗时，或看后端日志里每个文档的完成时间。
 
 ## 配合监控看
 
