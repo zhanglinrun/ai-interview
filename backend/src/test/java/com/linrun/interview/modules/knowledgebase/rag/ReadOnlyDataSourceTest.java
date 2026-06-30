@@ -51,6 +51,22 @@ class ReadOnlyDataSourceTest {
     }
 
     @Test
+    @DisplayName("SQL 安全校验应强制当前用户过滤")
+    void enforcesCurrentUserScope() throws Exception {
+        assertThatThrownBy(() -> SqlSafety.validate("select * from resumes", Set.of("resumes"), 7L))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate("select * from resumes where user_id = 8", Set.of("resumes"), 7L))
+            .isInstanceOf(SQLException.class);
+
+        assertThatThrownBy(() -> SqlSafety.validate(
+            "select * from resumes where user_id = 7 or user_id = 8", Set.of("resumes"), 7L))
+            .isInstanceOf(SQLException.class);
+
+        SqlSafety.validate("select * from resumes where user_id = 7", Set.of("resumes"), 7L);
+    }
+
+    @Test
     @DisplayName("安全连接应设置 SQL 超时和最大返回行数")
     void setsTimeoutAndMaxRows() throws Exception {
         Connection target = mock(Connection.class);

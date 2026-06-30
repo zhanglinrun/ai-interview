@@ -112,6 +112,27 @@ export interface RagEvalResponse {
   ndcg: number;
   citationHitRate: number;
   citationCoverage: number;
+  items: RagEvalItemResult[];
+}
+
+export interface RagEvalItemResult {
+  question: string;
+  hit: boolean;
+  firstHitRank: number;
+  reciprocalRank: number;
+  ndcg: number;
+  citationHitRate: number;
+  citationCoverage: number;
+  retrievedChunkIds: string[];
+  retrievedSegments: RagEvalRetrievedSegment[];
+}
+
+export interface RagEvalRetrievedSegment {
+  rank: number;
+  chunkId: string | null;
+  docId: number | null;
+  snippet: string;
+  score: number | null;
 }
 
 export interface DataTablePreview {
@@ -131,6 +152,7 @@ export interface RagQueryTrace {
   routeStrategy: string | null;
   routeReasoning: string | null;
   retrievedJson: string | null;
+  rerankedJson: string | null;
   finalSourcesJson: string | null;
   answer: string | null;
   confidence: number | null;

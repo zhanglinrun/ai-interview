@@ -43,6 +43,35 @@ interface KnowledgeBaseManagePageProps {
   onChat: () => void;
 }
 
+interface TraceContent {
+  rank: number;
+  docId: string | null;
+  chunkId: string | null;
+  score: number | null;
+  rerankScore: number | null;
+  snippet: string;
+}
+
+function parseTraceList(json: string | null): TraceContent[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed as TraceContent[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseSourceList(json: string | null): Array<{ documentTitle?: string; snippet?: string; similarity?: number | null }> {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeBaseManagePageProps) {
   const [stats, setStats] = useState<KnowledgeBaseStats | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([]);
@@ -821,29 +850,69 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <div className="py-12 text-center text-slate-400">加载中...</div>
                 ) : traces.length === 0 ? (
                   <div className="py-12 text-center text-slate-400">暂无 Trace</div>
-                ) : traces.map((trace) => (
-                  <div key={trace.traceId} className="p-4 rounded-lg border border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-slate-800 dark:text-white truncate">{trace.question}</p>
-                      <span className="text-xs text-slate-400 shrink-0">{formatDateTime(trace.createdAt)}</span>
+                ) : traces.map((trace) => {
+                  const retrieved = parseTraceList(trace.retrievedJson).slice(0, 5);
+                  const reranked = parseTraceList(trace.rerankedJson).slice(0, 5);
+                  const sources = parseSourceList(trace.finalSourcesJson).slice(0, 3);
+                  return (
+                    <div key={trace.traceId} className="p-4 rounded-lg border border-slate-100 dark:border-slate-700">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-slate-800 dark:text-white truncate">{trace.question}</p>
+                        <span className="text-xs text-slate-400 shrink-0">{formatDateTime(trace.createdAt)}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span>路由：{trace.routeStrategy || '-'}</span>
+                        <span>耗时：{trace.latencyMs ?? '-'}ms</span>
+                        <span>置信度：{trace.confidence ?? '-'}</span>
+                      </div>
+                      {trace.rewrittenQuestion && (
+                        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                          改写：{trace.rewrittenQuestion}
+                        </p>
+                      )}
+                      {trace.routeReasoning && (
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          原因：{trace.routeReasoning}
+                        </p>
+                      )}
+                      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                        {([
+                          ['原始召回', retrieved, 'score'],
+                          ['Rerank 顺序', reranked, 'rerankScore'],
+                        ] as Array<[string, TraceContent[], 'score' | 'rerankScore']>).map(([title, items, scoreKey]) => (
+                          <div key={title} className="rounded-lg bg-slate-50 dark:bg-slate-700/60 p-3">
+                            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{title}</p>
+                            {items.length === 0 ? (
+                              <p className="text-xs text-slate-400">无记录</p>
+                            ) : items.map(item => (
+                              <div key={`${title}-${item.rank}-${item.chunkId}`} className="mb-2 last:mb-0">
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                  #{item.rank} chunk={item.chunkId || '-'} {scoreKey === 'score' ? 'score' : 'rerank'}={
+                                    scoreKey === 'score' ? item.score ?? '-' : item.rerankScore ?? '-'
+                                  }
+                                </p>
+                                <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-2">{item.snippet}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                        <div className="rounded-lg bg-slate-50 dark:bg-slate-700/60 p-3">
+                          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">最终引用</p>
+                          {sources.length === 0 ? (
+                            <p className="text-xs text-slate-400">无引用</p>
+                          ) : sources.map((source, index) => (
+                            <div key={`${trace.traceId}-source-${index}`} className="mb-2 last:mb-0">
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                [{index + 1}] {source.documentTitle || '-'} similarity={source.similarity ?? '-'}
+                              </p>
+                              <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-2">{source.snippet || ''}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-500 dark:text-slate-400">
-                      <span>路由：{trace.routeStrategy || '-'}</span>
-                      <span>耗时：{trace.latencyMs ?? '-'}ms</span>
-                      <span>置信度：{trace.confidence ?? '-'}</span>
-                    </div>
-                    {trace.rewrittenQuestion && (
-                      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        改写：{trace.rewrittenQuestion}
-                      </p>
-                    )}
-                    {trace.routeReasoning && (
-                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        原因：{trace.routeReasoning}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </motion.div>
           </motion.div>

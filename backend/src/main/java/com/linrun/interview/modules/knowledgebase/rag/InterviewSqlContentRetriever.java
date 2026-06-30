@@ -90,10 +90,12 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
     private final SqlDatabaseContentRetriever sqlRetriever;
     private final ContentRetriever fallbackRetriever;
     private final int maxRows;
+    private final Long userId;
 
     public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
                                         ContentRetriever fallbackRetriever) {
-        this(dataSource, chatModel, fallbackRetriever, "", Set.of(), 8, 100);
+        this(dataSource, chatModel, fallbackRetriever, "", Set.of(), 8, 100,
+            UserContext.requireUserId());
     }
 
     public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
@@ -102,12 +104,24 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
                                         Collection<String> dynamicTables,
                                         int queryTimeoutSeconds,
                                         int maxRows) {
+        this(dataSource, chatModel, fallbackRetriever, dynamicDatabaseStructure, dynamicTables,
+            queryTimeoutSeconds, maxRows, UserContext.requireUserId());
+    }
+
+    public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
+                                        ContentRetriever fallbackRetriever,
+                                        String dynamicDatabaseStructure,
+                                        Collection<String> dynamicTables,
+                                        int queryTimeoutSeconds,
+                                        int maxRows,
+                                        Long userId) {
         this.maxRows = Math.max(maxRows, 1);
+        this.userId = userId;
         String databaseStructure = DATABASE_STRUCTURE
             + (dynamicDatabaseStructure == null ? "" : dynamicDatabaseStructure);
         this.sqlRetriever = SqlDatabaseContentRetriever.builder()
             .dataSource(new SafeReadOnlyDataSource(dataSource, allowedTables(dynamicTables),
-                queryTimeoutSeconds, this.maxRows))
+                queryTimeoutSeconds, this.maxRows, userId))
             .sqlDialect("PostgreSQL")
             .databaseStructure(databaseStructure)
             .chatModel(chatModel)
@@ -133,7 +147,6 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
     }
 
     private String buildScopedQuestion(String question) {
-        Long userId = UserContext.requireUserId();
         return """
             当前用户 user_id = %d。今天日期是 %s。
             只能查询上述白名单表，只能生成 SELECT 语句，并且必须在 SQL 中加入 user_id = %d 的过滤条件。
@@ -202,13 +215,15 @@ final class SafeReadOnlyDataSource extends DelegatingDataSource {
     private final Set<String> allowedTables;
     private final int queryTimeoutSeconds;
     private final int maxRows;
+    private final Long userId;
 
     SafeReadOnlyDataSource(DataSource targetDataSource, Set<String> allowedTables,
-                           int queryTimeoutSeconds, int maxRows) {
+                           int queryTimeoutSeconds, int maxRows, Long userId) {
         super(targetDataSource);
         this.allowedTables = allowedTables;
         this.queryTimeoutSeconds = Math.max(queryTimeoutSeconds, 1);
         this.maxRows = Math.max(maxRows, 1);
+        this.userId = userId;
     }
 
     @Override
@@ -223,7 +238,7 @@ final class SafeReadOnlyDataSource extends DelegatingDataSource {
 
     private Connection wrap(Connection connection) throws SQLException {
         connection.setReadOnly(true);
-        return SqlSafety.proxy(connection, allowedTables, queryTimeoutSeconds, maxRows);
+        return SqlSafety.proxy(connection, allowedTables, queryTimeoutSeconds, maxRows, userId);
     }
 }
 
@@ -240,11 +255,18 @@ final class SqlSafety {
     private static final Pattern FROM_CLAUSE = Pattern.compile(
         "\\bfrom\\b(.*?)(\\bwhere\\b|\\bgroup\\b|\\border\\b|\\blimit\\b|\\boffset\\b|\\bunion\\b|$)",
         Pattern.CASE_INSENSITIVE);
+    private static final Pattern USER_FILTER = Pattern.compile(
+        "(?:\\b[a-zA-Z_][a-zA-Z0-9_]*\\.)?\\buser_id\\b\\s*=\\s*(\\d+)");
 
     private SqlSafety() {
     }
 
     static Connection proxy(Connection connection, Set<String> allowedTables, int timeoutSeconds, int maxRows) {
+        return proxy(connection, allowedTables, timeoutSeconds, maxRows, null);
+    }
+
+    static Connection proxy(Connection connection, Set<String> allowedTables, int timeoutSeconds, int maxRows,
+                            Long userId) {
         return (Connection) java.lang.reflect.Proxy.newProxyInstance(
             Connection.class.getClassLoader(),
             new Class<?>[]{Connection.class},
@@ -253,11 +275,11 @@ final class SqlSafety {
                 boolean preparedSql = ("prepareStatement".equals(name) || "prepareCall".equals(name))
                     && args != null && args.length > 0 && args[0] instanceof String;
                 if (preparedSql) {
-                    validate((String) args[0], allowedTables);
+                    validate((String) args[0], allowedTables, userId);
                 }
                 Object result = invoke(connection, method, args);
                 if ("createStatement".equals(name) && result instanceof Statement statement) {
-                    return statementProxy(statement, allowedTables, timeoutSeconds, maxRows);
+                    return statementProxy(statement, allowedTables, timeoutSeconds, maxRows, userId);
                 }
                 if (preparedSql && result instanceof PreparedStatement statement) {
                     configure(statement, timeoutSeconds, maxRows);
@@ -267,7 +289,7 @@ final class SqlSafety {
     }
 
     private static Statement statementProxy(Statement statement, Set<String> allowedTables,
-                                            int timeoutSeconds, int maxRows) throws SQLException {
+                                            int timeoutSeconds, int maxRows, Long userId) throws SQLException {
         configure(statement, timeoutSeconds, maxRows);
         return (Statement) java.lang.reflect.Proxy.newProxyInstance(
             Statement.class.getClassLoader(),
@@ -275,7 +297,7 @@ final class SqlSafety {
             (proxy, method, args) -> {
                 if (isStatementSqlMethod(method.getName())
                     && args != null && args.length > 0 && args[0] instanceof String sql) {
-                    validate(sql, allowedTables);
+                    validate(sql, allowedTables, userId);
                 }
                 return invoke(statement, method, args);
             });
@@ -303,6 +325,10 @@ final class SqlSafety {
     }
 
     static void validate(String sql, Set<String> allowedTables) throws SQLException {
+        validate(sql, allowedTables, null);
+    }
+
+    static void validate(String sql, Set<String> allowedTables, Long userId) throws SQLException {
         String normalized = stripComments(sql).trim().toLowerCase(Locale.ROOT);
         if (!(normalized.startsWith("select ") || normalized.startsWith("with "))) {
             throw new SQLException("Text2SQL 只允许 SELECT/WITH 查询");
@@ -326,6 +352,29 @@ final class SqlSafety {
         }
         if (!sawBaseTable) {
             throw new SQLException("Text2SQL 查询必须访问白名单表");
+        }
+        if (userId != null) {
+            validateUserScope(normalized, userId);
+        }
+    }
+
+    private static void validateUserScope(String normalizedSql, Long userId) throws SQLException {
+        if (!normalizedSql.contains(" where ")) {
+            throw new SQLException("Text2SQL 查询必须包含 user_id 过滤条件");
+        }
+        if (Pattern.compile("\\bor\\b").matcher(normalizedSql).find()) {
+            throw new SQLException("Text2SQL 查询不允许 OR，避免绕过 user_id 过滤");
+        }
+        Matcher matcher = USER_FILTER.matcher(normalizedSql);
+        boolean found = false;
+        while (matcher.find()) {
+            found = true;
+            if (!String.valueOf(userId).equals(matcher.group(1))) {
+                throw new SQLException("Text2SQL user_id 与当前用户不一致");
+            }
+        }
+        if (!found) {
+            throw new SQLException("Text2SQL 查询必须包含当前用户 user_id 过滤条件");
         }
     }
 

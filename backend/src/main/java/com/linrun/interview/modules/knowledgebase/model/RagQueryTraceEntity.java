@@ -54,6 +54,9 @@ public class RagQueryTraceEntity {
     private String retrievedJson;
 
     @Column(columnDefinition = "TEXT")
+    private String rerankedJson;
+
+    @Column(columnDefinition = "TEXT")
     private String finalSourcesJson;
 
     @Column(columnDefinition = "TEXT")

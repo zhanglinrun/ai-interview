@@ -934,22 +934,46 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                 <p className="mt-2 text-sm text-red-500">{evalError}</p>
               )}
               {evalResult && (
-                <div className="grid grid-cols-5 gap-2 my-4 text-center">
-                  {[
-                    ['Hit@K', evalResult.hitRate],
-                    ['MRR', evalResult.mrr],
-                    ['NDCG', evalResult.ndcg],
-                    ['引用命中', evalResult.citationHitRate],
-                    ['覆盖率', evalResult.citationCoverage],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg bg-slate-50 dark:bg-slate-700 p-3">
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
-                      <p className="text-lg font-semibold text-slate-900 dark:text-white">
-                        {Number(value).toFixed(2)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div className="grid grid-cols-5 gap-2 my-4 text-center">
+                    {[
+                      ['Hit@K', evalResult.hitRate],
+                      ['MRR', evalResult.mrr],
+                      ['NDCG', evalResult.ndcg],
+                      ['引用命中', evalResult.citationHitRate],
+                      ['覆盖率', evalResult.citationCoverage],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg bg-slate-50 dark:bg-slate-700 p-3">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
+                        <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                          {Number(value).toFixed(2)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto space-y-3 pr-1">
+                    {evalResult.items.map((item, index) => (
+                      <div key={`${item.question}-${index}`} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{item.question}</p>
+                          <span className={`text-xs font-medium ${item.hit ? 'text-green-600' : 'text-red-500'}`}>
+                            {item.hit ? `命中 #${item.firstHitRank}` : '未命中'}
+                          </span>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {item.retrievedSegments.slice(0, evalResult.k).map(segment => (
+                            <div key={`${segment.rank}-${segment.chunkId}`} className="rounded bg-slate-50 dark:bg-slate-700/60 p-2">
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                #{segment.rank} chunk={segment.chunkId || '-'} doc={segment.docId ?? '-'} score={segment.score ?? '-'}
+                              </p>
+                              <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-2">{segment.snippet}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
               <div className="flex justify-end gap-3 mt-4">
                 <button
