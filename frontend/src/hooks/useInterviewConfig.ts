@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import { skillApi, type SkillDTO, type CategoryDTO } from '../api/skill';
 import { historyApi, type ResumeListItem } from '../api/history';
+import { knowledgeBaseApi, type KnowledgeBaseItem } from '../api/knowledgebase';
 import {getErrorMessage} from '../api/request';
 import { getSkillIcon } from '../utils/skillIcons';
 
@@ -60,6 +61,9 @@ export function useInterviewConfig(options?: {
   const [parsedCustomJdText, setParsedCustomJdText] = useState('');
   const [customCategories, setCustomCategories] = useState<CategoryDTO[]>([]);
   const [parsingJd, setParsingJd] = useState(false);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([]);
+  const [loadingKnowledgeBases, setLoadingKnowledgeBases] = useState(false);
+  const [selectedKbIds, setSelectedKbIds] = useState<number[]>([]);
 
   const isCustomSkill = skillId === CUSTOM_SKILL_ID;
   const jdNeedsReparse = parsedCustomJdText.length > 0 && customJdText !== parsedCustomJdText;
@@ -89,6 +93,25 @@ export function useInterviewConfig(options?: {
     }
   }, []);
 
+  const loadKnowledgeBases = useCallback(async () => {
+    setLoadingKnowledgeBases(true);
+    try {
+      const data = await knowledgeBaseApi.getAllKnowledgeBases('time', 'VECTOR_STORED');
+      setKnowledgeBases(data);
+    } catch (err) {
+      console.error('Failed to load knowledge bases:', err);
+      setKnowledgeBases([]);
+    } finally {
+      setLoadingKnowledgeBases(false);
+    }
+  }, []);
+
+  const toggleKnowledgeBase = useCallback((kbId: number) => {
+    setSelectedKbIds(prev =>
+      prev.includes(kbId) ? prev.filter(id => id !== kbId) : [...prev, kbId]
+    );
+  }, []);
+
   const handleParseJd = useCallback(async () => {
     if (!customJdText || customJdText.length < MIN_JD_LENGTH) {
       alert(`JD 内容太少（至少 ${MIN_JD_LENGTH} 字），请补充后重试`);
@@ -115,8 +138,9 @@ export function useInterviewConfig(options?: {
       }
       loadSkills();
       loadResumes();
+      loadKnowledgeBases();
     }
-  }, [autoLoad, defaultMode, defaultResumeId, loadResumes, loadSkills]);
+  }, [autoLoad, defaultMode, defaultResumeId, loadKnowledgeBases, loadResumes, loadSkills]);
 
   return {
     // State
@@ -138,9 +162,14 @@ export function useInterviewConfig(options?: {
     jdNeedsReparse,
     isCustomStartDisabled,
     isCustomSkill,
+    knowledgeBases,
+    loadingKnowledgeBases,
+    selectedKbIds,
     // Actions
     loadSkills,
     loadResumes,
+    loadKnowledgeBases,
+    toggleKnowledgeBase,
     handleParseJd,
     // Helpers
     getSkillIcon,

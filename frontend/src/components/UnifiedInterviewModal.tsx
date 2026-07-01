@@ -29,6 +29,7 @@ export interface UnifiedInterviewConfig {
   plannedDuration: number;
   customJdText?: string;
   customCategories?: import('../api/skill').CategoryDTO[];
+  knowledgeBaseIds?: number[];
 }
 
 interface UnifiedInterviewModalProps {
@@ -58,6 +59,7 @@ export default function UnifiedInterviewModal({
   const {
     loadResumes,
     loadSkills,
+    loadKnowledgeBases,
     setMode,
     setResumeId,
     setShowMore,
@@ -72,11 +74,13 @@ export default function UnifiedInterviewModal({
       }
       loadSkills();
       loadResumes();
+      loadKnowledgeBases();
     }
   }, [
     defaultMode,
     defaultResumeId,
     isOpen,
+    loadKnowledgeBases,
     loadResumes,
     loadSkills,
     setMode,
@@ -105,6 +109,7 @@ export default function UnifiedInterviewModal({
       plannedDuration: config.plannedDuration,
       customJdText: config.isCustomSkill ? config.parsedCustomJdText : undefined,
       customCategories: config.isCustomSkill ? config.customCategories : undefined,
+      knowledgeBaseIds: config.selectedKbIds.length > 0 ? config.selectedKbIds : undefined,
     });
   };
 
@@ -201,6 +206,10 @@ export default function UnifiedInterviewModal({
                   onQuestionCountChange={config.setQuestionCount}
                   plannedDuration={config.plannedDuration}
                   onPlannedDurationChange={config.setPlannedDuration}
+                  knowledgeBases={config.knowledgeBases}
+                  loadingKnowledgeBases={config.loadingKnowledgeBases}
+                  selectedKbIds={config.selectedKbIds}
+                  onKnowledgeBaseToggle={config.toggleKnowledgeBase}
                 />
               </div>
 

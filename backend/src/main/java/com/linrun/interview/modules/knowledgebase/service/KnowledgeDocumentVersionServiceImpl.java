@@ -1,8 +1,11 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
+import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
+import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseVersionMapper;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
-import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseVersionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -11,71 +14,84 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * 知识库版本 Service 实现（对齐 know-engine KnowledgeDocumentVersionServiceImpl）。
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeDocumentVersionServiceImpl implements KnowledgeDocumentVersionService {
 
-    private final KnowledgeBaseVersionRepository versionRepository;
+  private final KnowledgeBaseVersionMapper versionMapper;
 
-    @Override
-    @Transactional
-    public KnowledgeBaseVersionEntity save(KnowledgeBaseVersionEntity version) {
-        return versionRepository.save(version);
-    }
+  @Override
+  @Transactional
+  public KnowledgeBaseVersionEntity save(KnowledgeBaseVersionEntity version) {
+    return MapperUtils.save(versionMapper, version);
+  }
 
-    @Override
-    public Optional<KnowledgeBaseVersionEntity> getById(Long versionId) {
-        return versionRepository.findById(versionId);
-    }
+  @Override
+  public Optional<KnowledgeBaseVersionEntity> getById(Long versionId) {
+    return Optional.ofNullable(versionMapper.selectById(versionId));
+  }
 
-    @Override
-    public List<KnowledgeBaseVersionEntity> listByDocId(Long docId) {
-        return versionRepository.findByDocIdOrderByVersionIdDesc(docId);
-    }
+  @Override
+  public List<KnowledgeBaseVersionEntity> listByDocId(Long docId) {
+    return versionMapper.selectList(
+      Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
+        .eq(KnowledgeBaseVersionEntity::getDocId, docId)
+        .orderByDesc(KnowledgeBaseVersionEntity::getVersionId));
+  }
 
-    @Override
-    public Optional<KnowledgeBaseVersionEntity> findLatestByDocId(Long docId) {
-        return versionRepository.findFirstByDocIdOrderByVersionIdDesc(docId);
-    }
+  @Override
+  public Optional<KnowledgeBaseVersionEntity> findLatestByDocId(Long docId) {
+    return Optional.ofNullable(versionMapper.selectOne(
+      Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
+        .eq(KnowledgeBaseVersionEntity::getDocId, docId)
+        .orderByDesc(KnowledgeBaseVersionEntity::getVersionId)
+        .last("LIMIT 1")));
+  }
 
-    @Override
-    public Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash) {
-        return versionRepository.findByContentHash(contentHash);
-    }
+  @Override
+  public Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash) {
+    return Optional.ofNullable(versionMapper.selectOne(
+      Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
+        .eq(KnowledgeBaseVersionEntity::getContentHash, contentHash)
+        .last("LIMIT 1")));
+  }
 
-    @Override
-    public Optional<KnowledgeBaseVersionEntity> findByDocIdAndVersion(Long docId, String version) {
-        return versionRepository.findByDocIdAndVersion(docId, version);
-    }
+  @Override
+  public Optional<KnowledgeBaseVersionEntity> findByDocIdAndVersion(Long docId, String version) {
+    return Optional.ofNullable(versionMapper.selectOne(
+      Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
+        .eq(KnowledgeBaseVersionEntity::getDocId, docId)
+        .eq(KnowledgeBaseVersionEntity::getVersion, version)
+        .last("LIMIT 1")));
+  }
 
-    @Override
-    @Transactional
-    public void update(KnowledgeBaseVersionEntity version) {
-        versionRepository.save(version);
-    }
+  @Override
+  @Transactional
+  public void update(KnowledgeBaseVersionEntity version) {
+    MapperUtils.save(versionMapper, version);
+  }
 
-    @Override
-    @Transactional
-    public int physicalDeleteByDocId(Long docId) {
-        int deleted = versionRepository.physicalDeleteByDocId(docId);
-        log.info("按docId物理删除版本: docId={}, deleted={}", docId, deleted);
-        return deleted;
-    }
+  @Override
+  @Transactional
+  public int physicalDeleteByDocId(Long docId) {
+    int deleted = versionMapper.physicalDeleteByDocId(docId);
+    log.info("按docId物理删除版本: docId={}, deleted={}", docId, deleted);
+    return deleted;
+  }
 
-    @Override
-    @Transactional
-    public int physicalDeleteByVersionId(Long versionId) {
-        int deleted = versionRepository.physicalDeleteByVersionId(versionId);
-        log.info("按versionId物理删除版本: versionId={}, deleted={}", versionId, deleted);
-        return deleted;
-    }
+  @Override
+  @Transactional
+  public int physicalDeleteByVersionId(Long versionId) {
+    int deleted = versionMapper.physicalDeleteByVersionId(versionId);
+    log.info("按versionId物理删除版本: versionId={}, deleted={}", versionId, deleted);
+    return deleted;
+  }
 
-    @Override
-    public List<KnowledgeBaseVersionEntity> findByStatus(DocumentStatus status) {
-        return versionRepository.findByStatus(status);
-    }
+  @Override
+  public List<KnowledgeBaseVersionEntity> findByStatus(DocumentStatus status) {
+    return versionMapper.selectList(
+      Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
+        .eq(KnowledgeBaseVersionEntity::getStatus, status));
+  }
 }

@@ -9,7 +9,7 @@ import {
   type RagEvalResponse,
   type SortOption
 } from '../api/knowledgebase';
-import {ragChatApi, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
+import {ragChatApi, type RagCardChoice, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
 import {formatFileSize} from '../utils/format';
@@ -66,8 +66,12 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [loading, setLoading] = useState(false);
   // 当前流式回答的阶段进度（来自 progress: 前缀事件），显示在助手气泡上方
   const [progressText, setProgressText] = useState('');
+  const [rewrittenQuestion, setRewrittenQuestion] = useState('');
+  const [routeInfo, setRouteInfo] = useState<{ strategy: string; reasoning: string } | null>(null);
   // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
   const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
+  const [cardMessage, setCardMessage] = useState('');
+  const [cardChoices, setCardChoices] = useState<RagCardChoice[]>([]);
   const [evalOpen, setEvalOpen] = useState(false);
   const [evalInput, setEvalInput] = useState('');
   const [evalResult, setEvalResult] = useState<RagEvalResponse | null>(null);
@@ -278,7 +282,11 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setQuestion('');
     setLoading(true);
     setProgressText('');
+    setRewrittenQuestion('');
+    setRouteInfo(null);
     setActiveSources(null);
+    setCardMessage('');
+    setCardChoices([]);
 
     let sessionId = currentSessionId;
     if (!sessionId) {
@@ -341,6 +349,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         () => {
           setLoading(false);
           setProgressText('');
+          setRewrittenQuestion('');
+          setRouteInfo(null);
           setActiveSources(null);
           loadSessions();
         },
@@ -349,15 +359,27 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           updateAssistantMessage(fullContent || getErrorMessage(error, '回答失败，请重试'));
           setLoading(false);
           setProgressText('');
+          setRewrittenQuestion('');
+          setRouteInfo(null);
           setActiveSources(null);
         },
-        // 阶段进度：正在优化问题 → 检索知识库 → 排序筛选 → 生成回答
         (text: string) => {
           setProgressText(text);
         },
-        // 引用来源：augment 完成后推一次
         (sources: RagSourceDTO[]) => {
           setActiveSources(sources);
+        },
+        (text: string) => {
+          setCardMessage(text);
+        },
+        (choices: RagCardChoice[]) => {
+          setCardChoices(choices);
+        },
+        (text: string) => {
+          setRewrittenQuestion(text);
+        },
+        (route) => {
+          setRouteInfo(route);
         }
       );
     } catch (err) {
@@ -615,10 +637,42 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                     <span className="inline-block w-0.5 h-5 bg-primary-500 ml-1 animate-pulse" />
                                   )}
                                   {/* 流式阶段进度气泡（来自 progress: 前缀事件） */}
+                                  {loading && index === messages.length - 1 && cardMessage && (
+                                    <div className="mt-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
+                                      {cardMessage}
+                                    </div>
+                                  )}
+                                  {loading && index === messages.length - 1 && cardChoices.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {cardChoices.map(choice => (
+                                        <button
+                                          key={choice.id}
+                                          type="button"
+                                          className="text-xs px-3 py-1.5 rounded-full border border-primary-200 text-primary-700 hover:bg-primary-50 dark:border-primary-700 dark:text-primary-300"
+                                          onClick={() => {
+                                            setQuestion(`请分析简历「${choice.label}」（resumeId=${choice.id}）`);
+                                          }}
+                                        >
+                                          {choice.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
                                   {loading && index === messages.length - 1 && progressText && (
                                     <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-full px-2.5 py-1">
                                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />
                                       {progressText}
+                                    </div>
+                                  )}
+                                  {loading && index === messages.length - 1 && rewrittenQuestion && (
+                                    <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2">
+                                      检索优化：{rewrittenQuestion}
+                                    </div>
+                                  )}
+                                  {loading && index === messages.length - 1 && routeInfo && (
+                                    <div className="mt-2 text-xs text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2">
+                                      数据源：{routeInfo.strategy}
+                                      {routeInfo.reasoning ? ` · ${routeInfo.reasoning}` : ''}
                                     </div>
                                   )}
                                   {/* 引用来源（来自 reference: 前缀事件，流式期间显示在助手气泡内） */}

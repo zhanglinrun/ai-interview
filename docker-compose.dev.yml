@@ -1,30 +1,47 @@
-# 本地开发依赖服务
+# 本地开发依赖服务（对齐 know-engine 技术栈）
 # 用法：docker compose -f docker-compose.dev.yml up -d
-# 停止：docker compose -f docker-compose.dev.yml down
-# 清除数据：docker compose -f docker-compose.dev.yml down -v
 
 services:
-  postgres:
-    # 向量存储已迁移到 Elasticsearch，PG 不再需要 pgvector 扩展，改用标准 postgres 镜像。
-    image: postgres:16
-    container_name: interview-postgres
+  mysql:
+    image: mysql:8.0
+    container_name: interview-mysql
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
-      POSTGRES_DB: ${POSTGRES_DB:-interview_guide}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DB:-interview_guide}
+      MYSQL_USER: ${MYSQL_USER:-interview_guide}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-interview_guide}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
-      - "5432:5432"
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: interview-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j666}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - ./backend/src/main/resources/neo4j:/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   elasticsearch:
-    # 向量存储（替代 pgvector）。单节点、关闭安全认证，仅本地开发用。
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     container_name: interview-elasticsearch
     environment:
@@ -54,34 +71,44 @@ services:
       timeout: 3s
       retries: 5
 
-  rustfs:
-    # S3 兼容对象存储。容器内固定 9000(API)/9001(控制台)，
-    # 宿主机映射到 9100/9101 以避开本机其他 MinIO 占用的 9000。
-    image: rustfs/rustfs:latest
-    container_name: interview-rustfs
-    command: ["/data"]
+  minio:
+    image: minio/minio:latest
+    container_name: interview-minio
+    command: server /data --console-address ":9001"
     environment:
-      RUSTFS_ACCESS_KEY: ${APP_STORAGE_ACCESS_KEY:-rustfsadmin}
-      RUSTFS_SECRET_KEY: ${APP_STORAGE_SECRET_KEY:-rustfsadmin}
-      RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_ALLOW_INSECURE_DEFAULT_CREDENTIALS: "true"
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
-      - "9100:9000"
-      - "9101:9001"
+      - "9000:9000"
+      - "9001:9001"
     volumes:
-      - rustfs_data:/data
+      - minio_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "timeout 3 sh -c 'cat < /dev/null > /dev/tcp/localhost/9000' || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-# 首次启动后，浏览器访问 http://localhost:9101（RustFS 控制台，宿主机映射 9101）
-# 使用 ${APP_STORAGE_ACCESS_KEY} / ${APP_STORAGE_SECRET_KEY}（.env 中默认 minioadmin）登录，
-# 手动创建名为 interview-guide 的 bucket。API 端点为 http://localhost:9100。
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:2.4.0
+    container_name: interview-xxl-job-admin
+    environment:
+      PARAMS: >-
+        --spring.datasource.url=jdbc:mysql://mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+        --spring.datasource.username=root
+        --spring.datasource.password=${MYSQL_ROOT_PASSWORD:-root}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+# 首次启动后访问 http://localhost:9001 创建 interview-guide bucket（或使用 mc 客户端）
+# XXL-Job 控制台 http://localhost:8080/xxl-job-admin 默认 admin/123456
 
 volumes:
-  postgres_data:
+  mysql_data:
+  neo4j_data:
   elasticsearch_data:
   redis_data:
-  rustfs_data:
+  minio_data:

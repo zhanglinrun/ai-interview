@@ -20,6 +20,9 @@ public class KnowledgeBaseQueryProperties {
     private ParentExpand parentExpand = new ParentExpand();
     private IntentRecognition intentRecognition = new IntentRecognition();
     private Sql sql = new Sql();
+    private Routing routing = new Routing();
+    private Graph graph = new Graph();
+    private Generation generation = new Generation();
     private TitleSummary titleSummary = new TitleSummary();
     private int chunkOverlapChars = 80;
     private String chunkStrategy = "hybrid";
@@ -32,6 +35,8 @@ public class KnowledgeBaseQueryProperties {
     @Data
     public static class Rewrite {
         private boolean enabled = true;
+        /** 查询改写专用模型（对齐 know-engine：qwen-max-latest） */
+        private String model = "qwen-max-latest";
     }
 
     @Data
@@ -57,7 +62,12 @@ public class KnowledgeBaseQueryProperties {
     public static class Hybrid {
         /** 是否启用混合检索；关闭时退回纯向量检索 */
         private boolean enabled = true;
-        /** 检索模式：hybrid / vector / full_text */
+        /**
+         * 双通道并行：注册独立的 vector + full_text 两路 ES retriever（对齐 know-engine），
+         * 由 Aggregator RRF 融合。开启后忽略 {@link #mode} 的单 retriever 模式切换。
+         */
+        private boolean dualChannel = true;
+        /** 检索模式：hybrid / vector / full_text（dualChannel=false 时生效） */
         private String mode = "hybrid";
         /** 关键词通道单独召回的候选数 */
         private int keywordTopK = 20;
@@ -152,11 +162,17 @@ public class KnowledgeBaseQueryProperties {
     @Data
     public static class ParentExpand {
         /** 是否启用 small-to-big 上下文扩展 */
-        private boolean enabled = false;
+        private boolean enabled = true;
+        /**
+         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块，对齐 know-engine）。
+         */
+        private String strategy = "replace";
         /** 单个命中 chunk 扩展后的最大字符数 */
         private int maxChars = 1200;
         /** 最多聚合的兄弟 chunk 数 */
         private int maxSiblings = 5;
+        /** parent/brother 文本 Redis 缓存 TTL（秒），0 表示不缓存 */
+        private int cacheTtlSeconds = 30;
     }
 
     /**
@@ -170,6 +186,39 @@ public class KnowledgeBaseQueryProperties {
         private boolean enabled = true;
         /** 是否在意图识别前推"正在理解您的问题..."进度（关闭可省 ~0.4s 前端空进度） */
         private boolean progressEnabled = true;
+        /** 意图识别专用模型；空则复用默认 ChatModel */
+        private String model = "qwen-max-latest";
+    }
+
+    /**
+     * 查询路由 / Text2SQL / Text2Cypher 专用模型（对齐 know-engine）。
+     */
+    @Data
+    public static class Routing {
+        private String model = "qwen-max-latest";
+    }
+
+    /**
+     * Neo4j Text2Cypher 图检索配置。
+     */
+    @Data
+    public static class Graph {
+        private boolean enabled = true;
+        private String cypherPromptPath = "classpath:prompts/text-to-cypher-prompt.txt";
+        /** 向量化完成后自动从分段抽取概念节点写入 Neo4j */
+        private boolean autoSyncOnVectorize = true;
+        /** 启动时从 skills 目录各子目录 SKILL.md 预置 Skill 图谱 */
+        private boolean skillBootstrapEnabled = true;
+    }
+
+    /**
+     * RAG 流式生成模型配置（对齐 know-engine ragChatModel）。
+     */
+    @Data
+    public static class Generation {
+        /** 流式回答专用模型；空则复用默认 StreamingChatModel */
+        private String streamingModel = "qwen3.6-plus";
+        private double temperature = 0.2;
     }
 
     /**
@@ -191,5 +240,7 @@ public class KnowledgeBaseQueryProperties {
     public static class TitleSummary {
         /** 是否启用 LLM 异步标题生成；关闭则保留原规则标题（知识库名 / "N 个知识库对话"） */
         private boolean enabled = true;
+        /** 标题摘要专用模型（对齐 know-engine：qwen3.5-flash） */
+        private String model = "qwen3.5-flash";
     }
 }

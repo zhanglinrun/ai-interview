@@ -1,5 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
+import com.linrun.interview.modules.knowledgebase.model.DocumentSplitParam;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -28,6 +30,11 @@ public interface DocumentProcessService {
     Long upload(MultipartFile file, String title, String category);
 
     /**
+     * 上传并解析文档，指定知识库类型。
+     */
+    Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType);
+
+    /**
      * 上传新版本（版本号自动递增，旧版本即时失效）。
      *
      * @param docId      知识库 ID
@@ -47,6 +54,11 @@ public interface DocumentProcessService {
      * @return 分段数
      */
     int split(Long docId);
+
+    /**
+     * 按指定切块策略切块。
+     */
+    int split(Long docId, DocumentSplitParam splitParam);
 
     /**
      * 重新切块并重新向量化：删当前版本 segment、降 docStatus 为 CONVERTED，再 split 重新发事件触发异步向量化。

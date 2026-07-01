@@ -113,7 +113,25 @@ public class RerankService implements ScoringModel {
         if (!rerankProps.isEnabled()) {
             return false;
         }
-        return PROVIDER_LOCAL.equals(effectiveProvider) || cloudAvailable;
+        boolean localAvailable = localRerankModel != null && localRerankModel.isAvailable();
+        return localAvailable || cloudAvailable;
+    }
+
+    /** 当前实际生效的 rerank 实现（local / cloud）。 */
+    public String getEffectiveProvider() {
+        return effectiveProvider;
+    }
+
+    /** 启动预热本地 ONNX 模型。 */
+    public boolean warmupLocalModel() {
+        if (localRerankModel == null) {
+            return false;
+        }
+        boolean available = localRerankModel.isAvailable();
+        if (available) {
+            effectiveProvider = PROVIDER_LOCAL;
+        }
+        return available;
     }
 
     @Override

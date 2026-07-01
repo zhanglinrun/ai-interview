@@ -121,7 +121,7 @@ const REQUIRED_FIELDS_MESSAGE = '请填写必填字段';
 const REQUIRED_EMBEDDING_MODEL_MESSAGE =
   '支持向量化时需要填写向量模型，例如 GLM 填 embedding-3';
 const INVALID_EMBEDDING_DIMENSIONS_MESSAGE =
-  `向量维度必须为正整数，当前 pgvector 表为 ${DEFAULT_EMBEDDING_DIMENSIONS} 维`;
+  `向量维度必须为正整数，当前 ES 向量索引为 ${DEFAULT_EMBEDDING_DIMENSIONS} 维`;
 
 type ProviderFormMode = 'create' | 'update';
 
@@ -1240,7 +1240,7 @@ export default function SettingsPage() {
                   {formSupportsEmbedding && (
                     <div>
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                        向量维度 <span className="text-slate-400 font-normal">（必须与 pgvector 表一致，当前为 {DEFAULT_EMBEDDING_DIMENSIONS} 维）</span>
+                        向量维度 <span className="text-slate-400 font-normal">（必须与 ES 向量索引维度一致，当前为 {DEFAULT_EMBEDDING_DIMENSIONS} 维）</span>
                       </label>
                       <input
                         type="number"

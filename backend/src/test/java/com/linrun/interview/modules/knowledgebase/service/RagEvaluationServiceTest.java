@@ -6,7 +6,7 @@ import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.model.RagEvaluationRunEntity;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
-import com.linrun.interview.modules.knowledgebase.repository.RagEvaluationRunRepository;
+import com.linrun.interview.modules.knowledgebase.mapper.RagEvaluationRunMapper;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
 import org.junit.jupiter.api.DisplayName;
@@ -31,9 +31,9 @@ class RagEvaluationServiceTest {
             segment("c1", "无关内容"),
             segment("c2", "这里解释 JVM 垃圾回收")
         ));
-        RagEvaluationRunRepository repository = mock(RagEvaluationRunRepository.class);
-        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        RagEvaluationService service = new RagEvaluationService(queryService, repository, new ObjectMapper());
+        RagEvaluationRunMapper runMapper = mock(RagEvaluationRunMapper.class);
+        when(runMapper.insert(any(RagEvaluationRunEntity.class))).thenReturn(1);
+        RagEvaluationService service = new RagEvaluationService(queryService, runMapper, new ObjectMapper());
 
         UserContext.setUserId(7L);
         RagEvalResponse response;
@@ -53,7 +53,7 @@ class RagEvaluationServiceTest {
         assertThat(response.mrr()).isEqualTo(0.5);
         assertThat(response.items().getFirst().firstHitRank()).isEqualTo(2);
         assertThat(response.items().getFirst().ndcg()).isGreaterThan(0);
-        verify(repository).save(any(RagEvaluationRunEntity.class));
+        verify(runMapper).insert(any(RagEvaluationRunEntity.class));
     }
 
     private TextSegment segment(String chunkId, String text) {

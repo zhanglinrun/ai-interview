@@ -3,6 +3,7 @@ package com.linrun.interview.modules.llmprovider.service;
 import com.linrun.interview.common.ai.ApiPathResolver;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.config.LlmProviderProperties;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.config.LlmProviderProperties.ProviderConfig;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
@@ -17,8 +18,8 @@ import com.linrun.interview.modules.llmprovider.dto.TtsConfigRequest;
 import com.linrun.interview.modules.llmprovider.dto.UpdateProviderRequest;
 import com.linrun.interview.modules.llmprovider.model.LlmGlobalSettingEntity;
 import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
-import com.linrun.interview.modules.llmprovider.repository.LlmGlobalSettingRepository;
-import com.linrun.interview.modules.llmprovider.repository.LlmProviderRepository;
+import com.linrun.interview.modules.llmprovider.mapper.LlmGlobalSettingMapper;
+import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
 import com.linrun.interview.modules.voiceinterview.config.VoiceInterviewProperties;
 import com.linrun.interview.modules.voiceinterview.service.QwenAsrService;
 import com.linrun.interview.modules.voiceinterview.service.QwenTtsService;
@@ -37,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -55,8 +57,8 @@ public class LlmProviderConfigService {
 
   private final LlmProviderProperties properties;
   private final LlmProviderRegistry registry;
-  private final LlmProviderRepository providerRepository;
-  private final LlmGlobalSettingRepository globalSettingRepository;
+  private final LlmProviderMapper providerRepository;
+  private final LlmGlobalSettingMapper globalSettingRepository;
   private final ApiKeyEncryptionService encryptionService;
   private final String yamlPath;
   private final String envPath;
@@ -77,16 +79,16 @@ public class LlmProviderConfigService {
   public LlmProviderConfigService(
       LlmProviderProperties properties,
       LlmProviderRegistry registry,
-      LlmProviderRepository providerRepository,
-      LlmGlobalSettingRepository globalSettingRepository,
+      LlmProviderMapper llmProviderMapper,
+      LlmGlobalSettingMapper llmGlobalSettingMapper,
       ApiKeyEncryptionService encryptionService,
       VoiceInterviewProperties voiceProperties,
       QwenAsrService asrService,
       QwenTtsService ttsService) {
     this.properties = properties;
     this.registry = registry;
-    this.providerRepository = providerRepository;
-    this.globalSettingRepository = globalSettingRepository;
+    this.providerRepository = llmProviderMapper;
+    this.globalSettingRepository = llmGlobalSettingMapper;
     this.encryptionService = encryptionService;
     this.yamlPath = properties.getConfigYamlPath();
     this.envPath = properties.getConfigEnvPath();
@@ -157,7 +159,7 @@ public class LlmProviderConfigService {
             .toList();
       }
       LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
-      return providerRepository.findAll().stream()
+      return providerRepository.selectList(null).stream()
           .map(provider -> ProviderDTO.builder()
               .id(provider.getId())
               .baseUrl(provider.getBaseUrl())
@@ -322,7 +324,7 @@ public class LlmProviderConfigService {
         return;
       }
       String providerId = trimOrNull(request.id());
-      if (providerRepository.existsById(providerId)) {
+      if (providerRepository.selectById(providerId) != null) {
         throw new BusinessException(ErrorCode.PROVIDER_ALREADY_EXISTS,
             "Provider '" + request.id() + "' 已存在");
       }
@@ -337,7 +339,7 @@ public class LlmProviderConfigService {
       validateEmbeddingConfig(providerId, supportsEmbedding, embeddingModel, embeddingDimensions);
 
       ApiKeyEncryptionService.EncryptedValue encrypted = encryptionService.encrypt(apiKey);
-      providerRepository.save(LlmProviderEntity.builder()
+      MapperUtils.save(providerRepository, LlmProviderEntity.builder()
           .id(providerId)
           .baseUrl(baseUrl)
           .apiKeyNonce(encrypted.nonce())
@@ -405,7 +407,7 @@ public class LlmProviderConfigService {
         provider.setApiKeyCiphertext(encrypted.ciphertext());
       }
 
-      providerRepository.save(provider);
+      MapperUtils.save(providerRepository, provider);
       registry.reload();
       log.info("Updated provider: id={}", id);
     } finally {
@@ -451,7 +453,7 @@ public class LlmProviderConfigService {
       getProviderEntityOrThrow(providerId);
       LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
       setting.setDefaultChatProviderId(providerId);
-      globalSettingRepository.save(setting);
+      MapperUtils.save(globalSettingRepository, setting);
       registry.reload();
       log.info("Updated default provider: {}", providerId);
     } finally {
@@ -480,7 +482,7 @@ public class LlmProviderConfigService {
           resolveEmbeddingDimensions(provider.getEmbeddingDimensions()));
       LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
       setting.setDefaultEmbeddingProviderId(providerId);
-      globalSettingRepository.save(setting);
+      MapperUtils.save(globalSettingRepository, setting);
       registry.reload();
       log.info("Updated default embedding provider: {}", providerId);
     } finally {
@@ -676,13 +678,13 @@ public class LlmProviderConfigService {
   }
 
   LlmProviderEntity getProviderEntityOrThrow(String id) {
-    return providerRepository.findById(id)
+    return Optional.ofNullable(providerRepository.selectById(id))
         .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_NOT_FOUND,
             "Provider '" + id + "' 不存在"));
   }
 
   private LlmGlobalSettingEntity getGlobalSettingOrThrow() {
-    return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+    return Optional.ofNullable(globalSettingRepository.selectById(LlmGlobalSettingEntity.SINGLETON_ID))
         .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED,
             "默认 Provider 配置未初始化"));
   }

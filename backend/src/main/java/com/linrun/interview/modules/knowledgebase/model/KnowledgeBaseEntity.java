@@ -1,51 +1,35 @@
 package com.linrun.interview.modules.knowledgebase.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Index;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 
 /**
  * 知识库实体
  */
-@Entity
-@Table(name = "knowledge_bases", indexes = {
-    @Index(name = "idx_kb_user_hash", columnList = "userId,fileHash", unique = true),
-    @Index(name = "idx_kb_category", columnList = "category"),
-    @Index(name = "idx_knowledge_bases_user_id", columnList = "userId")
-})
+@TableName("knowledge_bases")
 public class KnowledgeBaseEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(nullable = false)
     private Long userId;
 
     // 文件内容的SHA-256哈希值，用于去重
-    @Column(nullable = false, length = 64)
     private String fileHash;
 
     // 知识库名称（用户自定义或从文件名提取）
-    @Column(nullable = false)
     private String name;
 
     // 分类/分组（如"Java面试"、"项目文档"等）
-    @Column(length = 100)
     private String category;
 
     // 原始文件名
-    @Column(nullable = false)
     private String originalFilename;
     
     // 文件大小（字节）
@@ -55,15 +39,12 @@ public class KnowledgeBaseEntity {
     private String contentType;
     
     // RustFS存储的文件Key
-    @Column(length = 500)
     private String storageKey;
     
     // RustFS存储的文件URL
-    @Column(length = 1000)
     private String storageUrl;
     
     // 上传时间
-    @Column(nullable = false)
     private LocalDateTime uploadedAt;
     
     // 最后访问时间
@@ -79,28 +60,20 @@ public class KnowledgeBaseEntity {
     private Long currentVersionId;
 
     // 文档描述（对齐 know-engine KnowledgeDocument.description）
-    @Column(length = 500)
     private String description;
 
-    @Column(length = 80)
     private String dataTableName;
 
-    @Column(columnDefinition = "TEXT")
     private String dataSchemaJson;
 
     private Integer dataRowCount;
 
     // 文档状态机（对齐 know-engine DocumentStatus）
-    @Enumerated(EnumType.STRING)
-    @Column(length = 20)
     private DocumentStatus docStatus;
 
-    @PrePersist
-    protected void onCreate() {
-        uploadedAt = LocalDateTime.now();
-        lastAccessedAt = LocalDateTime.now();
-        accessCount = 1;
-    }
+    /** 知识库类型：语义检索 / 数据查询。 */
+    private String knowledgeBaseType;
+
     
     // Getters and Setters
     public Long getId() {
@@ -271,6 +244,14 @@ public class KnowledgeBaseEntity {
 
     public void setDocStatus(DocumentStatus docStatus) {
         this.docStatus = docStatus;
+    }
+
+    public String getKnowledgeBaseType() {
+        return knowledgeBaseType;
+    }
+
+    public void setKnowledgeBaseType(String knowledgeBaseType) {
+        this.knowledgeBaseType = knowledgeBaseType;
     }
 }
 

@@ -1,18 +1,11 @@
 package com.linrun.interview.modules.knowledgebase.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Index;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 
@@ -22,66 +15,41 @@ import java.time.LocalDateTime;
  * <p>与 {@link KnowledgeBaseEntity} 一对多：一个知识库可有多个版本，每个版本独立存储原始文件 URL、
  * 转换后 Markdown 文本内容、内容哈希与状态。{@link KnowledgeBaseEntity#getCurrentVersionId()} 指向当前激活版本。
  */
-@Entity
-@Table(name = "knowledge_base_version", indexes = {
-    @Index(name = "idx_kbv_doc_id", columnList = "docId")
-}, uniqueConstraints = {
-    @UniqueConstraint(name = "uk_kbv_doc_version", columnNames = {"docId", "version"})
-})
+@TableName("knowledge_base_version")
 public class KnowledgeBaseVersionEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(value = "version_id", type = IdType.AUTO)
     private Long versionId;
 
     /** 关联知识库 ID（knowledge_bases.id）。 */
-    @Column(nullable = false)
     private Long docId;
 
     /** 语义化版本号，如 1.0.0。 */
-    @Column(nullable = false, length = 32)
     private String version;
 
     /** 原始文件 URL（RustFS）。 */
-    @Column(length = 1000)
     private String docUrl;
 
     /** 转换后 Markdown 文本内容（解析产物，split 时直接取，省存储往返）。 */
-    @Column(columnDefinition = "TEXT")
     private String convertedContent;
 
     /** 文档内容 SHA-256（跨版本去重）。 */
-    @Column(length = 64)
     private String contentHash;
 
     /** 版本状态机。 */
-    @Enumerated(EnumType.STRING)
-    @Column(length = 20)
     private DocumentStatus status;
 
     /** 上传用户标识。 */
-    @Column(length = 64)
     private String uploadUser;
 
     /** 版本变更说明。 */
-    @Column(length = 500)
     private String changelog;
 
-    @Column(nullable = false)
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
 
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = createdAt;
-    }
 
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
 
     public Long getVersionId() {
         return versionId;

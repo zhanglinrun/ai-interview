@@ -3,8 +3,9 @@ package com.linrun.interview.modules.voiceinterview.service;
 import com.linrun.interview.common.ai.FluxStreamingBridge;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.ai.PromptSanitizer;
+import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
-import com.linrun.interview.modules.resume.repository.ResumeRepository;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.voiceinterview.config.VoiceInterviewProperties;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import dev.langchain4j.data.message.UserMessage;
@@ -32,7 +33,7 @@ public class DashscopeLlmService {
 
     private final LlmProviderRegistry llmProviderRegistry;
     private final VoiceInterviewPromptService promptService;
-    private final ResumeRepository resumeRepository;
+    private final ResumeEntityMapper resumeEntityMapper;
     private final VoiceInterviewProperties voiceInterviewProperties;
     private final PromptSanitizer promptSanitizer;
 
@@ -162,8 +163,9 @@ public class DashscopeLlmService {
     private PromptContext buildPromptContext(String userInput, VoiceInterviewSessionEntity session, List<String> conversationHistory) {
         String resumeText = null;
         if (session.getResumeId() != null) {
-            ResumeEntity resume = resumeRepository.findByUserIdAndId(
-                session.getUserId(), session.getResumeId()).orElse(null);
+            ResumeEntity resume = EntityQueries.byUserAndId(
+                resumeEntityMapper, session.getUserId(), session.getResumeId(),
+                ResumeEntity::getUserId, ResumeEntity::getId).orElse(null);
             if (resume != null) {
                 resumeText = resume.getResumeText();
             }

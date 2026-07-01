@@ -5,20 +5,25 @@ import com.linrun.interview.common.constant.CommonConstants.InterviewDefaults;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.model.AsyncTaskStatus;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.security.UserContext;
-import com.linrun.interview.modules.resume.repository.ResumeRepository;
+import com.linrun.interview.modules.resume.model.ResumeEntity;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.voiceinterview.config.VoiceInterviewProperties;
 import com.linrun.interview.modules.voiceinterview.dto.CreateSessionRequest;
 import com.linrun.interview.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
 import com.linrun.interview.modules.voiceinterview.dto.SessionMetaDTO;
 import com.linrun.interview.modules.voiceinterview.dto.SessionResponseDTO;
 import com.linrun.interview.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
+import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewEvaluationEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionStatus;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewEvaluationRepository;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewMessageRepository;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewEvaluationMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewMessageMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewSessionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
@@ -29,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -47,14 +53,14 @@ import java.util.stream.Collectors;
 @Slf4j
 public class VoiceInterviewService {
 
-    private final VoiceInterviewSessionRepository sessionRepository;
-    private final VoiceInterviewMessageRepository messageRepository;
-    private final VoiceInterviewEvaluationRepository evaluationRepository;
+    private final VoiceInterviewSessionMapper sessionRepository;
+    private final VoiceInterviewMessageMapper messageRepository;
+    private final VoiceInterviewEvaluationMapper evaluationRepository;
     private final RedissonClient redissonClient;
     private final VoiceInterviewProperties properties;
     private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
     private final LlmProviderRegistry llmProviderRegistry;
-    private final ResumeRepository resumeRepository;
+    private final ResumeEntityMapper resumeEntityMapper;
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
     private static final int CACHE_TTL_HOURS = 1;
@@ -70,7 +76,8 @@ public class VoiceInterviewService {
     public SessionResponseDTO createSession(CreateSessionRequest request) {
         Long userId = UserContext.requireUserId();
         if (request.getResumeId() != null
-                && !resumeRepository.existsByUserIdAndId(userId, request.getResumeId())) {
+                && !EntityQueries.existsByUserAndId(resumeEntityMapper, userId, request.getResumeId(),
+                    ResumeEntity::getUserId, ResumeEntity::getId)) {
             throw new BusinessException(ErrorCode.RESUME_NOT_FOUND);
         }
         String effectiveSkillId = request.getSkillId() != null ? request.getSkillId() : InterviewDefaults.SKILL_ID;
@@ -94,7 +101,7 @@ public class VoiceInterviewService {
                 .currentPhase(determineFirstPhase(request))
                 .build();
 
-        VoiceInterviewSessionEntity saved = sessionRepository.save(session);
+        VoiceInterviewSessionEntity saved = MapperUtils.save(sessionRepository, session);
         cacheSession(saved);
 
         log.info("Created voice interview session: {} with template: {}, phase: {}",
@@ -110,7 +117,8 @@ public class VoiceInterviewService {
     @Transactional
     public void endSessionIfInProgress(String sessionId) {
         Long sessionIdLong = parseSessionId(sessionId);
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong).orElse(null);
+        VoiceInterviewSessionEntity session = Optional.ofNullable(
+            sessionRepository.selectById(sessionIdLong)).orElse(null);
         if (session == null || session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
             return;
         }
@@ -152,7 +160,7 @@ public class VoiceInterviewService {
         session.setActualDuration((int) Duration.between(session.getStartTime(), LocalDateTime.now()).toSeconds());
         session.setEvaluateStatus(AsyncTaskStatus.PENDING);
 
-        sessionRepository.save(session);
+        MapperUtils.save(sessionRepository, session);
         invalidateSessionCache(session.getId());
 
         log.info("Ended voice interview session: {}, duration: {} seconds, evaluation triggered",
@@ -193,14 +201,15 @@ public class VoiceInterviewService {
         }
 
         // Fallback to database
-        return sessionRepository.findById(sessionId).orElse(null);
+        return Optional.ofNullable(sessionRepository.selectById(sessionId)).orElse(null);
     }
 
     public VoiceInterviewSessionEntity getSessionForCurrentUser(Long sessionId) {
         if (sessionId == null) {
             return null;
         }
-        return sessionRepository.findByUserIdAndId(UserContext.requireUserId(), sessionId)
+        return EntityQueries.byUserAndId(sessionRepository, UserContext.requireUserId(), sessionId,
+            VoiceInterviewSessionEntity::getUserId, VoiceInterviewSessionEntity::getId)
             .orElse(null);
     }
 
@@ -208,7 +217,8 @@ public class VoiceInterviewService {
         if (sessionId == null) {
             throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在");
         }
-        return sessionRepository.findByUserIdAndId(UserContext.requireUserId(), sessionId)
+        return EntityQueries.byUserAndId(sessionRepository, UserContext.requireUserId(), sessionId,
+            VoiceInterviewSessionEntity::getUserId, VoiceInterviewSessionEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
                 "会话不存在: " + sessionId));
     }
@@ -236,7 +246,7 @@ public class VoiceInterviewService {
 
             VoiceInterviewSessionEntity.InterviewPhase oldPhase = session.getCurrentPhase();
             session.setCurrentPhase(newPhase);
-            sessionRepository.save(session);
+            MapperUtils.save(sessionRepository, session);
             cacheSession(session); // Update cache
 
             log.info("Session {} transitioned from phase {} to {}", sessionId, oldPhase, newPhase);
@@ -296,18 +306,22 @@ public class VoiceInterviewService {
                 .sequenceNum(getNextSequenceNum(sessionIdLong))
                 .build();
 
-        messageRepository.save(message);
+        MapperUtils.save(messageRepository, message);
         log.debug("Saved message for session: {}, phase: {}, sequence: {}",
                 sessionId, session.getCurrentPhase(), message.getSequenceNum());
     }
 
     private boolean fillLatestUnansweredQuestion(Long sessionId, String userText) {
-        return messageRepository
-            .findFirstBySessionIdAndUserRecognizedTextIsNullAndAiGeneratedTextIsNotNullOrderBySequenceNumDesc(
-                sessionId)
+        return MapperUtils.selectOneOptional(messageRepository,
+            Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                .eq(VoiceInterviewMessageEntity::getSessionId, sessionId)
+                .isNull(VoiceInterviewMessageEntity::getUserRecognizedText)
+                .isNotNull(VoiceInterviewMessageEntity::getAiGeneratedText)
+                .orderByDesc(VoiceInterviewMessageEntity::getSequenceNum)
+                .last("LIMIT 1"))
             .map(message -> {
                 message.setUserRecognizedText(userText);
-                messageRepository.save(message);
+                MapperUtils.save(messageRepository, message);
                 log.debug("Filled answer for voice message: sessionId={}, sequence={}",
                     sessionId, message.getSequenceNum());
                 return true;
@@ -324,7 +338,10 @@ public class VoiceInterviewService {
      */
     public List<VoiceInterviewMessageEntity> getConversationHistory(String sessionId) {
         Long sessionIdLong = parseSessionId(sessionId);
-        return messageRepository.findBySessionIdOrderBySequenceNumAsc(sessionIdLong);
+        return messageRepository.selectList(
+            Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                .eq(VoiceInterviewMessageEntity::getSessionId, sessionIdLong)
+                .orderByAsc(VoiceInterviewMessageEntity::getSequenceNum));
     }
 
     /**
@@ -357,8 +374,9 @@ public class VoiceInterviewService {
     public void pauseSession(String sessionId, String reason) {
         Long sessionIdLong = parseSessionId(sessionId);
 
-        VoiceInterviewSessionEntity session = sessionRepository.findByUserIdAndId(
-                UserContext.requireUserId(), sessionIdLong)
+        VoiceInterviewSessionEntity session = EntityQueries.byUserAndId(
+                sessionRepository, UserContext.requireUserId(), sessionIdLong,
+                VoiceInterviewSessionEntity::getUserId, VoiceInterviewSessionEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
 
         if (session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
@@ -370,7 +388,7 @@ public class VoiceInterviewService {
         session.setStatus(VoiceInterviewSessionStatus.PAUSED);
         session.setPausedAt(LocalDateTime.now());
 
-        sessionRepository.save(session);
+        MapperUtils.save(sessionRepository, session);
         invalidateSessionCache(sessionIdLong);
 
         log.info("Session {} paused, reason: {}", sessionId, reason);
@@ -387,8 +405,9 @@ public class VoiceInterviewService {
     public SessionResponseDTO resumeSession(String sessionId) {
         Long sessionIdLong = parseSessionId(sessionId);
 
-        VoiceInterviewSessionEntity session = sessionRepository.findByUserIdAndId(
-                UserContext.requireUserId(), sessionIdLong)
+        VoiceInterviewSessionEntity session = EntityQueries.byUserAndId(
+                sessionRepository, UserContext.requireUserId(), sessionIdLong,
+                VoiceInterviewSessionEntity::getUserId, VoiceInterviewSessionEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
 
         if (session.getStatus() != VoiceInterviewSessionStatus.PAUSED) {
@@ -400,11 +419,13 @@ public class VoiceInterviewService {
         session.setStatus(VoiceInterviewSessionStatus.IN_PROGRESS);
         session.setResumedAt(LocalDateTime.now());
 
-        VoiceInterviewSessionEntity saved = sessionRepository.save(session);
+        VoiceInterviewSessionEntity saved = MapperUtils.save(sessionRepository, session);
         cacheSession(saved);
 
         log.info("Session {} resumed with {} messages in conversation history",
-            sessionId, messageRepository.countBySessionId(sessionIdLong));
+            sessionId, messageRepository.selectCount(
+                Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                    .eq(VoiceInterviewMessageEntity::getSessionId, sessionIdLong)));
 
         return buildSessionResponse(saved);
     }
@@ -424,9 +445,16 @@ public class VoiceInterviewService {
         if (status != null && !status.isEmpty()) {
             VoiceInterviewSessionStatus statusEnum =
                 VoiceInterviewSessionStatus.valueOf(status.toUpperCase());
-            sessions = sessionRepository.findByUserIdAndStatusOrderByUpdatedAtDesc(userIdLong, statusEnum);
+            sessions = sessionRepository.selectList(
+                Wrappers.<VoiceInterviewSessionEntity>lambdaQuery()
+                    .eq(VoiceInterviewSessionEntity::getUserId, userIdLong)
+                    .eq(VoiceInterviewSessionEntity::getStatus, statusEnum)
+                    .orderByDesc(VoiceInterviewSessionEntity::getUpdatedAt));
         } else {
-            sessions = sessionRepository.findByUserIdOrderByUpdatedAtDesc(userIdLong);
+            sessions = EntityQueries.listByUserIdOrderByDesc(
+                sessionRepository, userIdLong,
+                VoiceInterviewSessionEntity::getUserId,
+                VoiceInterviewSessionEntity::getUpdatedAt);
         }
 
         return sessions.stream()
@@ -438,7 +466,9 @@ public class VoiceInterviewService {
                 .createdAt(session.getCreatedAt())
                 .updatedAt(session.getUpdatedAt())
                 .actualDuration(session.getActualDuration())
-                .messageCount(messageRepository.countBySessionId(session.getId()))
+                .messageCount(messageRepository.selectCount(
+                    Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                        .eq(VoiceInterviewMessageEntity::getSessionId, session.getId())))
                 .evaluateStatus(session.getEvaluateStatus() != null ? session.getEvaluateStatus().name() : null)
                 .evaluateError(session.getEvaluateError())
                 .build())
@@ -589,7 +619,9 @@ public class VoiceInterviewService {
      * Get next sequence number for messages in a session
      */
     private int getNextSequenceNum(Long sessionId) {
-        return (int) messageRepository.countBySessionId(sessionId) + 1;
+        return messageRepository.selectCount(
+            Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                .eq(VoiceInterviewMessageEntity::getSessionId, sessionId)).intValue() + 1;
     }
 
     /**
@@ -597,10 +629,10 @@ public class VoiceInterviewService {
      */
     public void updateEvaluateStatus(Long sessionId, AsyncTaskStatus status, String error) {
         try {
-            sessionRepository.findById(sessionId).ifPresent(session -> {
+            Optional.ofNullable(sessionRepository.selectById(sessionId)).ifPresent(session -> {
                 session.setEvaluateStatus(status);
                 session.setEvaluateError(error);
-                sessionRepository.save(session);
+                MapperUtils.save(sessionRepository, session);
                 log.debug("Evaluation status updated: sessionId={}, status={}", sessionId, status);
             });
         } catch (Exception e) {
@@ -625,8 +657,11 @@ public class VoiceInterviewService {
     @Transactional
     public void deleteSession(Long sessionId) {
         getSessionForCurrentUserOrThrow(sessionId);
-        evaluationRepository.findBySessionId(sessionId).ifPresent(evaluationRepository::delete);
-        messageRepository.deleteBySessionId(sessionId);
+        EntityQueries.selectOne(evaluationRepository, VoiceInterviewEvaluationEntity::getSessionId, sessionId)
+            .ifPresent(e -> evaluationRepository.deleteById(e.getId()));
+        messageRepository.delete(
+            Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                .eq(VoiceInterviewMessageEntity::getSessionId, sessionId));
         sessionRepository.deleteById(sessionId);
         invalidateSessionCache(sessionId);
         log.info("Deleted voice interview session: {}", sessionId);
@@ -682,8 +717,10 @@ public class VoiceInterviewService {
     public int cleanupStaleSessions() {
         LocalDateTime staleThreshold = LocalDateTime.now().minusHours(2);
 
-        List<VoiceInterviewSessionEntity> staleSessions = sessionRepository
-            .findByStatusAndStartTimeBefore(VoiceInterviewSessionStatus.IN_PROGRESS, staleThreshold);
+        List<VoiceInterviewSessionEntity> staleSessions = sessionRepository.selectList(
+            Wrappers.<VoiceInterviewSessionEntity>lambdaQuery()
+                .eq(VoiceInterviewSessionEntity::getStatus, VoiceInterviewSessionStatus.IN_PROGRESS)
+                .lt(VoiceInterviewSessionEntity::getStartTime, staleThreshold));
 
         int cleaned = 0;
         for (VoiceInterviewSessionEntity session : staleSessions) {
@@ -694,14 +731,16 @@ public class VoiceInterviewService {
         }
 
         LocalDateTime evalStaleThreshold = LocalDateTime.now().minusMinutes(30);
-        List<VoiceInterviewSessionEntity> stuckEvals = sessionRepository
-            .findByEvaluateStatusAndUpdatedAtBefore(AsyncTaskStatus.PROCESSING, evalStaleThreshold);
+        List<VoiceInterviewSessionEntity> stuckEvals = sessionRepository.selectList(
+            Wrappers.<VoiceInterviewSessionEntity>lambdaQuery()
+                .eq(VoiceInterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.PROCESSING)
+                .lt(VoiceInterviewSessionEntity::getUpdatedAt, evalStaleThreshold));
 
         for (VoiceInterviewSessionEntity session : stuckEvals) {
             log.info("Resetting stuck PROCESSING evaluation for session {}", session.getId());
             session.setEvaluateStatus(AsyncTaskStatus.FAILED);
             session.setEvaluateError("评估超时，请重新触发");
-            sessionRepository.save(session);
+            MapperUtils.save(sessionRepository, session);
             cleaned++;
         }
 

@@ -3,8 +3,11 @@ package com.linrun.interview.modules.interview.listener;
 import com.linrun.interview.common.async.AbstractStreamProducer;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.infrastructure.redis.RedisService;
-import com.linrun.interview.modules.interview.repository.InterviewSessionRepository;
+import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
+import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -18,11 +21,11 @@ import java.util.Map;
 @Component
 public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
 
-    private final InterviewSessionRepository sessionRepository;
+    private final InterviewSessionMapper sessionRepository;
 
-    public EvaluateStreamProducer(RedisService redisService, InterviewSessionRepository sessionRepository) {
+    public EvaluateStreamProducer(RedisService redisService, InterviewSessionMapper interviewSessionMapper) {
         super(redisService);
-        this.sessionRepository = sessionRepository;
+        this.sessionRepository = interviewSessionMapper;
     }
 
     /**
@@ -66,12 +69,13 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
      * 更新评估状态
      */
     private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
-        sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
+        EntityQueries.selectOne(sessionRepository, InterviewSessionEntity::getSessionId, sessionId)
+            .ifPresent(session -> {
             session.setEvaluateStatus(status);
             if (error != null) {
                 session.setEvaluateError(error.length() > 500 ? error.substring(0, 500) : error);
             }
-            sessionRepository.save(session);
+            MapperUtils.save(sessionRepository, session);
         });
     }
 }

@@ -1,13 +1,16 @@
 package com.linrun.interview.modules.llmprovider.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.linrun.interview.common.config.LlmProviderProperties;
 import com.linrun.interview.common.config.LlmProviderProperties.ProviderConfig;
+import com.linrun.interview.common.mybatis.MapperUtils;
+import com.linrun.interview.modules.llmprovider.mapper.LlmGlobalSettingMapper;
+import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
 import com.linrun.interview.modules.llmprovider.model.LlmGlobalSettingEntity;
 import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
-import com.linrun.interview.modules.llmprovider.repository.LlmGlobalSettingRepository;
-import com.linrun.interview.modules.llmprovider.repository.LlmProviderRepository;
 import jakarta.annotation.PostConstruct;
 import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,14 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class LlmProviderBootstrapService {
 
   private final LlmProviderProperties properties;
-  private final LlmProviderRepository providerRepository;
-  private final LlmGlobalSettingRepository globalSettingRepository;
+  private final LlmProviderMapper providerMapper;
+  private final LlmGlobalSettingMapper globalSettingMapper;
   private final ApiKeyEncryptionService encryptionService;
 
   @PostConstruct
   @Transactional
   public void seedProvidersIfNecessary() {
-    if (providerRepository.count() == 0) {
+    if (providerMapper.selectCount(null) == 0) {
       seedProviders();
     }
     ensureGlobalSetting();
@@ -62,25 +65,25 @@ public class LlmProviderBootstrapService {
           .enabled(true)
           .builtin(true)
           .build();
-      providerRepository.save(entity);
+      providerMapper.insert(entity);
     });
-    log.info("Seeded {} LLM providers from application configuration", providerRepository.count());
+    log.info("Seeded {} LLM providers from application configuration", providerMapper.selectCount(null));
   }
 
   private void ensureGlobalSetting() {
-    if (globalSettingRepository.existsById(LlmGlobalSettingEntity.SINGLETON_ID)) {
+    if (globalSettingMapper.selectById(LlmGlobalSettingEntity.SINGLETON_ID) != null) {
       return;
     }
     String defaultChatProvider = resolveExistingProvider(
         properties.getDefaultProvider(),
-        providerRepository.findAll().stream().findFirst().map(LlmProviderEntity::getId).orElse("dashscope")
+        providerMapper.selectList(null).stream().findFirst().map(LlmProviderEntity::getId).orElse("dashscope")
     );
     String configuredEmbeddingProvider = !isBlank(properties.getDefaultEmbeddingProvider())
         ? properties.getDefaultEmbeddingProvider()
         : defaultChatProvider;
     String defaultEmbeddingProvider = resolveExistingEmbeddingProvider(configuredEmbeddingProvider, defaultChatProvider);
 
-    globalSettingRepository.save(LlmGlobalSettingEntity.builder()
+    MapperUtils.save(globalSettingMapper, LlmGlobalSettingEntity.builder()
         .id(LlmGlobalSettingEntity.SINGLETON_ID)
         .defaultChatProviderId(defaultChatProvider)
         .defaultEmbeddingProviderId(defaultEmbeddingProvider)
@@ -90,17 +93,19 @@ public class LlmProviderBootstrapService {
   }
 
   private String resolveExistingProvider(String preferredProvider, String fallbackProvider) {
-    if (!isBlank(preferredProvider) && providerRepository.existsById(preferredProvider)) {
+    if (!isBlank(preferredProvider) && providerMapper.selectById(preferredProvider) != null) {
       return preferredProvider;
     }
     return fallbackProvider;
   }
 
   private String resolveExistingEmbeddingProvider(String preferredProvider, String fallbackProvider) {
-    return providerRepository.findById(preferredProvider)
+    return Optional.ofNullable(providerMapper.selectById(preferredProvider))
         .filter(this::canProvideEmbedding)
         .map(LlmProviderEntity::getId)
-        .orElseGet(() -> providerRepository.findAll().stream()
+        .orElseGet(() -> providerMapper.selectList(
+                Wrappers.<LlmProviderEntity>lambdaQuery().eq(LlmProviderEntity::isEnabled, true))
+            .stream()
             .filter(this::canProvideEmbedding)
             .findFirst()
             .map(LlmProviderEntity::getId)

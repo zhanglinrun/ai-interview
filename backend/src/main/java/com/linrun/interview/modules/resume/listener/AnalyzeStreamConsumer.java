@@ -3,10 +3,11 @@ package com.linrun.interview.modules.resume.listener;
 import com.linrun.interview.common.async.AbstractStreamConsumer;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.interview.model.ResumeAnalysisResponse;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
-import com.linrun.interview.modules.resume.repository.ResumeRepository;
 import com.linrun.interview.modules.resume.service.ResumeGradingService;
 import com.linrun.interview.modules.resume.service.ResumePersistenceService;
 import lombok.extern.slf4j.Slf4j;
@@ -14,29 +15,26 @@ import org.redisson.api.StreamMessageId;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Optional;
 
-/**
- * 简历分析 Stream 消费者
- * 负责从 Redis Stream 消费消息并执行 AI 分析
- */
 @Slf4j
 @Component
 public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamConsumer.AnalyzePayload> {
 
     private final ResumeGradingService gradingService;
     private final ResumePersistenceService persistenceService;
-    private final ResumeRepository resumeRepository;
+    private final ResumeEntityMapper resumeEntityMapper;
 
     public AnalyzeStreamConsumer(
         RedisService redisService,
         ResumeGradingService gradingService,
         ResumePersistenceService persistenceService,
-        ResumeRepository resumeRepository
+        ResumeEntityMapper resumeEntityMapper
     ) {
         super(redisService);
         this.gradingService = gradingService;
         this.persistenceService = persistenceService;
-        this.resumeRepository = resumeRepository;
+        this.resumeEntityMapper = resumeEntityMapper;
     }
 
     record AnalyzePayload(Long resumeId, String content) {}
@@ -90,13 +88,12 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
     @Override
     protected void processBusiness(AnalyzePayload payload) {
         Long resumeId = payload.resumeId();
-        if (!resumeRepository.existsById(resumeId)) {
+        if (resumeEntityMapper.selectById(resumeId) == null) {
             log.warn("简历已被删除，跳过分析任务: resumeId={}", resumeId);
             return;
         }
-
         ResumeAnalysisResponse analysis = gradingService.analyzeResume(payload.content());
-        ResumeEntity resume = resumeRepository.findById(resumeId).orElse(null);
+        ResumeEntity resume = resumeEntityMapper.selectById(resumeId);
         if (resume == null) {
             log.warn("简历在分析期间被删除，跳过保存结果: resumeId={}", resumeId);
             return;
@@ -123,20 +120,16 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
         );
     }
 
-    /**
-     * 更新分析状态
-     */
     private void updateAnalyzeStatus(Long resumeId, AsyncTaskStatus status, String error) {
         try {
-            resumeRepository.findById(resumeId).ifPresent(resume -> {
+            Optional.ofNullable(resumeEntityMapper.selectById(resumeId)).ifPresent(resume -> {
                 resume.setAnalyzeStatus(status);
                 resume.setAnalyzeError(error);
-                resumeRepository.save(resume);
+                MapperUtils.save(resumeEntityMapper, resume);
                 log.debug("分析状态已更新: resumeId={}, status={}", resumeId, status);
             });
         } catch (Exception e) {
             log.error("更新分析状态失败: resumeId={}, status={}, error={}", resumeId, status, e.getMessage(), e);
         }
     }
-
 }

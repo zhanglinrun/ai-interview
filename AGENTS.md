@@ -63,7 +63,7 @@ com.linrun.interview/
     └── llmprovider/                  #   多模型管理：Provider 配置、默认模型切换、API Key 加密、连通性测试、启动加载
 ```
 
-**技术栈**：Spring Boot 3.5.6 / Java 21（虚拟线程）/ LangChain4j 1.11.0（替代 Spring AI，对齐 know-engine）/ JPA + PostgreSQL + Flyway / Elasticsearch（向量存储，替代 pgvector）/ Redisson 3.50.0 / Redis Stream（简历/面试评估）+ Spring 事件（知识库向量化）/ MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 + MinerU（文档解析，Tika fallback）/ DashScope SDK 2.22.7（ASR/TTS）
+**技术栈**：Spring Boot 3.5.6 / Java 21（虚拟线程）/ LangChain4j 1.11.0 / JPA + PostgreSQL + Flyway / Elasticsearch（向量存储）/ Redisson 3.50.0 / Redis Stream（简历/面试评估）+ Spring 事件（知识库向量化）/ MapStruct 1.6.3 / iText 8.0.5 / Apache Tika 2.9.2 + MinerU（文档解析，Tika fallback）/ DashScope SDK 2.22.7（ASR/TTS）
 
 **前端**：React 18.3 + TypeScript 5.6 + Vite 5.4 + Tailwind CSS 4.1 + React Router 7.11 + Framer Motion 12.23（`frontend/` 目录）
 
@@ -230,7 +230,7 @@ StreamingChatModel streamingChatModel = llmProviderRegistry.getStreamingChatMode
 EmbeddingModel embeddingModel = llmProviderRegistry.getDefaultEmbeddingModel();
 ```
 
-- 已从 Spring AI `ChatClient` 迁移到 LangChain4j `ChatModel` / `StreamingChatModel` / `EmbeddingModel`
+- AI 调用统一走 LangChain4j `ChatModel` / `StreamingChatModel` / `EmbeddingModel`
 - 配置：`app.ai.providers.{providerId}.baseUrl/apiKey/model`，默认 Provider `app.ai.default-provider`
 - 敏感词过滤：`SafeGuardChatModel` / `SafeGuardStreamingChatModel` 包装底层模型
 - ReAct Agent：用 LangChain4j `AiServices` + `@Tool` 方法（`InterviewAgentLoop`），`ToolListener` 捕获执行轨迹，`ThreadLocal` 传 `AgentToolContext`
@@ -282,7 +282,7 @@ String result = structuredOutputInvoker.invokeStructuredOutput(prompt, ChatModel
 ## 十一、数据库与向量存储
 
 - PostgreSQL（关系数据，业务表）+ Flyway（数据库版本迁移）
-- Elasticsearch（向量存储，替代 pgvector；LangChain4j `ElasticsearchEmbeddingStore`，1024 维 COSINE，单一索引靠 metadata docId/version 区分）
+- Elasticsearch（向量存储；LangChain4j `ElasticsearchEmbeddingStore`，1024 维 COSINE，单一索引靠 metadata docId/version 区分）
 - 知识库三表结构：`knowledge_bases`（文档主表）+ `knowledge_base_version`（版本表）+ `knowledge_base_segment`（分段表，存 chunk 文本 + embeddingId + 分段级状态机）
 - JPA 实体使用 `@Data`、`@Builder`、`@NoArgsConstructor`、`@AllArgsConstructor`
 - `ddl-auto` 开发环境 `update`，生产环境 `false`（表结构由 JPA Entity 注解驱动 + Flyway 迁移）

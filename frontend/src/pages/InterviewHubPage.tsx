@@ -113,6 +113,7 @@ export default function InterviewHubPage() {
             llmProvider: config.llmProvider,
             jdText: config.isCustomSkill ? config.parsedCustomJdText : undefined,
             customCategories: config.isCustomSkill ? config.customCategories : undefined,
+            knowledgeBaseIds: config.selectedKbIds.length > 0 ? config.selectedKbIds : undefined,
           },
         },
       });
@@ -187,6 +188,10 @@ export default function InterviewHubPage() {
             onQuestionCountChange={config.setQuestionCount}
             plannedDuration={config.plannedDuration}
             onPlannedDurationChange={config.setPlannedDuration}
+            knowledgeBases={config.knowledgeBases}
+            loadingKnowledgeBases={config.loadingKnowledgeBases}
+            selectedKbIds={config.selectedKbIds}
+            onKnowledgeBaseToggle={config.toggleKnowledgeBase}
           />
         </div>
 

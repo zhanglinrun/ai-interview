@@ -23,6 +23,7 @@ interface InterviewProps {
     difficulty?: Difficulty;
     customCategories?: CategoryDTO[];
     jdText?: string;
+    knowledgeBaseIds?: number[];
   };
   onBack: () => void;
   onInterviewComplete: () => void;
@@ -52,6 +53,7 @@ export default function Interview({
   const difficulty = initialConfig?.difficulty ?? 'mid';
   const customCategories = initialConfig?.customCategories;
   const jdText = initialConfig?.jdText;
+  const knowledgeBaseIds = initialConfig?.knowledgeBaseIds;
 
   const initSession = useCallback((s: InterviewSession) => {
     setSession(s);
@@ -96,6 +98,7 @@ export default function Interview({
         difficulty,
         customCategories: skillId === CUSTOM_SKILL_ID ? customCategories : undefined,
         jdText: skillId === CUSTOM_SKILL_ID ? jdText : undefined,
+        knowledgeBaseIds: knowledgeBaseIds && knowledgeBaseIds.length > 0 ? knowledgeBaseIds : undefined,
       });
 
       initSession(newSession);
@@ -110,6 +113,7 @@ export default function Interview({
     difficulty,
     initSession,
     jdText,
+    knowledgeBaseIds,
     llmProvider,
     questionCount,
     resumeId,

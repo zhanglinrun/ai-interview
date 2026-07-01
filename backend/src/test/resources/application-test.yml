@@ -1,26 +1,20 @@
-# Test Profile Configuration
-# 测试环境配置文件
+# 测试环境配置（对齐 MyBatis-Plus + MySQL 方言，H2 内存库模拟）
 
 spring:
   datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    type: com.alibaba.druid.pool.DruidDataSource
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
     password:
     driver-class-name: org.h2.Driver
+    druid:
+      initial-size: 1
+      min-idle: 1
+      max-active: 5
 
-  # 测试用 H2 内存库，schema 由 JPA create-drop 生成；
-  # V1 基线是 PostgreSQL 方言（CREATE EXTENSION vector 等），在 H2 上执行会直接报错，必须关闭 Flyway。
-  flyway:
-    enabled: false
-
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-    show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
-        format_sql: true
+  sql:
+    init:
+      mode: never
 
   redis:
     redisson:
@@ -29,52 +23,65 @@ spring:
           address: "redis://localhost:6379"
           database: 0
 
-  ai:
-    openai:
-      base-url: https://dashscope.aliyuncs.com/compatible-mode
-      api-key: test-api-key
-      chat:
-        options:
-          model: qwen3.5-flash
-          temperature: 0.2
-      embedding:
-        options:
-          model: text-embedding-v3
-    retry:
-      max-attempts: 1
-      on-client-errors: false
-    vectorstore:
-      pgvector:
-        index-type: HNSW
-        distance-type: COSINE_DISTANCE
-        dimensions: 1024
-        initialize-schema: false
-        remove-existing-vector-store-table: false
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
 
-# Elasticsearch 向量存储（测试环境指向本地 ES，bean 创建时不真实连接，
-# 仅保证 ElasticSearchProperties.host 非空，避免 RestClient bean 初始化 NPE）
 elasticsearch:
   host: ${ES_HOST:http://localhost:9200}
   index-name: interview-guide-vector
-  dimensions: 1024
+  dimensions: 1536
+
+minio:
+  url: http://localhost:9000
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucketName: interview-guide
+  endpoint: http://localhost:9000
+
+neo4j:
+  uri: bolt://localhost:7687
+  username: neo4j
+  password: neo4j666
+
+xxl:
+  job:
+    admin:
+      addresses: http://127.0.0.1:8080/xxl-job-admin
+    accessToken: default_token
+    executor:
+      appname: ai-interview-executor-test
 
 app:
   ai:
     default-provider: dashscope
+    embedding-dimensions: 1536
     providers:
       dashscope:
-        base-url: https://dashscope.aliyuncs.com/compatible-mode
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         api-key: test-api-key
-      model: qwen3.5-flash
+        model: qwen3.5-flash
+        embedding-model: text-embedding-v4
+        embedding-dimensions: 1536
+        supports-embedding: true
       lmstudio:
         base-url: http://localhost:1234
         api-key: lm-studio
         model: qwen2.5-7b-instruct
+        supports-embedding: false
     structured-max-attempts: 2
     structured-include-last-error: true
     rag:
       rewrite:
         enabled: true
+      hybrid:
+        enabled: true
+        mode: hybrid
+      rerank:
+        provider: local
       search:
         short-query-length: 4
         topk-short: 20
@@ -93,20 +100,10 @@ app:
       - application/msword
       - application/vnd.openxmlformats-officedocument.wordprocessingml.document
       - text/plain
-
-  storage:
-    endpoint: http://localhost:9000
-    access-key: minioadmin
-    secret-key: minioadmin
-    bucket: interview-guide
-    region: us-east-1
-
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:80
-
   voice-interview:
     llm-provider: dashscope
-
     phase:
       intro:
         min-duration: 3
@@ -132,10 +129,8 @@ app:
         max-duration: 8
         min-questions: 2
         max-questions: 5
-
     tts:
       default-voice: siyue
-
     qwen:
       asr:
         url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
@@ -148,7 +143,6 @@ app:
         turn-detection-type: server_vad
         turn-detection-threshold: 0.0
         turn-detection-silence-duration-ms: 1000
-
       tts:
         url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
         model: qwen3-tts-flash-realtime
@@ -160,14 +154,11 @@ app:
         language-type: Chinese
         speech-rate: 1.0
         volume: 60
-
     user-utterance-debounce-ms: 1600
-
     rate-limit:
       max-per-session: 10
       max-per-ip: 3
       max-concurrent: 50
-
     audio:
       codec: opus
       sample-rate: 16000

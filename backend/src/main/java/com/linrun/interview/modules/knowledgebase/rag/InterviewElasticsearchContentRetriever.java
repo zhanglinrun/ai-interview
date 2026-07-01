@@ -22,6 +22,7 @@ import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
+import com.linrun.interview.modules.knowledgebase.service.SegmentTextCacheService;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.RestClient;
@@ -52,7 +53,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  * <p>父子/兄弟分段扩展（small-to-big，对齐 know-engine）：检索命中小 chunk 后，开启
  * {@code ParentExpand} 时按 {@code parentChunkId} 取父块章节文本拼接、按 {@code brotherChunkId}
  * 取同组兄弟按序拼接成完整段落，给 LLM 更完整上下文。扩展从 segment 表按冗余列批量查（避免 N+1），
- * 受 {@code maxChars/maxSiblings} 截断；扩展不改变命中 chunk 的 score。权限过滤由 docId filter 限定。
+ * 受 {@code maxChars/maxSiblings} 截断；扩展不改变命中 chunk 的 score。权限过滤由 docId + accessibleBy 限定。
  *
  * <p>每次对话按 knowledgeBaseIds 构建 filter，故为 prototype 作用域，由调用方 new 或工厂创建。
  */
@@ -73,6 +74,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final RestClient restClient;
     private final String indexName;
     private final ObjectMapper objectMapper;
+    private final String forcedSearchMode;
+    private final Long accessibleUserId;
+    private final SegmentTextCacheService segmentTextCache;
     /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
     private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
 
@@ -139,11 +143,32 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    RestClient restClient,
                                                    String indexName,
                                                    ObjectMapper objectMapper) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
+            parentExpand, hybrid, progressCallback, trace, restClient, indexName, objectMapper,
+            null, null, null);
+    }
+
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
+                                                   Consumer<String> progressCallback,
+                                                   RagQueryTrace trace,
+                                                   RestClient restClient,
+                                                   String indexName,
+                                                   ObjectMapper objectMapper,
+                                                   String forcedSearchMode,
+                                                   Long accessibleUserId,
+                                                   SegmentTextCacheService segmentTextCache) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
         this.minScore = minScore;
-        this.filter = buildKbFilter(knowledgeBaseIds);
+        this.filter = buildKbFilter(knowledgeBaseIds, accessibleUserId);
         this.knowledgeBaseIdSet = knowledgeBaseIds == null ? Set.of() : knowledgeBaseIds.stream()
             .filter(Objects::nonNull)
             .map(String::valueOf)
@@ -156,6 +181,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         this.restClient = restClient;
         this.indexName = indexName;
         this.objectMapper = objectMapper;
+        this.forcedSearchMode = forcedSearchMode;
+        this.accessibleUserId = accessibleUserId;
+        this.segmentTextCache = segmentTextCache;
     }
 
     @Override
@@ -256,10 +284,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         }
         knn.put("k", searchRequest.maxResults());
         knn.put("num_candidates", Math.max(searchRequest.maxResults() * 10, 100));
-        if (!knowledgeBaseIdSet.isEmpty()) {
-            ArrayNode terms = knn.putObject("filter").putObject("terms")
-                .putArray("metadata." + MetadataKeyConstant.DOC_ID + ".keyword");
-            knowledgeBaseIdSet.forEach(terms::add);
+        ObjectNode metadataFilter = buildNativeMetadataFilter();
+        if (metadataFilter != null) {
+            knn.set("filter", metadataFilter);
         }
 
         Request request = new Request("POST", "/" + indexName + "/_search");
@@ -271,6 +298,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         List<EmbeddingMatch<TextSegment>> matches = embeddingStore.fullTextSearch(queryText).stream()
             .limit(Math.max(maxResults, 1))
             .map(segment -> new EmbeddingMatch<>(1.0, null, null, segment))
+            .filter(match -> matchesKnowledgeBaseFilter(toContent(match)))
             .toList();
         return new EmbeddingSearchResult<>(matches);
     }
@@ -281,10 +309,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         root.putArray("_source").add("text").add("metadata");
         ObjectNode bool = root.putObject("query").putObject("bool");
         bool.putArray("must").addObject().putObject("match").putObject("text").put("query", queryText);
-        if (!knowledgeBaseIdSet.isEmpty()) {
-            ArrayNode terms = bool.putArray("filter").addObject().putObject("terms")
-                .putArray("metadata." + MetadataKeyConstant.DOC_ID + ".keyword");
-            knowledgeBaseIdSet.forEach(terms::add);
+        ObjectNode metadataFilter = buildNativeMetadataFilter();
+        if (metadataFilter != null) {
+            bool.putArray("filter").add(metadataFilter);
         }
 
         Request request = new Request("POST", "/" + indexName + "/_search");
@@ -321,14 +348,25 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     }
 
     private String searchMode() {
+        if (forcedSearchMode != null && !forcedSearchMode.isBlank()) {
+            return forcedSearchMode;
+        }
         return hybrid != null && hybrid.getMode() != null ? hybrid.getMode() : "hybrid";
     }
 
     private boolean matchesKnowledgeBaseFilter(Content content) {
+        Metadata metadata = content.textSegment().metadata();
+        if (accessibleUserId != null) {
+            String accessibleBy = metadata.getString(MetadataKeyConstant.ACCESSIBLE_BY);
+            if (accessibleBy != null && !accessibleBy.isBlank()
+                && !accessibleBy.equals(String.valueOf(accessibleUserId))) {
+                return false;
+            }
+        }
         if (knowledgeBaseIdSet.isEmpty()) {
             return true;
         }
-        String docId = content.textSegment().metadata().getString(MetadataKeyConstant.DOC_ID);
+        String docId = metadata.getString(MetadataKeyConstant.DOC_ID);
         return knowledgeBaseIdSet.contains(docId);
     }
 
@@ -358,15 +396,17 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         // 2. 批量查父块（按 chunkId）与同组兄弟（按 brotherChunkId，已按 index 排序）
         Map<String, String> parentTextByChunkId = new HashMap<>();
         if (!parentChunkIds.isEmpty()) {
-            for (KnowledgeBaseSegmentEntity s : segmentService.findByChunkIdIn(new ArrayList<>(parentChunkIds))) {
-                if (s.getText() != null && !s.getText().isBlank()) {
-                    parentTextByChunkId.put(s.getChunkId(), s.getText());
-                }
-            }
+            Map<String, String> loaded = loadParentTexts(parentChunkIds);
+            parentTextByChunkId.putAll(loaded);
         }
         Map<String, List<KnowledgeBaseSegmentEntity>> brothersByGroupId = new LinkedHashMap<>();
         if (!brotherChunkIds.isEmpty()) {
-            for (KnowledgeBaseSegmentEntity s : segmentService.findByBrotherChunkIdIn(new ArrayList<>(brotherChunkIds))) {
+            List<KnowledgeBaseSegmentEntity> brothers =
+                segmentService.findByBrotherChunkIdIn(new ArrayList<>(brotherChunkIds));
+            if (segmentTextCache != null) {
+                segmentTextCache.warmChunkTexts(brothers);
+            }
+            for (KnowledgeBaseSegmentEntity s : brothers) {
                 brothersByGroupId.computeIfAbsent(s.getBrotherChunkId(), k -> new ArrayList<>()).add(s);
             }
         }
@@ -379,8 +419,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         for (Content hit : hits) {
             TextSegment seg = hit.textSegment();
             Metadata meta = seg.metadata();
-            String expandedText = buildExpandedText(
-                seg.text(), meta, parentTextByChunkId, brothersByGroupId, maxChars, maxSiblings);
+            String expandedText = ParentExpandHelper.buildExpandedText(
+                seg.text(), meta, parentTextByChunkId, brothersByGroupId, maxChars, maxSiblings,
+                parentExpand.getStrategy());
             Content expandedContent;
             if (expandedText.equals(seg.text())) {
                 expandedContent = hit;
@@ -397,102 +438,47 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         return expanded;
     }
 
-    /**
-     * 拼接扩展文本：父块章节文本 + 同组兄弟按序拼接。命中 chunk 自身必包含在内。
-     * 受 maxChars 截断、maxSiblings 限制兄弟数。
-     */
-    private String buildExpandedText(String hitText, Metadata meta,
-                                     Map<String, String> parentTextByChunkId,
-                                     Map<String, List<KnowledgeBaseSegmentEntity>> brothersByGroupId,
-                                     int maxChars, int maxSiblings) {
-        StringBuilder sb = new StringBuilder();
-        appendTruncated(sb, hitText, maxChars);
-
-        // 同组兄弟围绕命中 chunk 拼接，避免大组从头拼接时把真正命中的答案截掉。
-        String bid = meta.getString(MetadataKeyConstant.BROTHER_CHUNK_ID);
-        List<KnowledgeBaseSegmentEntity> brothers = bid != null ? brothersByGroupId.get(bid) : null;
-        if (brothers != null && brothers.size() > 1) {
-            int added = 1;
-            for (KnowledgeBaseSegmentEntity b : nearbyBrothers(brothers, meta, maxSiblings)) {
-                if (added >= maxSiblings) {
-                    break;
-                }
-                if (!isHitBrother(b, meta) && b.getText() != null && !b.getText().isBlank()) {
-                    appendTruncated(sb, b.getText(), maxChars);
-                    added++;
-                }
+    private Map<String, String> loadParentTexts(Set<String> parentChunkIds) {
+        Map<String, String> loaded = new HashMap<>();
+        List<KnowledgeBaseSegmentEntity> segments =
+            segmentService.findByChunkIdIn(new ArrayList<>(parentChunkIds));
+        for (KnowledgeBaseSegmentEntity segment : segments) {
+            if (segment.getText() == null || segment.getText().isBlank()) {
+                continue;
+            }
+            String text = segmentTextCache == null
+                ? segment.getText()
+                : segmentTextCache.getTextByChunkId(segment.getChunkId(), segment::getText);
+            if (text != null && !text.isBlank()) {
+                loaded.put(segment.getChunkId(), text);
             }
         }
-
-        // 父块放在命中内容之后，保留章节骨架但不抢占答案片段预算。
-        String pid = meta.getString(MetadataKeyConstant.PARENT_CHUNK_ID);
-        if (pid != null) {
-            String parentText = parentTextByChunkId.get(pid);
-            if (parentText != null && !parentText.isBlank()) {
-                appendTruncated(sb, parentText, maxChars);
-            }
-        }
-
-        return sb.toString();
+        return loaded;
     }
 
-    private List<KnowledgeBaseSegmentEntity> nearbyBrothers(
-        List<KnowledgeBaseSegmentEntity> brothers, Metadata meta, int maxSiblings) {
-        int hitIndex = findHitBrotherIndex(brothers, meta);
-        if (hitIndex < 0 || maxSiblings <= 1) {
-            return List.of();
+    private ObjectNode buildNativeMetadataFilter() {
+        if (objectMapper == null) {
+            return null;
         }
-        int maxNeighbors = maxSiblings == Integer.MAX_VALUE ? Integer.MAX_VALUE : maxSiblings - 1;
-        List<KnowledgeBaseSegmentEntity> nearby = new ArrayList<>();
-        int left = hitIndex - 1;
-        int right = hitIndex + 1;
-        while (nearby.size() < maxNeighbors && (left >= 0 || right < brothers.size())) {
-            if (right < brothers.size()) {
-                nearby.add(brothers.get(right++));
-            }
-            if (nearby.size() >= maxNeighbors) {
-                break;
-            }
-            if (left >= 0) {
-                nearby.add(brothers.get(left--));
-            }
+        ArrayNode must = objectMapper.createArrayNode();
+        if (accessibleUserId != null) {
+            must.addObject().putObject("term")
+                .putObject("metadata." + MetadataKeyConstant.ACCESSIBLE_BY + ".keyword")
+                .put("value", String.valueOf(accessibleUserId));
         }
-        return nearby;
-    }
-
-    private int findHitBrotherIndex(List<KnowledgeBaseSegmentEntity> brothers, Metadata meta) {
-        String hitChunkId = meta.getString(MetadataKeyConstant.CHUNK_ID);
-        Integer hitBrotherIndex = meta.getInteger(MetadataKeyConstant.BROTHER_CHUNK_INDEX);
-        for (int i = 0; i < brothers.size(); i++) {
-            KnowledgeBaseSegmentEntity brother = brothers.get(i);
-            if (hitChunkId != null && hitChunkId.equals(brother.getChunkId())) {
-                return i;
-            }
-            if (hitBrotherIndex != null && hitBrotherIndex.equals(brother.getBrotherChunkIndex())) {
-                return i;
-            }
+        if (!knowledgeBaseIdSet.isEmpty()) {
+            ArrayNode terms = must.addObject().putObject("terms")
+                .putArray("metadata." + MetadataKeyConstant.DOC_ID + ".keyword");
+            knowledgeBaseIdSet.forEach(terms::add);
         }
-        return -1;
-    }
-
-    private boolean isHitBrother(KnowledgeBaseSegmentEntity brother, Metadata meta) {
-        String hitChunkId = meta.getString(MetadataKeyConstant.CHUNK_ID);
-        if (hitChunkId != null && hitChunkId.equals(brother.getChunkId())) {
-            return true;
+        if (must.isEmpty()) {
+            return null;
         }
-        Integer hitBrotherIndex = meta.getInteger(MetadataKeyConstant.BROTHER_CHUNK_INDEX);
-        return hitBrotherIndex != null && hitBrotherIndex.equals(brother.getBrotherChunkIndex());
-    }
-
-    private void appendTruncated(StringBuilder sb, String text, int maxChars) {
-        if (sb.length() >= maxChars) {
-            return;
-        }
-        if (sb.length() > 0) {
-            sb.append("\n\n");
-        }
-        int remaining = maxChars - sb.length();
-        sb.append(text, 0, Math.min(text.length(), remaining));
+        ObjectNode bool = objectMapper.createObjectNode();
+        bool.set("must", must);
+        ObjectNode filter = objectMapper.createObjectNode();
+        filter.set("bool", bool);
+        return filter;
     }
 
     private Content toContent(EmbeddingMatch<TextSegment> match) {
@@ -510,9 +496,23 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     }
 
     /**
-     * 构建 docId metadata filter（任一知识库命中）。
+     * 构建 docId + accessibleBy metadata filter。
      */
-    private Filter buildKbFilter(List<Long> knowledgeBaseIds) {
+    private Filter buildKbFilter(List<Long> knowledgeBaseIds, Long userId) {
+        Filter accessFilter = userId != null
+            ? metadataKey(MetadataKeyConstant.ACCESSIBLE_BY).isEqualTo(String.valueOf(userId))
+            : null;
+        Filter docFilter = buildDocIdFilter(knowledgeBaseIds);
+        if (accessFilter == null) {
+            return docFilter;
+        }
+        if (docFilter == null) {
+            return accessFilter;
+        }
+        return accessFilter.and(docFilter);
+    }
+
+    private Filter buildDocIdFilter(List<Long> knowledgeBaseIds) {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
             return null;
         }

@@ -122,7 +122,7 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
         this.sqlRetriever = SqlDatabaseContentRetriever.builder()
             .dataSource(new SafeReadOnlyDataSource(dataSource, allowedTables(dynamicTables),
                 queryTimeoutSeconds, this.maxRows, userId))
-            .sqlDialect("PostgreSQL")
+            .sqlDialect("MySQL")
             .databaseStructure(databaseStructure)
             .chatModel(chatModel)
             .maxRetries(1)

@@ -1,5 +1,8 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.security.UserContext;
@@ -10,18 +13,18 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 import com.linrun.interview.modules.knowledgebase.model.RagChatSessionEntity;
-import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseRepository;
-import com.linrun.interview.modules.knowledgebase.repository.RagChatSessionRepository;
+import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
+import com.linrun.interview.modules.knowledgebase.mapper.RagSessionKnowledgeBaseMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 知识库文档管理实现（对齐 know-engine KnowledgeDocumentServiceImpl）。
@@ -45,19 +48,23 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
     private static final int EMBED_PAGE_SIZE = 100;
 
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
     private final KnowledgeDocumentVersionService versionService;
     private final KnowledgeSegmentService segmentService;
     private final VectorStoreService vectorStoreService;
     private final FileStorageService fileStorageService;
-    private final RagChatSessionRepository sessionRepository;
+    private final RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
     private final KnowledgeBaseDataTableService dataTableService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private KnowledgeGraphSyncService knowledgeGraphSyncService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void removeDocumentWithSegments(Long docId) {
         Long userId = UserContext.requireUserId();
-        KnowledgeBaseEntity doc = knowledgeBaseRepository.findByUserIdAndId(userId, docId)
+        KnowledgeBaseEntity doc = EntityQueries.byUserAndId(
+            knowledgeBaseEntityMapper, userId, docId, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
         log.info("删除知识库（级联）: docId={}", docId);
 
@@ -70,7 +77,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 4. 物理删 version
         versionService.physicalDeleteByDocId(docId);
         // 5. 物理删文档
-        knowledgeBaseRepository.deleteById(docId);
+        knowledgeBaseEntityMapper.deleteById(docId);
         log.info("删除知识库 DB 记录完成: docId={}", docId);
 
         // 5. ES 删向量 + RustFS 删文件：外部 IO，移到事务提交后执行（事务内禁止外部 API）
@@ -86,7 +93,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         Long userId = UserContext.requireUserId();
         log.info("批量删除知识库（级联）: count={}", docIds.size());
         for (Long docId : docIds) {
-            KnowledgeBaseEntity doc = knowledgeBaseRepository.findByUserIdAndId(userId, docId)
+            KnowledgeBaseEntity doc = EntityQueries.byUserAndId(
+            knowledgeBaseEntityMapper, userId, docId, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
                 .orElse(null);
             if (doc == null) {
                 log.warn("批量删除跳过不存在的知识库: docId={}", docId);
@@ -96,7 +104,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             dataTableService.deleteByDoc(userId, docId);
             segmentService.physicalDeleteByDocumentId(docId);
             versionService.physicalDeleteByDocId(docId);
-            knowledgeBaseRepository.deleteById(docId);
+            knowledgeBaseEntityMapper.deleteById(docId);
             schedulePostCommitCleanup(docId, doc.getStorageKey());
         }
         log.info("批量删除知识库 DB 记录完成: count={}", docIds.size());
@@ -124,14 +132,12 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * 删除 RAG 会话中对该知识库的关联（避免外键约束阻止删除文档）。
      */
     private void removeSessionAssociations(Long userId, Long docId) {
-        List<RagChatSessionEntity> sessions =
-            sessionRepository.findByUserIdAndKnowledgeBaseIds(userId, List.of(docId));
-        for (RagChatSessionEntity session : sessions) {
-            session.getKnowledgeBases().removeIf(kb -> kb.getId().equals(docId));
-            sessionRepository.save(session);
+        List<Long> sessionIds = sessionKnowledgeBaseMapper.selectSessionIdsByKnowledgeBaseId(docId);
+        for (Long sessionId : sessionIds) {
+            sessionKnowledgeBaseMapper.deleteLink(sessionId, docId);
         }
-        if (!sessions.isEmpty()) {
-            log.info("已从 {} 个会话中移除知识库关联: docId={}", sessions.size(), docId);
+        if (!sessionIds.isEmpty()) {
+            log.info("已从 {} 个会话中移除知识库关联: docId={}", sessionIds.size(), docId);
         }
     }
 
@@ -175,7 +181,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         log.info("开始向量化版本: docId={}, versionId={}", docId, versionId);
 
         // 切换/重新向量化前，先失效文档当前激活版本的 ES 向量（避免旧版本向量残留干扰检索）
-        KnowledgeBaseEntity doc = knowledgeBaseRepository.findById(docId)
+        KnowledgeBaseEntity doc = Optional.ofNullable(knowledgeBaseEntityMapper.selectById(docId))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "知识库不存在: docId=" + docId));
         Long currentVersionId = doc.getCurrentVersionId();
@@ -184,10 +190,13 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         }
 
         // 分页扫 STORED + skipEmbedding=0 + embeddingId IS NULL 的分段
-        Page<KnowledgeBaseSegmentEntity> page = segmentService.pagePendingEmbedding(
-            docId, versionId, SegmentStatus.STORED, PageRequest.of(0, EMBED_PAGE_SIZE));
-        while (!page.isEmpty()) {
-            List<KnowledgeBaseSegmentEntity> batch = page.getContent();
+        List<KnowledgeBaseSegmentEntity> batch;
+        do {
+            batch = segmentService.listPendingEmbedding(
+                docId, versionId, SegmentStatus.STORED, EMBED_PAGE_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
             List<String> embeddingIds = vectorStoreService.embedAndStore(batch);
             for (int i = 0; i < batch.size(); i++) {
                 KnowledgeBaseSegmentEntity seg = batch.get(i);
@@ -195,9 +204,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 seg.setStatus(SegmentStatus.VECTOR_STORED);
                 segmentService.update(seg);
             }
-            page = segmentService.pagePendingEmbedding(
-                docId, versionId, SegmentStatus.STORED, PageRequest.of(0, EMBED_PAGE_SIZE));
-        }
+        } while (batch.size() == EMBED_PAGE_SIZE);
 
         // 版本升 VECTOR_STORED
         version.setStatus(DocumentStatus.VECTOR_STORED);
@@ -206,8 +213,16 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 同步文档主表
         doc.setDocStatus(DocumentStatus.VECTOR_STORED);
         doc.setCurrentVersionId(versionId);
-        knowledgeBaseRepository.save(doc);
+        MapperUtils.save(knowledgeBaseEntityMapper, doc);
         log.info("版本向量化完成: docId={}, versionId={}", docId, versionId);
+        syncKnowledgeGraphIfEnabled(doc, versionId);
+    }
+
+    private void syncKnowledgeGraphIfEnabled(KnowledgeBaseEntity doc, Long versionId) {
+        if (knowledgeGraphSyncService == null || !knowledgeGraphSyncService.isEnabled()) {
+            return;
+        }
+        knowledgeGraphSyncService.syncDocument(doc.getId(), versionId, doc.getUserId(), doc.getName());
     }
 
     @Override
@@ -244,5 +259,50 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 3. 版本降 CHUNKED
         version.setStatus(DocumentStatus.CHUNKED);
         versionService.update(version);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean advanceDocumentAndVersionStatus(Long docId, Long versionId, DocumentStatus targetStatus) {
+        if (docId == null || versionId == null || targetStatus == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "推进文档状态参数不能为空");
+        }
+        KnowledgeBaseEntity document = Optional.ofNullable(knowledgeBaseEntityMapper.selectById(docId))
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: docId=" + docId));
+        KnowledgeBaseVersionEntity version = versionService.getById(versionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
+                "版本记录不存在: versionId=" + versionId));
+        if (!docId.equals(version.getDocId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "版本不属于该知识库");
+        }
+
+        boolean updated = false;
+        if (shouldAdvanceStatus(document.getDocStatus(), targetStatus)) {
+            document.setDocStatus(targetStatus);
+            MapperUtils.save(knowledgeBaseEntityMapper, document);
+            updated = true;
+            log.info("文档状态已推进: docId={}, status={}", docId, targetStatus);
+        } else {
+            log.debug("文档状态无需推进: docId={}, current={}, target={}",
+                docId, document.getDocStatus(), targetStatus);
+        }
+
+        if (shouldAdvanceStatus(version.getStatus(), targetStatus)) {
+            version.setStatus(targetStatus);
+            versionService.update(version);
+            updated = true;
+            log.info("版本状态已推进: versionId={}, status={}", versionId, targetStatus);
+        } else {
+            log.debug("版本状态无需推进: versionId={}, current={}, target={}",
+                versionId, version.getStatus(), targetStatus);
+        }
+        return updated;
+    }
+
+    private boolean shouldAdvanceStatus(DocumentStatus current, DocumentStatus target) {
+        if (current == null) {
+            return true;
+        }
+        return current.ordinal() < target.ordinal();
     }
 }

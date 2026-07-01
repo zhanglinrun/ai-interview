@@ -10,10 +10,14 @@ import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.interview.model.InterviewAnswerEntity;
 import com.linrun.interview.modules.interview.model.InterviewQuestionDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
-import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
-import com.linrun.interview.modules.interview.repository.InterviewSessionRepository;
-import com.linrun.interview.modules.interview.service.AnswerEvaluationService;
 import com.linrun.interview.modules.interview.service.InterviewPersistenceService;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
+import com.linrun.interview.modules.resume.model.ResumeEntity;
+import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
+import com.linrun.interview.modules.interview.service.AnswerEvaluationService;
+import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.StreamMessageId;
 import dev.langchain4j.model.chat.ChatModel;
@@ -33,7 +37,7 @@ import java.util.Optional;
 @Component
 public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStreamConsumer.EvaluatePayload> {
 
-    private final InterviewSessionRepository sessionRepository;
+    private final InterviewSessionMapper sessionRepository;
     private final AnswerEvaluationService evaluationService;
     private final InterviewPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
@@ -41,14 +45,14 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
     public EvaluateStreamConsumer(
         RedisService redisService,
-        InterviewSessionRepository sessionRepository,
+        InterviewSessionMapper interviewSessionMapper,
         AnswerEvaluationService evaluationService,
         InterviewPersistenceService persistenceService,
         ObjectMapper objectMapper,
         LlmProviderRegistry llmProviderRegistry
     ) {
         super(redisService);
-        this.sessionRepository = sessionRepository;
+        this.sessionRepository = interviewSessionMapper;
         this.evaluationService = evaluationService;
         this.persistenceService = persistenceService;
         this.objectMapper = objectMapper;
@@ -105,7 +109,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected void processBusiness(EvaluatePayload payload) {
         String sessionId = payload.sessionId();
-        Optional<InterviewSessionEntity> sessionOpt = sessionRepository.findBySessionIdWithResume(sessionId);
+        Optional<InterviewSessionEntity> sessionOpt = persistenceService.findBySessionIdInternal(sessionId);
         if (sessionOpt.isEmpty()) {
             log.warn("会话已被删除，跳过评估任务: sessionId={}", sessionId);
             return;
@@ -165,10 +169,11 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
      */
     private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
         try {
-            sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
+            EntityQueries.selectOne(sessionRepository, InterviewSessionEntity::getSessionId, sessionId)
+                .ifPresent(session -> {
                 session.setEvaluateStatus(status);
                 session.setEvaluateError(error);
-                sessionRepository.save(session);
+                MapperUtils.save(sessionRepository, session);
                 log.debug("评估状态已更新: sessionId={}, status={}", sessionId, status);
             });
         } catch (Exception e) {

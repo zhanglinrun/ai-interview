@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronUp, FileStack } from 'lucide-react';
 import type { ResumeListItem } from '../api/history';
+import type { KnowledgeBaseItem } from '../api/knowledgebase';
 import type { InterviewMode } from '../hooks/useInterviewConfig';
+import InterviewKnowledgeBaseSelector from './InterviewKnowledgeBaseSelector';
 
 const QUESTION_COUNTS = [6, 8, 10, 12] as const;
 
@@ -16,6 +18,10 @@ interface InterviewAdvancedOptionsProps {
   onQuestionCountChange: (questionCount: number) => void;
   plannedDuration: number;
   onPlannedDurationChange: (plannedDuration: number) => void;
+  knowledgeBases?: KnowledgeBaseItem[];
+  loadingKnowledgeBases?: boolean;
+  selectedKbIds?: number[];
+  onKnowledgeBaseToggle?: (id: number) => void;
 }
 
 export default function InterviewAdvancedOptions({
@@ -29,6 +35,10 @@ export default function InterviewAdvancedOptions({
   onQuestionCountChange,
   plannedDuration,
   onPlannedDurationChange,
+  knowledgeBases = [],
+  loadingKnowledgeBases = false,
+  selectedKbIds = [],
+  onKnowledgeBaseToggle,
 }: InterviewAdvancedOptionsProps) {
   return (
     <>
@@ -69,6 +79,15 @@ export default function InterviewAdvancedOptions({
                 ))}
               </select>
             </div>
+
+            {mode === 'text' && onKnowledgeBaseToggle && (
+              <InterviewKnowledgeBaseSelector
+                knowledgeBases={knowledgeBases}
+                loading={loadingKnowledgeBases}
+                selectedIds={selectedKbIds}
+                onToggle={onKnowledgeBaseToggle}
+              />
+            )}
 
             {mode === 'text' && (
               <div>

@@ -11,12 +11,15 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionDTO;
+import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
+import com.linrun.interview.modules.knowledgebase.model.DocumentSplitParam;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagQueryTraceDTO;
-import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseRepository;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.modules.knowledgebase.service.DocumentProcessService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseDataTableService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
@@ -64,7 +67,7 @@ public class KnowledgeBaseController {
     private final RagQueryTraceService ragQueryTraceService;
     private final KnowledgeBaseDataTableService dataTableService;
     private final KnowledgeBaseListService listService;
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
 
     /**
      * 获取所有知识库列表
@@ -190,7 +193,8 @@ public class KnowledgeBaseController {
 
     /**
      * 上传知识库文件
-     * <p>新链路：upload（解析落库）+ split（切块发事件触发异步向量化），返回结构与旧接口兼容。
+     * <p>对齐 know-engine：upload 同步完成解析（UPLOADED→CONVERTING→CONVERTED），
+     * split 由调用方单独触发（切块后发 DocumentChunkedEvent 异步向量化）。
      */
     @PostMapping(value = "/api/knowledgebase/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3)
@@ -198,8 +202,11 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> uploadKnowledgeBase(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "category", required = false) String category) {
-        return Result.success(uploadSingle(file, name, category));
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "knowledgeBaseType", required = false, defaultValue = "DOCUMENT_SEARCH")
+            String knowledgeBaseType) {
+        KnowledgeBaseType type = parseKnowledgeBaseType(knowledgeBaseType);
+        return Result.success(uploadSingle(file, name, category, type));
     }
 
     /**
@@ -225,7 +232,14 @@ public class KnowledgeBaseController {
         for (MultipartFile file : files) {
             String fileName = file != null ? file.getOriginalFilename() : null;
             try {
-                Map<String, Object> result = uploadSingle(file, null, category);
+                Map<String, Object> result = uploadSingle(file, null, category, KnowledgeBaseType.DOCUMENT_SEARCH);
+                Object kbObj = result.get("knowledgeBase");
+                if (kbObj instanceof Map<?, ?> kbMap) {
+                    Object idObj = kbMap.get("id");
+                    if (idObj instanceof Number idNum) {
+                        documentProcessService.split(idNum.longValue());
+                    }
+                }
                 success++;
                 items.add(Map.of(
                     "filename", fileName != null ? fileName : "",
@@ -266,17 +280,19 @@ public class KnowledgeBaseController {
     }
 
     /**
-     * 单文件上传内部逻辑：upload + split，返回与旧接口兼容的结构。
+     * 单文件上传内部逻辑：仅 upload（解析落库至 CONVERTED），不自动 split。
      */
-    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category) {
+    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
+                                             KnowledgeBaseType knowledgeBaseType) {
         String fileName = file.getOriginalFilename();
-        log.info("收到知识库上传请求: {}, 大小: {} bytes, category: {}", fileName, file.getSize(), category);
+        log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, type={}",
+            fileName, file.getSize(), category, knowledgeBaseType);
 
-        Long docId = documentProcessService.upload(file, name, category);
-        documentProcessService.split(docId);
+        Long docId = documentProcessService.upload(file, name, category, knowledgeBaseType);
 
-        KnowledgeBaseEntity entity = knowledgeBaseRepository
-            .findByUserIdAndId(UserContext.requireUserId(), docId)
+        KnowledgeBaseEntity entity = EntityQueries.byUserAndId(
+            knowledgeBaseEntityMapper, UserContext.requireUserId(), docId,
+            KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR, "上传后知识库记录丢失"));
 
         Map<String, Object> result = new HashMap<>();
@@ -344,6 +360,18 @@ public class KnowledgeBaseController {
         return Result.success(null);
     }
 
+    /**
+     * 按策略重新切块（可选参数，默认 BROTHER）。
+     */
+    @PostMapping("/api/knowledgebase/{id}/split")
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 3)
+    public Result<Map<String, Object>> splitDocument(@PathVariable Long id,
+                                                     @RequestBody(required = false) DocumentSplitParam splitParam) {
+        int segmentCount = documentProcessService.split(id, splitParam);
+        return Result.success(Map.of("segmentCount", segmentCount));
+    }
+
     // ========== 版本管理 API ==========
 
     /**
@@ -367,12 +395,10 @@ public class KnowledgeBaseController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "changelog", required = false) String changelog) {
         Long versionId = documentProcessService.uploadNewVersion(id, file, changelog);
-        // 新版本上传后自动切块发事件触发异步向量化，前端无需再调 split
-        documentProcessService.split(id);
         return Result.success(Map.of(
             "docId", id,
             "versionId", versionId,
-            "message", "新版本上传并切块完成，向量化已异步触发"
+            "message", "新版本上传完成（CONVERTED），请调用 split 触发切块与向量化"
         ));
     }
 
@@ -405,6 +431,18 @@ public class KnowledgeBaseController {
     public Result<Void> activateVersion(@PathVariable Long id, @PathVariable Long versionId) {
         knowledgeDocumentService.activateVersion(versionId);
         return Result.success(null);
+    }
+
+    private static KnowledgeBaseType parseKnowledgeBaseType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return KnowledgeBaseType.DOCUMENT_SEARCH;
+        }
+        try {
+            return KnowledgeBaseType.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "无效的知识库类型: " + raw + "，可选 DOCUMENT_SEARCH / DATA_QUERY");
+        }
     }
 
 }

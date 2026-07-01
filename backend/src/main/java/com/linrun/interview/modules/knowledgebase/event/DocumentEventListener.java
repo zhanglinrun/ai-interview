@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.event;
 
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
-import com.linrun.interview.modules.knowledgebase.repository.KnowledgeBaseVersionRepository;
+import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseVersionMapper;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ import java.util.Optional;
 public class DocumentEventListener {
 
     private final KnowledgeDocumentService knowledgeDocumentService;
-    private final KnowledgeBaseVersionRepository versionRepository;
+    private final KnowledgeBaseVersionMapper versionRepository;
 
     @Async("eventListenerExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -36,7 +36,8 @@ public class DocumentEventListener {
         log.info("收到文档切块事件，触发向量化: docId={}, versionId={}, segmentCount={}",
             docId, versionId, event.getSegmentCount());
         try {
-            Optional<KnowledgeBaseVersionEntity> versionOpt = versionRepository.findById(versionId);
+            Optional<KnowledgeBaseVersionEntity> versionOpt =
+                Optional.ofNullable(versionRepository.selectById(versionId));
             if (versionOpt.isEmpty()) {
                 log.warn("版本不存在，跳过向量化: versionId={}", versionId);
                 return;

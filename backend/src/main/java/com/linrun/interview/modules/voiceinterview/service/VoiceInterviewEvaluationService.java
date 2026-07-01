@@ -12,9 +12,12 @@ import com.linrun.interview.modules.voiceinterview.dto.VoiceEvaluationDetailDTO.
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewEvaluationEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewEvaluationRepository;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewMessageRepository;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewEvaluationMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewMessageMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewSessionMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import dev.langchain4j.model.chat.ChatModel;
@@ -26,6 +29,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -39,9 +43,9 @@ public class VoiceInterviewEvaluationService {
 
     private final UnifiedEvaluationService unifiedEvaluationService;
     private final LlmProviderRegistry llmProviderRegistry;
-    private final VoiceInterviewEvaluationRepository evaluationRepository;
-    private final VoiceInterviewMessageRepository messageRepository;
-    private final VoiceInterviewSessionRepository sessionRepository;
+    private final VoiceInterviewEvaluationMapper evaluationRepository;
+    private final VoiceInterviewMessageMapper messageRepository;
+    private final VoiceInterviewSessionMapper sessionRepository;
     private final ObjectMapper objectMapper;
     private final InterviewSkillService skillService;
 
@@ -54,8 +58,10 @@ public class VoiceInterviewEvaluationService {
             log.info("开始生成语音面试评估: sessionId={}", sessionId);
 
             VoiceInterviewSessionEntity session = getSession(sessionId);
-            List<VoiceInterviewMessageEntity> messages = messageRepository
-                .findBySessionIdOrderBySequenceNumAsc(sessionId);
+            List<VoiceInterviewMessageEntity> messages = messageRepository.selectList(
+                Wrappers.<VoiceInterviewMessageEntity>lambdaQuery()
+                    .eq(VoiceInterviewMessageEntity::getSessionId, sessionId)
+                    .orderByAsc(VoiceInterviewMessageEntity::getSequenceNum));
 
             if (messages.isEmpty()) {
                 log.warn("语音面试会话无对话记录，生成空评估结果: sessionId={}", sessionId);
@@ -85,7 +91,8 @@ public class VoiceInterviewEvaluationService {
     }
 
     public VoiceEvaluationDetailDTO getEvaluation(Long sessionId) {
-        VoiceInterviewEvaluationEntity evaluation = evaluationRepository.findBySessionId(sessionId)
+        VoiceInterviewEvaluationEntity evaluation = EntityQueries.selectOne(
+            evaluationRepository, VoiceInterviewEvaluationEntity::getSessionId, sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_EVALUATION_NOT_FOUND,
                 "评估结果不存在: " + sessionId));
 
@@ -179,7 +186,7 @@ public class VoiceInterviewEvaluationService {
                 .interviewDate(session.getStartTime())
                 .build();
 
-            evaluationRepository.save(entity);
+            MapperUtils.save(evaluationRepository, entity);
             log.info("评估结果已保存: sessionId={}, score={}", sessionId, entity.getOverallScore());
         } catch (Exception e) {
             log.error("保存评估结果失败: sessionId={}", sessionId, e);
@@ -191,7 +198,8 @@ public class VoiceInterviewEvaluationService {
     @Transactional
     public void saveEmptyEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session) {
         try {
-            VoiceInterviewEvaluationEntity entity = evaluationRepository.findBySessionId(sessionId)
+            VoiceInterviewEvaluationEntity entity = EntityQueries.selectOne(
+                evaluationRepository, VoiceInterviewEvaluationEntity::getSessionId, sessionId)
                 .orElseGet(() -> VoiceInterviewEvaluationEntity.builder().sessionId(sessionId).build());
 
             entity.setOverallScore(0);
@@ -203,7 +211,7 @@ public class VoiceInterviewEvaluationService {
             entity.setInterviewerRole(session.getRoleType());
             entity.setInterviewDate(session.getStartTime());
 
-            evaluationRepository.save(entity);
+            MapperUtils.save(evaluationRepository, entity);
             log.info("空评估结果已保存: sessionId={}", sessionId);
         } catch (Exception e) {
             log.error("保存空评估结果失败: sessionId={}", sessionId, e);
@@ -271,7 +279,7 @@ public class VoiceInterviewEvaluationService {
     }
 
     private VoiceInterviewSessionEntity getSession(Long sessionId) {
-        return sessionRepository.findById(sessionId)
+        return Optional.ofNullable(sessionRepository.selectById(sessionId))
             .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
                 "语音面试会话不存在: " + sessionId));
     }

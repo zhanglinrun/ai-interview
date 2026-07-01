@@ -54,6 +54,18 @@ def main():
                 upload_data = upload_resp.json()
                 # 后端返回 Result<Map>：{code, message, data:{knowledgeBase:{id}, storage:{...}, duplicate}}
                 if upload_data.get("success") or upload_data.get("code") == 200:
+                    kb_info = upload_data.get("data", {}).get("knowledgeBase", {})
+                    kb_id = kb_info.get("id")
+                    if kb_id is not None:
+                        split_resp = requests.post(
+                            f"{BASE_URL}/api/knowledgebase/{kb_id}/split",
+                            json={},
+                            timeout=120
+                        )
+                        split_data = split_resp.json()
+                        if not (split_data.get("success") or split_data.get("code") == 200):
+                            print(f"    [SPLIT FAILED]: {split_data.get('message')}")
+                            continue
                     print("    [OK]")
                     success_count += 1
                     kb_info = upload_data.get("data", {}).get("knowledgeBase", {})

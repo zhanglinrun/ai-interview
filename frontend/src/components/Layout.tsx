@@ -71,6 +71,9 @@ export default function Layout() {
             difficulty: config.difficulty,
             questionCount: config.questionCount,
             llmProvider: config.llmProvider,
+            customCategories: config.customCategories,
+            jdText: config.customJdText,
+            knowledgeBaseIds: config.knowledgeBaseIds,
           },
         },
       });

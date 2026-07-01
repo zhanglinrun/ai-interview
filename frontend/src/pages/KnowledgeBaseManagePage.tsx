@@ -91,6 +91,11 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
 
   // 重新向量化状态
   const [revectorizing, setRevectorizing] = useState<number | null>(null);
+  const [splitModalKb, setSplitModalKb] = useState<KnowledgeBaseItem | null>(null);
+  const [splitType, setSplitType] = useState('BROTHER');
+  const [splitChunkSize, setSplitChunkSize] = useState(800);
+  const [splitOverlap, setSplitOverlap] = useState(80);
+  const [splitting, setSplitting] = useState(false);
 
   // 版本管理状态
   const [versionModalKb, setVersionModalKb] = useState<KnowledgeBaseItem | null>(null);
@@ -171,6 +176,24 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       console.error('重新向量化失败:', error);
     } finally {
       setRevectorizing(null);
+    }
+  };
+
+  const handleSplitDocument = async () => {
+    if (!splitModalKb) return;
+    try {
+      setSplitting(true);
+      await knowledgeBaseApi.splitDocument(splitModalKb.id, {
+        splitType,
+        chunkSize: splitChunkSize,
+        overlap: splitOverlap,
+      });
+      setSplitModalKb(null);
+      await loadDataSilent();
+    } catch (error) {
+      console.error('切块失败:', error);
+    } finally {
+      setSplitting(false);
     }
   };
 
@@ -601,6 +624,15 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                         <Download className="w-4 h-4" />
                       </button>
                       {/* 重新向量化按钮（卡在 CHUNKED 可手动重试） */}
+                      {kb.knowledgeBaseType !== 'DATA_QUERY' && kb.docStatus === 'VECTOR_STORED' && (
+                        <button
+                          onClick={() => setSplitModalKb(kb)}
+                          className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                          title="按策略重新切块"
+                        >
+                          <FileText className="w-4 h-4" />
+                        </button>
+                      )}
                       {isVectorStatusFailed(kb.docStatus) && (
                         <button
                           onClick={() => handleRevectorize(kb.id)}
@@ -918,6 +950,63 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
           </motion.div>
         )}
       </AnimatePresence>
+
+      {splitModalKb && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-600">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-1">重新切块</h3>
+            <p className="text-sm text-slate-500 mb-4">{splitModalKb.name}</p>
+            <label className="block text-sm text-slate-600 dark:text-slate-300 mb-1">策略</label>
+            <select
+              value={splitType}
+              onChange={e => setSplitType(e.target.value)}
+              className="w-full mb-3 rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm bg-white dark:bg-slate-700"
+            >
+              <option value="BROTHER">BROTHER（兄弟分段，默认）</option>
+              <option value="SMART">SMART（标题 + 10% overlap）</option>
+              <option value="TITLE">TITLE（按标题层级）</option>
+              <option value="LENGTH">LENGTH（按长度）</option>
+            </select>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">chunkSize</label>
+                <input
+                  type="number"
+                  value={splitChunkSize}
+                  onChange={e => setSplitChunkSize(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">overlap</label>
+                <input
+                  type="number"
+                  value={splitOverlap}
+                  onChange={e => setSplitOverlap(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSplitModalKb(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={splitting}
+                onClick={() => void handleSplitDocument()}
+                className="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white disabled:opacity-50"
+              >
+                {splitting ? '切块中...' : '开始切块'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

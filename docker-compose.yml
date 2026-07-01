@@ -6,12 +6,10 @@ services:
   #   - 存储业务数据（用户、简历、面试会话、知识库三表等）
   #
   # 教程知识点：
-  #   - 向量存储已迁移到 Elasticsearch（见下方 elasticsearch 服务），PG 不再需要 pgvector 插件，
-  #     改用标准 postgres:16 镜像，精简依赖。
+  #   - 业务数据存 PostgreSQL；向量检索走 Elasticsearch（见下方 elasticsearch 服务）。
   #   - schema 演进由 Flyway 管理。
   # =========================================
   postgres:
-    # 标准 PostgreSQL 16 镜像（向量存储已迁至 Elasticsearch，不再需要 pgvector）
     image: postgres:16
     container_name: interview-postgres
     environment:
@@ -62,7 +60,7 @@ services:
   # 3. Elasticsearch 向量存储服务
   # -----------------------------------------
   # 作用：
-  #   - 知识库 RAG 检索的向量存储（替代 pgvector，对齐 know-engine）
+  #   - 知识库 RAG 检索的向量存储
   #   - LangChain4j ElasticsearchEmbeddingStore，1024 维 COSINE，KNN + 全文 + 混合检索
   #
   # 教程知识点：

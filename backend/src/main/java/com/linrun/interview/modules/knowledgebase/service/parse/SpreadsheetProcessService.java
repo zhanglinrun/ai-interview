@@ -1,15 +1,14 @@
 package com.linrun.interview.modules.knowledgebase.service.parse;
 
+import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.context.AnalysisContext;
+import com.alibaba.excel.read.listener.ReadListener;
+import com.alibaba.excel.read.metadata.ReadSheet;
+import com.alibaba.excel.ExcelReader;
 import com.linrun.interview.infrastructure.file.DocumentParseService;
 import com.linrun.interview.modules.knowledgebase.constant.FileType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
@@ -18,9 +17,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 表格文件解析器：CSV/TSV/Excel 保留行列结构，输出 Markdown 表格和行记录。
+ *
+ * <p>Excel 解析对齐 know-engine {@code ExcelProcessServiceImpl#parseExcel}：
+ * 使用 EasyExcel + {@code headRowNumber(0)}，从第一行开始读取数据（含表头行）。
  */
 @Slf4j
 @Service
@@ -57,13 +60,16 @@ public class SpreadsheetProcessService implements FileProcessService {
     }
 
     private ParsedSpreadsheet parseWorkbook(byte[] fileBytes) throws IOException {
-        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(fileBytes))) {
+        try (ExcelReader excelReader = EasyExcel.read(new ByteArrayInputStream(fileBytes)).build()) {
+            List<ReadSheet> sheets = excelReader.excelExecutor().sheetList();
+            if (sheets.isEmpty()) {
+                return new ParsedSpreadsheet("", List.of(), List.of());
+            }
             StringBuilder markdown = new StringBuilder("# 表格内容\n\n");
-            DataFormatter formatter = new DataFormatter();
-            int parsedSheets = 0;
             List<List<String>> firstRows = List.of();
-            for (Sheet sheet : workbook) {
-                List<List<String>> rows = readSheet(sheet, formatter);
+            int parsedSheets = 0;
+            for (ReadSheet readSheet : sheets) {
+                List<List<String>> rows = parseExcelSheet(fileBytes, readSheet.getSheetNo());
                 if (rows.isEmpty()) {
                     continue;
                 }
@@ -73,7 +79,10 @@ public class SpreadsheetProcessService implements FileProcessService {
                 if (parsedSheets > 0) {
                     markdown.append('\n');
                 }
-                markdown.append("## ").append(escapeHeading(sheet.getSheetName())).append("\n\n");
+                String sheetName = readSheet.getSheetName();
+                markdown.append("## ")
+                    .append(escapeHeading(sheetName == null || sheetName.isBlank() ? "Sheet" : sheetName))
+                    .append("\n\n");
                 appendRows(markdown, rows);
                 parsedSheets++;
             }
@@ -83,18 +92,29 @@ public class SpreadsheetProcessService implements FileProcessService {
         }
     }
 
-    private List<List<String>> readSheet(Sheet sheet, DataFormatter formatter) {
-        List<List<String>> rows = new ArrayList<>();
-        for (Row row : sheet) {
-            List<String> cells = new ArrayList<>();
-            short lastCellNum = row.getLastCellNum();
-            for (int i = 0; i < lastCellNum; i++) {
-                Cell cell = row.getCell(i, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
-                cells.add(cleanCell(cell == null ? "" : formatter.formatCellValue(cell)));
+    /**
+     * 对齐 know-engine：headRowNumber(0) 从第一行开始读，表头也作为数据行返回。
+     */
+    private List<List<String>> parseExcelSheet(byte[] fileBytes, int sheetNo) {
+        List<List<String>> result = new ArrayList<>();
+        EasyExcel.read(new ByteArrayInputStream(fileBytes), new ReadListener<Map<Integer, String>>() {
+            @Override
+            public void invoke(Map<Integer, String> data, AnalysisContext context) {
+                List<String> row = new ArrayList<>();
+                int maxIndex = data.keySet().stream().max(Integer::compareTo).orElse(-1);
+                for (int i = 0; i <= maxIndex; i++) {
+                    String value = data.getOrDefault(i, "");
+                    row.add(cleanCell(value != null ? value : ""));
+                }
+                addRow(result, trimTrailingBlankCells(row));
             }
-            addRow(rows, trimTrailingBlankCells(cells));
-        }
-        return rows;
+
+            @Override
+            public void doAfterAllAnalysed(AnalysisContext context) {
+                log.debug("Excel sheet {} 解析完成，共 {} 行", sheetNo, result.size());
+            }
+        }).headRowNumber(0).sheet(sheetNo).doRead();
+        return result;
     }
 
     private ParsedSpreadsheet parseDelimited(byte[] fileBytes, char delimiter) {

@@ -13,7 +13,6 @@ import org.redisson.api.RLock;
 import org.redisson.api.RMap;
 import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
-import org.redisson.api.options.KeysScanOptions;
 import org.redisson.api.AutoClaimResult;
 import org.redisson.api.stream.StreamAddArgs;
 import org.redisson.api.stream.StreamCreateGroupArgs;
@@ -509,6 +508,6 @@ public class RedisService {
      */
     public Iterable<String> findKeysByPattern(String pattern) {
         RKeys keys = redissonClient.getKeys();
-        return keys.getKeys(KeysScanOptions.defaults().pattern(pattern));
+        return keys.getKeysByPattern(pattern);
     }
 }

@@ -3,7 +3,8 @@ package com.linrun.interview.modules.interview.agent.tool;
 import dev.langchain4j.agent.tool.Tool;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
-import com.linrun.interview.modules.resume.repository.ResumeRepository;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -24,7 +25,7 @@ public class ResumeReadTool {
 
     private static final int MAX_RESUME_CHARS = 2000;
 
-    private final ResumeRepository resumeRepository;
+    private final ResumeEntityMapper resumeEntityMapper;
 
     @Tool("读取候选人简历正文，了解其项目经历与技术栈，用于出针对性问题或决定追问点。"
         + "无需输入参数。当你想结合候选人背景出题时调用。")
@@ -35,8 +36,9 @@ public class ResumeReadTool {
         }
 
         try {
-            Optional<ResumeEntity> resume = resumeRepository.findByUserIdAndId(
-                UserContext.requireUserId(), context.resumeId());
+            Optional<ResumeEntity> resume = EntityQueries.byUserAndId(
+                resumeEntityMapper, UserContext.requireUserId(), context.resumeId(),
+                ResumeEntity::getUserId, ResumeEntity::getId);
             if (resume.isEmpty() || resume.get().getResumeText() == null
                 || resume.get().getResumeText().isBlank()) {
                 return "未找到候选人简历正文，请基于该方向出通用题。";

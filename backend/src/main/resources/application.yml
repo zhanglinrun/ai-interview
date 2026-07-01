@@ -57,52 +57,44 @@ spring:
   application:
     name: ai-interview-platform
 
-  # 排除 Neo4j 自动配置（阶段9引入 graph RAG 后实际退化为单一 ES 数据源，
-  # 业务代码未使用 @Node / Neo4jRepository / Text2Cypher，也未手动建 Neo4j bean；
-  # 本地/部署未配 Neo4j 时 driver 连 localhost:7687 失败会导致 /actuator/health 503。
-  # 后续真要用 graph RAG 再去掉这里的排除项 + 起 Neo4j 容器。）
-  autoconfigure:
-    exclude:
-      - dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration
-      - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveDataAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jRepositoriesAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveRepositoriesAutoConfiguration
-
   # 启用虚拟线程 (Java 21+)
-  # 显著提升 I/O 密集型场景的并发能力，特别适合 AI 调用和 SSE 长连接
   threads:
     virtual:
       enabled: true
 
-  # PostgreSQL数据库配置
+  # MySQL + Druid（对齐 know-engine）
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:interview_guide}
-    username: ${POSTGRES_USER:postgres}
-    # 与根目录 docker-compose.yml 中 postgres 服务默认一致（本地只起依赖容器 + bootRun 时无需改）
-    password: ${POSTGRES_PASSWORD:password}
-    driver-class-name: org.postgresql.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:interview_guide}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:interview_guide}
+    password: ${MYSQL_PASSWORD:interview_guide}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    druid:
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+      filters: stat,wall
+      connection-properties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: admin
+        login-password: admin
 
-  jpa:
-    hibernate:
-      # Flyway 接管 schema 演进，JPA 只做验证：启动时检查 Entity 与库表是否一致，不一致则报错退出。
-      # 新增字段/表需手写 migration SQL（src/main/resources/db/migration/V*.sql），而非依赖 JPA 自动建表。
-      ddl-auto: validate
-    show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-
-  # Flyway 数据库版本迁移配置
-  flyway:
-    enabled: true
-    baseline-on-migrate: true
-    baseline-version: 1
-    # V1__baseline.sql 锁定初始 schema；V2 起是正式 migration（如加 user_id 列做多租户隔离）
-    locations: classpath:db/migration
-    validate-on-migrate: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
 
   servlet:
     multipart:
@@ -125,14 +117,58 @@ spring:
           subscriptionConnectionPoolSize: 50
   
   # LangChain4j 配置（chat + embedding 由 app.ai.providers 驱动 LlmProviderRegistry 手动构造）
-  # 向量存储迁移到 Elasticsearch（见顶层 elasticsearch 段 / app.ai.rag 段），pgvector 配置已移除
 
-# Elasticsearch 向量存储配置（LangChain4j ElasticsearchEmbeddingStore，详见 ElasticSearchProperties）
+# MyBatis-Plus 配置（对齐 know-engine）
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  mapper-locations: classpath*:/mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# Elasticsearch 向量存储（对齐 know-engine：text-embedding-v4 / 1536 维）
 elasticsearch:
   host: ${ES_HOST:http://localhost:9200}
   index-name: ${ES_INDEX_NAME:interview-guide-vector}
-  dimensions: ${ES_DIMENSIONS:1024}
+  dimensions: ${ES_DIMENSIONS:1536}
   num-candidates: ${ES_NUM_CANDIDATES:100}
+
+# MinIO 对象存储（对齐 know-engine）
+minio:
+  url: ${MINIO_URL:http://localhost:9000}
+  accessKey: ${MINIO_ACCESS_KEY:minioadmin}
+  secretKey: ${MINIO_SECRET_KEY:minioadmin}
+  bucketName: ${MINIO_BUCKET:interview-guide}
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+
+# Neo4j 图数据库（Text2Cypher）
+neo4j:
+  uri: ${NEO4J_URI:bolt://localhost:7687}
+  username: ${NEO4J_USER:neo4j}
+  password: ${NEO4J_PASSWORD:neo4j666}
+
+langchain4j:
+  community:
+    neo4j:
+      await-index-timeout: 300
+      auth:
+        uri: ${NEO4J_URI:bolt://localhost:7687}
+        user: ${NEO4J_USER:neo4j}
+        password: ${NEO4J_PASSWORD:neo4j666}
+
+# XXL-Job 配置（对齐 know-engine 2.4）
+xxl:
+  job:
+    admin:
+      addresses: ${XXL_JOB_ADMIN:http://127.0.0.1:8080/xxl-job-admin}
+    accessToken: ${XXL_JOB_ACCESS_TOKEN:default_token}
+    executor:
+      appname: ${XXL_JOB_EXECUTOR:ai-interview-executor}
+      port: ${XXL_JOB_EXECUTOR_PORT:9999}
 
 # Application custom configuration
 app:
@@ -146,7 +182,7 @@ app:
   ai:
     default-provider: dashscope
     default-embedding-provider: dashscope
-    embedding-dimensions: ${APP_AI_EMBEDDING_DIMENSIONS:1024}
+    embedding-dimensions: ${APP_AI_EMBEDDING_DIMENSIONS:1536}
     security:
       api-key-encryption-key: ${APP_AI_CONFIG_ENCRYPTION_KEY:}
       require-encryption-key: ${APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY:false}
@@ -166,8 +202,8 @@ app:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         api-key: ${AI_BAILIAN_API_KEY}
         model: ${AI_MODEL:qwen3.5-flash}
-        embedding-model: text-embedding-v3
-        embedding-dimensions: 1024
+        embedding-model: text-embedding-v4
+        embedding-dimensions: 1536
         supports-embedding: true
       lmstudio:
         base-url: http://localhost:1234
@@ -204,7 +240,7 @@ app:
       message-chat-memory-enabled: ${APP_AI_ADVISORS_MESSAGE_CHAT_MEMORY_ENABLED:false}
       message-chat-memory-max-messages: ${APP_AI_ADVISORS_MESSAGE_CHAT_MEMORY_MAX_MESSAGES:120}
       simple-logger-enabled: ${APP_AI_ADVISORS_SIMPLE_LOGGER_ENABLED:false}
-    # 结构化输出重试次数（用于 BeanOutputConverter 解析失败时的业务层重试）
+    # 结构化输出重试次数（JSON 解析失败时的业务层重试）
     structured-max-attempts: ${APP_AI_STRUCTURED_MAX_ATTEMPTS:2}
     # 重试时是否将上次错误原因注入提示词，帮助模型定向修复输出
     structured-include-last-error: ${APP_AI_STRUCTURED_INCLUDE_LAST_ERROR:true}
@@ -219,6 +255,9 @@ app:
     rag:
       rewrite:
         enabled: ${APP_AI_RAG_REWRITE_ENABLED:true}
+        model: ${APP_AI_RAG_REWRITE_MODEL:qwen-max-latest}
+      routing:
+        model: ${APP_AI_RAG_ROUTING_MODEL:qwen-max-latest}
       search:
         short-query-length: ${APP_AI_RAG_SHORT_QUERY_LENGTH:4}
         topk-short: ${APP_AI_RAG_TOPK_SHORT:20}
@@ -226,11 +265,11 @@ app:
         topk-long: ${APP_AI_RAG_TOPK_LONG:8}
         min-score-short: ${APP_AI_RAG_MIN_SCORE_SHORT:0.18}
         min-score-default: ${APP_AI_RAG_MIN_SCORE_DEFAULT:0.28}
-      # 混合检索：本地 Basic 许可证不支持 RRF，默认向量；评测混合检索时显式设 hybrid
+      # 混合检索（对齐 know-engine 默认 hybrid：ES 向量 + BM25/RRF）
       hybrid:
         enabled: ${APP_AI_RAG_HYBRID_ENABLED:true}
-        # hybrid: ES 向量 + BM25/RRF；vector: 纯向量；full_text: 纯全文
-        mode: ${APP_AI_RAG_HYBRID_MODE:vector}
+        dual-channel: ${APP_AI_RAG_HYBRID_DUAL_CHANNEL:true}
+        mode: ${APP_AI_RAG_HYBRID_MODE:hybrid}
         keyword-top-k: ${APP_AI_RAG_HYBRID_KEYWORD_TOPK:20}
         keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
         rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
@@ -240,11 +279,10 @@ app:
         router-enabled: ${APP_AI_RAG_SQL_ROUTER_ENABLED:true}
         query-timeout-seconds: ${APP_AI_RAG_SQL_QUERY_TIMEOUT_SECONDS:8}
         max-rows: ${APP_AI_RAG_SQL_MAX_ROWS:100}
-      # 重排：默认 DashScope gte-rerank 云端；本地 ONNX 模型文件存在时可切 provider=local
+      # 重排：默认本地 ONNX BGE-RERANKER（对齐 know-engine）
       rerank:
         enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
-        # provider: cloud（DashScope gte-rerank，默认）| local（本地 ONNX BGE）
-        provider: ${APP_AI_RAG_RERANK_PROVIDER:cloud}
+        provider: ${APP_AI_RAG_RERANK_PROVIDER:local}
         model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
         timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
@@ -260,19 +298,29 @@ app:
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
+        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:replace}
         max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
-      # 意图识别兜底（亮点4）：流式问答前置一次意图识别，判定问题是否与面试/技术知识/简历/求职
-      # 等场景相关。不相关走通用对话兜底（不检索知识库），避免越界问题强行检索导致幻觉。
-      # 关闭则全部走 RAG（行为同批次A）。识别本身多一次 LLM 调用（~0.4s 关 thinking 后）。
+        cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}
+      # Neo4j Text2Cypher 图检索（对齐 know-engine graph_db 路由）
+      graph:
+        enabled: ${APP_AI_RAG_GRAPH_ENABLED:true}
+        auto-sync-on-vectorize: ${APP_AI_RAG_GRAPH_AUTO_SYNC:true}
+        skill-bootstrap-enabled: ${APP_AI_RAG_GRAPH_SKILL_BOOTSTRAP:true}
+        cypher-prompt-path: classpath:prompts/text-to-cypher-prompt.txt
+      # RAG 流式生成专用模型（对齐 know-engine qwen3.6-plus）
+      generation:
+        streaming-model: ${APP_AI_RAG_GENERATION_MODEL:qwen3.6-plus}
+        temperature: 0.2
+      # 意图识别兜底
       intent-recognition:
         enabled: ${APP_AI_RAG_INTENT_RECOGNITION_ENABLED:true}
         # 是否在意图识别前推"正在理解您的问题..."进度（关闭可省前端空进度）
         progress-enabled: ${APP_AI_RAG_INTENT_RECOGNITION_PROGRESS_ENABLED:true}
-      # 异步 LLM 标题生成（亮点6）：首问流式完成后用虚拟线程异步让 LLM 根据首问生成会话标题，
-      # 替代知识库名规则拼接。失败保留原规则标题。关闭则保留原规则标题。
+        model: ${APP_AI_RAG_INTENT_MODEL:qwen-max-latest}
       title-summary:
         enabled: ${APP_AI_RAG_TITLE_SUMMARY_ENABLED:true}
+        model: ${APP_AI_RAG_TITLE_MODEL:qwen3.5-flash}
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { knowledgeBaseApi } from '../api/knowledgebase';
+import { knowledgeBaseApi, type KnowledgeBaseType } from '../api/knowledgebase';
 import type { UploadKnowledgeBaseResponse } from '../api/knowledgebase';
 import { getErrorMessage } from '../api/request';
 import FileUploadCard from '../components/FileUploadCard';
@@ -13,6 +13,7 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [knowledgeBaseType, setKnowledgeBaseType] = useState<KnowledgeBaseType>('DOCUMENT_SEARCH');
 
   const handleUpload = async (file: File, name?: string) => {
     setUploading(true);
@@ -20,11 +21,14 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     setNotice('');
 
     try {
-      const data = await knowledgeBaseApi.uploadKnowledgeBase(file, name);
+      const data = await knowledgeBaseApi.uploadKnowledgeBase(file, name, undefined, knowledgeBaseType);
       if (data.duplicate) {
         setNotice(`该文件已存在，对应知识库「${data.knowledgeBase.name}」，无需重复上传。`);
         setUploading(false);
         return;
+      }
+      if (knowledgeBaseType === 'DOCUMENT_SEARCH') {
+        await knowledgeBaseApi.splitDocument(data.knowledgeBase.id);
       }
       onUploadComplete(data);
     } catch (err: unknown) {
@@ -33,23 +37,53 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     }
   };
 
+  const isSpreadsheetOnly = knowledgeBaseType === 'DATA_QUERY';
+
   return (
-    <FileUploadCard
-      title="上传知识库"
-      subtitle="上传文档，AI 将基于知识库内容回答您的问题"
-      accept=".pdf,.doc,.docx,.txt,.md"
-      formatHint="支持 PDF、DOCX、DOC、TXT、MD"
-      maxSizeHint="最大 50MB"
-      uploading={uploading}
-      uploadButtonText="开始上传"
-      selectButtonText="选择文件"
-      showNameInput={true}
-      nameLabel="知识库名称（可选）"
-      namePlaceholder="留空则使用文件名"
-      error={error}
-      notice={notice}
-      onUpload={handleUpload}
-      onBack={onBack}
-    />
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-4">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">知识库类型</p>
+        <div className="flex flex-wrap gap-3 text-sm">
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="kbType"
+              checked={knowledgeBaseType === 'DOCUMENT_SEARCH'}
+              onChange={() => setKnowledgeBaseType('DOCUMENT_SEARCH')}
+            />
+            文档检索（切块 + 向量化）
+          </label>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="kbType"
+              checked={knowledgeBaseType === 'DATA_QUERY'}
+              onChange={() => setKnowledgeBaseType('DATA_QUERY')}
+            />
+            数据查询（Excel/CSV → Text2SQL，不向量化）
+          </label>
+        </div>
+      </div>
+
+      <FileUploadCard
+        title="上传知识库"
+        subtitle={isSpreadsheetOnly
+          ? '上传 Excel/CSV，用于结构化数据查询（不向量化）'
+          : '上传文档，AI 将基于知识库内容回答您的问题'}
+        accept={isSpreadsheetOnly ? '.csv,.xlsx,.xls,.tsv' : '.pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls'}
+        formatHint={isSpreadsheetOnly ? '支持 CSV、Excel' : '支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel'}
+        maxSizeHint="最大 50MB"
+        uploading={uploading}
+        uploadButtonText="开始上传"
+        selectButtonText="选择文件"
+        showNameInput={true}
+        nameLabel="知识库名称（可选）"
+        namePlaceholder="留空则使用文件名"
+        error={error}
+        notice={notice}
+        onUpload={handleUpload}
+        onBack={onBack}
+      />
+    </div>
   );
 }

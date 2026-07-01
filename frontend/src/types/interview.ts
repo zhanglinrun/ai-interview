@@ -37,6 +37,7 @@ export interface CreateInterviewRequest {
   difficulty?: string;
   customCategories?: CategoryDTO[];
   jdText?: string;
+  knowledgeBaseIds?: number[];
 }
 
 export interface SubmitAnswerRequest {

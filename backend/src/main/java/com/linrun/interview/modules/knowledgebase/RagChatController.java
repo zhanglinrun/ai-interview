@@ -155,10 +155,12 @@ public class RagChatController {
             });
     }
 
-    /** progress:/reference: 前缀事件（元数据），原样透传不转义、不计入回答正文。 */
+    /** progress:/reference:/rewritten:/route:/card: 前缀事件（元数据），原样透传不转义、不计入回答正文。 */
     private static boolean isPrefixedEvent(String chunk) {
         return chunk != null
-            && (chunk.startsWith("progress:") || chunk.startsWith("reference:"));
+            && (chunk.startsWith("progress:") || chunk.startsWith("reference:")
+            || chunk.startsWith("rewritten:") || chunk.startsWith("route:")
+            || chunk.startsWith("card:") || chunk.startsWith("card_choice:"));
     }
 
     private static String escapeChunk(String chunk) {

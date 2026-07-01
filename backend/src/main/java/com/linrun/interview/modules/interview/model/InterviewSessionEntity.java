@@ -1,22 +1,12 @@
 package com.linrun.interview.modules.interview.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToMany;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -25,41 +15,28 @@ import java.util.List;
 /**
  * 面试会话实体
  */
-@Entity
-@Table(name = "interview_sessions", indexes = {
-    @Index(name = "idx_interview_session_resume_created", columnList = "resume_id,created_at"),
-    @Index(name = "idx_interview_session_resume_status_created", columnList = "resume_id,status,created_at"),
-    @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt"),
-    @Index(name = "idx_interview_sessions_user_id", columnList = "userId")
-})
+@TableName("interview_sessions")
 public class InterviewSessionEntity {
     
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(nullable = false)
     private Long userId;
     
     // 会话ID (UUID)
-    @Column(nullable = false, unique = true, length = 36)
     private String sessionId;
     
     // 面试主题
-    @Column(length = 64)
     private String skillId = "java-backend";
 
     // 难度级别 (junior / mid / senior)
-    @Column(length = 16)
     private String difficulty = "mid";
 
     // 简历ID（直接映射FK列，避免LAZY加载触发额外查询）
-    @Column(name = "resume_id", insertable = false, updatable = false)
     private Long resumeId;
 
     // 关联的简历（可选，支持无简历通用面试）
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "resume_id")
+    @TableField(exist = false)
     private ResumeEntity resume;
     
     // 问题总数
@@ -69,56 +46,47 @@ public class InterviewSessionEntity {
     private Integer currentQuestionIndex = 0;
     
     // 会话状态
-    @Enumerated(EnumType.STRING)
-    @Column(length = 20)
     private SessionStatus status = SessionStatus.CREATED;
     
     // 问题列表 (JSON格式)
-    @Column(columnDefinition = "TEXT")
     private String questionsJson;
     
     // 总分 (0-100)
     private Integer overallScore;
     
     // 总体评价
-    @Column(columnDefinition = "TEXT")
     private String overallFeedback;
     
     // 优势 (JSON)
-    @Column(columnDefinition = "TEXT")
     private String strengthsJson;
     
     // 改进建议 (JSON)
-    @Column(columnDefinition = "TEXT")
     private String improvementsJson;
     
     // 参考答案 (JSON)
-    @Column(columnDefinition = "TEXT")
     private String referenceAnswersJson;
     
     // 面试答案记录
-    @OneToMany(mappedBy = "session", cascade = CascadeType.ALL, orphanRemoval = true)
+    @TableField(exist = false)
     private List<InterviewAnswerEntity> answers = new ArrayList<>();
     
     // 创建时间
-    @Column(nullable = false)
     private LocalDateTime createdAt;
     
     // 完成时间
     private LocalDateTime completedAt;
 
     // 评估状态（异步评估）
-    @Enumerated(EnumType.STRING)
-    @Column(length = 20)
     private AsyncTaskStatus evaluateStatus;
 
     // 评估错误信息
-    @Column(length = 500)
     private String evaluateError;
 
     // LLM提供商
-    @Column(length = 50)
     private String llmProvider = "dashscope";
+
+    // 关联知识库 ID 列表（JSON）
+    private String knowledgeBaseIdsJson;
     
     public enum SessionStatus {
         CREATED,      // 会话已创建
@@ -127,10 +95,6 @@ public class InterviewSessionEntity {
         EVALUATED     // 已生成评估报告
     }
     
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
     
     // Getters and Setters
     public Long getId() {
@@ -167,6 +131,11 @@ public class InterviewSessionEntity {
 
     public void setResume(ResumeEntity resume) {
         this.resume = resume;
+        this.resumeId = resume != null ? resume.getId() : null;
+    }
+
+    public void setResumeId(Long resumeId) {
+        this.resumeId = resumeId;
     }
     
     public Integer getTotalQuestions() {
@@ -289,6 +258,14 @@ public class InterviewSessionEntity {
         this.llmProvider = llmProvider;
     }
 
+    public String getKnowledgeBaseIdsJson() {
+        return knowledgeBaseIdsJson;
+    }
+
+    public void setKnowledgeBaseIdsJson(String knowledgeBaseIdsJson) {
+        this.knowledgeBaseIdsJson = knowledgeBaseIdsJson;
+    }
+
     public String getSkillId() {
         return skillId;
     }
@@ -307,6 +284,6 @@ public class InterviewSessionEntity {
 
     public void addAnswer(InterviewAnswerEntity answer) {
         answers.add(answer);
-        answer.setSession(this);
+        answer.setSessionId(this.id);
     }
 }

@@ -6,8 +6,8 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.modules.llmprovider.model.LlmGlobalSettingEntity;
 import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
-import com.linrun.interview.modules.llmprovider.repository.LlmGlobalSettingRepository;
-import com.linrun.interview.modules.llmprovider.repository.LlmProviderRepository;
+import com.linrun.interview.modules.llmprovider.mapper.LlmGlobalSettingMapper;
+import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
 import com.linrun.interview.modules.llmprovider.service.ApiKeyEncryptionService;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -41,12 +42,12 @@ public class LlmProviderRegistry {
     private final Map<String, ChatModel> chatModelCache = new ConcurrentHashMap<>();
     private final Map<String, StreamingChatModel> streamingChatModelCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> embeddingModelCache = new ConcurrentHashMap<>();
-    private final LlmProviderRepository providerRepository;
-    private final LlmGlobalSettingRepository globalSettingRepository;
+    private final LlmProviderMapper llmProviderMapper;
+    private final LlmGlobalSettingMapper llmGlobalSettingMapper;
     private final ApiKeyEncryptionService encryptionService;
 
     private static final Map<String, String> RECOMMENDED_EMBEDDING_MODELS = Map.of(
-        "dashscope", "text-embedding-v3",
+        "dashscope", "text-embedding-v4",
         "glm", "embedding-3",
         "zhipu", "embedding-3",
         "baidu", "Embedding-V1",
@@ -55,12 +56,12 @@ public class LlmProviderRegistry {
 
     public LlmProviderRegistry(
             LlmProviderProperties properties,
-            LlmProviderRepository providerRepository,
-            LlmGlobalSettingRepository globalSettingRepository,
+            LlmProviderMapper llmProviderMapper,
+            LlmGlobalSettingMapper llmGlobalSettingMapper,
             ApiKeyEncryptionService encryptionService) {
         this.properties = properties;
-        this.providerRepository = providerRepository;
-        this.globalSettingRepository = globalSettingRepository;
+        this.llmProviderMapper = llmProviderMapper;
+        this.llmGlobalSettingMapper = llmGlobalSettingMapper;
         this.encryptionService = encryptionService;
     }
 
@@ -92,6 +93,18 @@ public class LlmProviderRegistry {
     }
 
     /**
+     * 按指定模型名获取 {@link ChatModel}（用于意图识别等分场景模型）。
+     */
+    public ChatModel getChatModelWithModel(String providerId, String modelName) {
+        if (isBlank(modelName)) {
+            return getChatModelOrDefault(providerId);
+        }
+        String cacheKey = resolveProviderId(providerId) + "::chat::" + modelName;
+        return chatModelCache.computeIfAbsent(cacheKey,
+            key -> createChatModel(resolveProviderId(providerId), modelName));
+    }
+
+    /**
      * 获取流式 {@link StreamingChatModel}，用于 SSE 场景（知识库问答、语音面试实时字幕）。
      */
     public StreamingChatModel getStreamingChatModel(String providerId) {
@@ -111,6 +124,18 @@ public class LlmProviderRegistry {
             return getStreamingChatModel(providerId);
         }
         return getDefaultStreamingChatModel();
+    }
+
+    /**
+     * 按指定模型名获取 {@link StreamingChatModel}（用于 RAG 流式生成，对齐 know-engine ragChatModel）。
+     */
+    public StreamingChatModel getStreamingChatModelWithModel(String providerId, String modelName) {
+        if (isBlank(modelName)) {
+            return getStreamingChatModelOrDefault(providerId);
+        }
+        String cacheKey = resolveProviderId(providerId) + "::stream::" + modelName;
+        return streamingChatModelCache.computeIfAbsent(cacheKey,
+            key -> createStreamingChatModel(resolveProviderId(providerId), modelName));
     }
 
     /**
@@ -137,28 +162,46 @@ public class LlmProviderRegistry {
 
     private ChatModel createChatModel(String providerId) {
         ProviderSnapshot config = loadProviderOrThrow(providerId);
+        return createChatModel(config, config.model());
+    }
+
+    private ChatModel createChatModel(String providerId, String modelName) {
+        ProviderSnapshot config = loadProviderOrThrow(providerId);
+        return createChatModel(config, modelName);
+    }
+
+    private ChatModel createChatModel(ProviderSnapshot config, String modelName) {
         log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
-                 providerId, config.baseUrl(), config.model(), properties.getThinking().isEnabled());
+            config.id(), config.baseUrl(), modelName, properties.getThinking().isEnabled());
 
         ChatModel raw = OpenAiChatModel.builder()
-                .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
-                .apiKey(config.apiKey())
-                .defaultRequestParameters(buildChatRequestParameters(config))
-                .maxRetries(1)
-                .build();
+            .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
+            .apiKey(config.apiKey())
+            .defaultRequestParameters(buildChatRequestParameters(config, modelName))
+            .maxRetries(1)
+            .build();
         return new SafeGuardChatModel(raw, properties.getAdvisors());
     }
 
     private StreamingChatModel createStreamingChatModel(String providerId) {
         ProviderSnapshot config = loadProviderOrThrow(providerId);
+        return createStreamingChatModel(config, config.model());
+    }
+
+    private StreamingChatModel createStreamingChatModel(String providerId, String modelName) {
+        ProviderSnapshot config = loadProviderOrThrow(providerId);
+        return createStreamingChatModel(config, modelName);
+    }
+
+    private StreamingChatModel createStreamingChatModel(ProviderSnapshot config, String modelName) {
         log.info("[LlmProviderRegistry] Building StreamingChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
-                 providerId, config.baseUrl(), config.model(), properties.getThinking().isEnabled());
+            config.id(), config.baseUrl(), modelName, properties.getThinking().isEnabled());
 
         StreamingChatModel raw = OpenAiStreamingChatModel.builder()
-                .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
-                .apiKey(config.apiKey())
-                .defaultRequestParameters(buildChatRequestParameters(config))
-                .build();
+            .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
+            .apiKey(config.apiKey())
+            .defaultRequestParameters(buildChatRequestParameters(config, modelName))
+            .build();
         return new SafeGuardStreamingChatModel(raw, properties.getAdvisors());
     }
 
@@ -170,9 +213,13 @@ public class LlmProviderRegistry {
      * 如需深度推理，可在 application.yml 设 {@code app.ai.thinking.enabled=true}。
      */
     private OpenAiChatRequestParameters buildChatRequestParameters(ProviderSnapshot config) {
+        return buildChatRequestParameters(config, config.model());
+    }
+
+    private OpenAiChatRequestParameters buildChatRequestParameters(ProviderSnapshot config, String modelName) {
         OpenAiChatRequestParameters.Builder builder = OpenAiChatRequestParameters.builder()
-                .modelName(config.model())
-                .temperature(config.temperature() != null ? config.temperature() : 0.2);
+            .modelName(modelName)
+            .temperature(config.temperature() != null ? config.temperature() : 0.2);
         if (!properties.getThinking().isEnabled()) {
             builder.customParameters(Map.of("enable_thinking", false));
         }
@@ -212,22 +259,22 @@ public class LlmProviderRegistry {
     }
 
     private String resolveDefaultChatProviderId() {
-        if (globalSettingRepository == null) {
+        if (llmGlobalSettingMapper == null) {
             return properties.getDefaultProvider();
         }
-        return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+        return Optional.ofNullable(llmGlobalSettingMapper.selectById(LlmGlobalSettingEntity.SINGLETON_ID))
             .map(LlmGlobalSettingEntity::getDefaultChatProviderId)
             .filter(id -> !isBlank(id))
             .orElse(properties.getDefaultProvider());
     }
 
     private String resolveDefaultEmbeddingProviderId() {
-        if (globalSettingRepository == null) {
+        if (llmGlobalSettingMapper == null) {
             return !isBlank(properties.getDefaultEmbeddingProvider())
                 ? properties.getDefaultEmbeddingProvider()
                 : properties.getDefaultProvider();
         }
-        return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+        return Optional.ofNullable(llmGlobalSettingMapper.selectById(LlmGlobalSettingEntity.SINGLETON_ID))
             .map(LlmGlobalSettingEntity::getDefaultEmbeddingProviderId)
             .filter(id -> !isBlank(id))
             .orElseGet(() -> !isBlank(properties.getDefaultEmbeddingProvider())
@@ -236,10 +283,10 @@ public class LlmProviderRegistry {
     }
 
     private ProviderSnapshot loadProviderOrThrow(String providerId) {
-        if (providerRepository == null) {
+        if (llmProviderMapper == null) {
             return loadProviderFromPropertiesOrThrow(providerId);
         }
-        LlmProviderEntity entity = providerRepository.findById(providerId)
+        LlmProviderEntity entity = Optional.ofNullable(llmProviderMapper.selectById(providerId))
             .filter(LlmProviderEntity::isEnabled)
             .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_NOT_FOUND,
                 "LLM Provider 不存在或未启用: " + providerId));

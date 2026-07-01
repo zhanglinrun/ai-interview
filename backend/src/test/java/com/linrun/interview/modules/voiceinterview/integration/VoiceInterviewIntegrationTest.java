@@ -1,325 +1,129 @@
 package com.linrun.interview.modules.voiceinterview.integration;
 
+import com.linrun.interview.common.ai.LlmProviderRegistry;
+import com.linrun.interview.common.security.UserContext;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.voiceinterview.config.VoiceInterviewProperties;
 import com.linrun.interview.modules.voiceinterview.dto.CreateSessionRequest;
 import com.linrun.interview.modules.voiceinterview.dto.SessionResponseDTO;
+import com.linrun.interview.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewEvaluationMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewMessageMapper;
+import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewSessionMapper;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
-import com.linrun.interview.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionStatus;
 import com.linrun.interview.modules.voiceinterview.service.VoiceInterviewService;
-import org.junit.jupiter.api.*;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.redisson.api.RBucket;
+import org.redisson.api.RedissonClient;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Voice Interview Integration Test
- *
- * <p>End-to-end testing of the voice interview feature:
- * <ul>
- *   <li>Session creation via REST API</li>
- *   <li>Session lifecycle management</li>
- *   <li>Phase transition logic</li>
- *   <li>Database persistence</li>
- *   <li>Configuration validation</li>
- * </ul>
+ * 语音面试端到端场景测试（MyBatis-Plus Mapper mock，不依赖 Spring 全量上下文）。
  */
-@SpringBootTest
-@ActiveProfiles("test")
-@org.junit.jupiter.api.Disabled(
-    "Pending: 测试环境下 application-test.yml 的 app.ai.providers 配置漂移，Spring context 启动后 "
-        + "VoiceInterviewService.createSession 通过 LlmProviderRegistry 解析 module-default provider "
-        + "时 NPE。独立 PR 修 test profile 配置后再启用。"
-)
-@DisplayName("语音面试集成测试（待修复）")
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+@DisplayName("语音面试集成场景测试")
 class VoiceInterviewIntegrationTest {
 
-    @Autowired
+    private static final Long USER_ID = 7L;
+
+    @Mock private VoiceInterviewSessionMapper sessionMapper;
+    @Mock private VoiceInterviewMessageMapper messageMapper;
+    @Mock private VoiceInterviewEvaluationMapper evaluationMapper;
+    @Mock private RedissonClient redissonClient;
+    @Mock private VoiceInterviewProperties properties;
+    @Mock private VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
+    @Mock private LlmProviderRegistry llmProviderRegistry;
+    @Mock private ResumeEntityMapper resumeEntityMapper;
+    @Mock private RBucket<VoiceInterviewSessionEntity> bucket;
+
+    @InjectMocks
     private VoiceInterviewService voiceInterviewService;
-
-    @Autowired
-    private VoiceInterviewSessionRepository sessionRepository;
-
-    @Autowired
-    private VoiceInterviewProperties properties;
 
     @BeforeEach
     void setUp() {
-        // Clean up database
-        sessionRepository.deleteAll();
-    }
-
-    @Nested
-    @DisplayName("完整面试流程测试")
-    class CompleteInterviewFlowTests {
-
-        @Test
-        @DisplayName("完整面试流程 - 创建会话到结束会话")
-        void testCompleteInterviewFlow() {
-            // Step 1: Create session
-            CreateSessionRequest createRequest = CreateSessionRequest.builder()
-                .roleType("ali-p8")
-                .introEnabled(true)
-                .techEnabled(true)
-                .projectEnabled(true)
-                .hrEnabled(true)
-                .plannedDuration(30)
-                .build();
-
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(createRequest);
-
-            assertNotNull(sessionResponse);
-            assertNotNull(sessionResponse.getSessionId());
-            assertEquals("ali-p8", sessionResponse.getRoleType());
-            assertEquals("INTRO", sessionResponse.getCurrentPhase());
-            assertEquals("IN_PROGRESS", sessionResponse.getStatus());
-
-            Long sessionId = sessionResponse.getSessionId();
-
-            // Verify session was saved to database
-            VoiceInterviewSessionEntity savedSession = sessionRepository.findById(sessionId).orElse(null);
-            assertNotNull(savedSession);
-            assertEquals("ali-p8", savedSession.getRoleType());
-
-            // Step 2: Test phase transition logic
-            LocalDateTime phaseStartTime = LocalDateTime.now();
-            boolean shouldTransition = voiceInterviewService.shouldTransitionToNextPhase(
-                savedSession, phaseStartTime, 2
-            );
-
-            // Should not transition yet (INTRO phase, low question count)
-            assertFalse(shouldTransition, "Should not transition with low question count");
-
-            // Step 3: End session
-            String sessionIdStr = sessionId.toString();
-            voiceInterviewService.endSession(sessionIdStr);
-
-            // Verify session status
-            VoiceInterviewSessionEntity endedSession = sessionRepository.findById(sessionId).orElse(null);
-            assertNotNull(endedSession);
-            assertEquals(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED, endedSession.getCurrentPhase());
-        }
-
-        @Test
-        @DisplayName("会话状态转换 - 验证阶段转换条件")
-        void testPhaseTransition() {
-            // Create session with INTRO and TECH phases
-            CreateSessionRequest request = CreateSessionRequest.builder()
-                .roleType("byteance-algo")
-                .introEnabled(true)
-                .techEnabled(true)
-                .projectEnabled(false)
-                .hrEnabled(false)
-                .plannedDuration(20)
-                .build();
-
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
-            Long sessionId = sessionResponse.getSessionId();
-
-            // Initial phase should be INTRO
-            assertEquals("INTRO", sessionResponse.getCurrentPhase());
-
-            VoiceInterviewSessionEntity session = sessionRepository.findById(sessionId).orElseThrow();
-
-            // Test phase transition conditions
-            LocalDateTime phaseStartTime = LocalDateTime.now().minusMinutes(10); // 10 minutes ago
-            int questionCount = 3; // Low question count
-
-            boolean shouldTransition = voiceInterviewService.shouldTransitionToNextPhase(
-                session, phaseStartTime, questionCount
-            );
-
-            // Verify transition logic works
-            assertNotNull(shouldTransition);
-        }
-
-        @Test
-        @DisplayName("会话持久化 - 数据库存储和检索")
-        void testSessionPersistence() {
-            CreateSessionRequest request = CreateSessionRequest.builder()
-                .roleType("tencent-backend")
-                .introEnabled(true)
-                .plannedDuration(25)
-                .build();
-
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
-            Long sessionId = sessionResponse.getSessionId();
-
-            // Verify database persistence
-            VoiceInterviewSessionEntity dbSession = sessionRepository.findById(sessionId).orElse(null);
-            assertNotNull(dbSession);
-            assertEquals(sessionId, dbSession.getId());
-            assertEquals("tencent-backend", dbSession.getRoleType());
-
-            // Verify we can retrieve the session
-            VoiceInterviewSessionEntity retrievedSession = sessionRepository.findById(sessionId).orElse(null);
-            assertNotNull(retrievedSession);
-            assertEquals(dbSession.getCurrentPhase(), retrievedSession.getCurrentPhase());
-        }
-
-        @Test
-        @DisplayName("多阶段会话 - 验证所有阶段都能正确初始化")
-        void testMultiPhaseSession() {
-            CreateSessionRequest request = CreateSessionRequest.builder()
-                .roleType("ali-p8")
-                .introEnabled(true)
-                .techEnabled(true)
-                .projectEnabled(true)
-                .hrEnabled(true)
-                .plannedDuration(45)
-                .build();
-
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
-            Long sessionId = sessionResponse.getSessionId();
-
-            VoiceInterviewSessionEntity session = sessionRepository.findById(sessionId).orElseThrow();
-
-            // Verify all phases are properly configured
-            assertEquals(VoiceInterviewSessionEntity.InterviewPhase.INTRO, session.getCurrentPhase());
-
-            // Test transition logic for each phase
-            LocalDateTime startTime = LocalDateTime.now();
-
-            // INTRO phase
-            session.setCurrentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO);
-            boolean introTransition = voiceInterviewService.shouldTransitionToNextPhase(
-                session, startTime.minusMinutes(10), 5
-            );
-
-            // TECH phase
-            session.setCurrentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH);
-            boolean techTransition = voiceInterviewService.shouldTransitionToNextPhase(
-                session, startTime.minusMinutes(12), 9
-            );
-
-            // Verify logic works for all phases
-            assertNotNull(introTransition);
-            assertNotNull(techTransition);
-        }
-    }
-
-    @Nested
-    @DisplayName("错误处理测试")
-    class ErrorHandlingTests {
-
-        @Test
-        @DisplayName("处理无效的会话ID")
-        void testInvalidSessionId() {
-            // Try to end a non-existent session
-            String invalidSessionId = "99999";
-
-            // Service should handle non-existent session gracefully (no exception)
-            assertDoesNotThrow(() -> {
-                voiceInterviewService.endSession(invalidSessionId);
-            });
-        }
-
-        @Test
-        @DisplayName("处理空配置 - 验证默认值")
-        void testEmptyConfiguration() {
-            // Create session with minimal configuration
-            CreateSessionRequest request = CreateSessionRequest.builder()
-                .roleType("ali-p8")
-                .build();
-
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
-
-            assertNotNull(sessionResponse);
-            assertNotNull(sessionResponse.getSessionId());
-        }
-
-        @Test
-        @DisplayName("处理不同角色类型")
-        void testDifferentRoleTypes() {
-            String[] roleTypes = {"ali-p8", "byteance-algo", "tencent-backend"};
-
-            for (String roleType : roleTypes) {
-                CreateSessionRequest request = CreateSessionRequest.builder()
-                    .roleType(roleType)
-                    .plannedDuration(30)
-                    .build();
-
-                SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
-
-                assertNotNull(sessionResponse, "Session should be created for role: " + roleType);
-                assertEquals(roleType, sessionResponse.getRoleType());
-            }
-        }
-    }
-
-    @Nested
-    @DisplayName("配置验证测试")
-    class ConfigurationTests {
-
-        @Test
-        @DisplayName("验证面试阶段配置")
-        void testPhaseConfiguration() {
-            VoiceInterviewProperties.PhaseConfig phaseConfig = properties.getPhase();
-
-            assertNotNull(phaseConfig.getIntro(), "INTRO phase config should not be null");
-            assertNotNull(phaseConfig.getTech(), "TECH phase config should not be null");
-            assertNotNull(phaseConfig.getProject(), "PROJECT phase config should not be null");
-            assertNotNull(phaseConfig.getHr(), "HR phase config should not be null");
-
-            // Verify reasonable duration limits
-            assertTrue(phaseConfig.getIntro().getMaxDuration() > 0);
-            assertTrue(phaseConfig.getTech().getMaxDuration() > 0);
-            assertTrue(phaseConfig.getProject().getMaxDuration() > 0);
-            assertTrue(phaseConfig.getHr().getMaxDuration() > 0);
-        }
-
-        @Test
-        @DisplayName("验证阶段配置参数")
-        void testPhaseConfigParameters() {
-            VoiceInterviewProperties.PhaseConfig phaseConfig = properties.getPhase();
-
-            // Verify INTRO phase
-            VoiceInterviewProperties.DurationConfig intro = phaseConfig.getIntro();
-            assertTrue(intro.getSuggestedDuration() > 0);
-            assertTrue(intro.getMinQuestions() >= 0);
-            assertTrue(intro.getMaxQuestions() > intro.getMinQuestions());
-
-            // Verify TECH phase
-            VoiceInterviewProperties.DurationConfig tech = phaseConfig.getTech();
-            assertTrue(tech.getSuggestedDuration() > 0);
-            assertTrue(tech.getMinQuestions() >= 0);
-            assertTrue(tech.getMaxQuestions() > tech.getMinQuestions());
-
-            // Verify PROJECT phase
-            VoiceInterviewProperties.DurationConfig project = phaseConfig.getProject();
-            assertTrue(project.getSuggestedDuration() > 0);
-            assertTrue(project.getMinQuestions() >= 0);
-            assertTrue(project.getMaxQuestions() > project.getMinQuestions());
-
-            // Verify HR phase
-            VoiceInterviewProperties.DurationConfig hr = phaseConfig.getHr();
-            assertTrue(hr.getSuggestedDuration() > 0);
-            assertTrue(hr.getMinQuestions() >= 0);
-            assertTrue(hr.getMaxQuestions() > hr.getMinQuestions());
-        }
-
-        @Test
-        @DisplayName("验证配置完整性")
-        void testConfigurationCompleteness() {
-            assertNotNull(properties, "Properties should not be null");
-            assertNotNull(properties.getPhase(), "Phase config should not be null");
-
-            VoiceInterviewProperties.PhaseConfig phaseConfig = properties.getPhase();
-
-            // Verify all phases have non-null configs
-            assertNotNull(phaseConfig.getIntro());
-            assertNotNull(phaseConfig.getTech());
-            assertNotNull(phaseConfig.getProject());
-            assertNotNull(phaseConfig.getHr());
-        }
+        UserContext.setUserId(USER_ID);
+        VoiceInterviewProperties.PhaseConfig phaseConfig = new VoiceInterviewProperties.PhaseConfig();
+        phaseConfig.setIntro(new VoiceInterviewProperties.DurationConfig(3, 5, 8, 2, 5));
+        phaseConfig.setTech(new VoiceInterviewProperties.DurationConfig(8, 10, 15, 3, 8));
+        phaseConfig.setProject(new VoiceInterviewProperties.DurationConfig(8, 10, 15, 2, 5));
+        phaseConfig.setHr(new VoiceInterviewProperties.DurationConfig(3, 5, 8, 2, 5));
+        lenient().when(properties.getPhase()).thenReturn(phaseConfig);
+        lenient().when(redissonClient.<VoiceInterviewSessionEntity>getBucket(any())).thenReturn(bucket);
+        lenient().when(bucket.get()).thenReturn(null);
+        when(sessionMapper.insert(any(VoiceInterviewSessionEntity.class))).thenAnswer(invocation -> {
+            VoiceInterviewSessionEntity entity = invocation.getArgument(0);
+            entity.setId(100L);
+            entity.setStartTime(LocalDateTime.now());
+            return 1;
+        });
+        when(sessionMapper.updateById(any(VoiceInterviewSessionEntity.class))).thenReturn(1);
     }
 
     @AfterEach
     void tearDown() {
-        // Clean up test data
-        sessionRepository.deleteAll();
+        UserContext.clear();
+    }
+
+    @Test
+    @DisplayName("完整流程：创建 → 暂停 → 恢复 → 结束")
+    void completeInterviewFlow() {
+        CreateSessionRequest createRequest = CreateSessionRequest.builder()
+            .skillId("ali-p8")
+            .introEnabled(true)
+            .techEnabled(true)
+            .projectEnabled(true)
+            .hrEnabled(true)
+            .plannedDuration(30)
+            .build();
+
+        SessionResponseDTO created = voiceInterviewService.createSession(createRequest);
+        assertThat(created.getSessionId()).isEqualTo(100L);
+        assertThat(created.getStatus()).isEqualTo("IN_PROGRESS");
+
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            .id(100L)
+            .userId(USER_ID)
+            .status(VoiceInterviewSessionStatus.IN_PROGRESS)
+            .startTime(LocalDateTime.now().minusMinutes(5))
+            .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
+            .plannedDuration(30)
+            .build();
+        when(sessionMapper.selectOne(any())).thenReturn(session);
+        when(sessionMapper.selectById(100L)).thenReturn(session);
+        when(messageMapper.selectCount(any())).thenReturn(0L);
+
+        voiceInterviewService.pauseSession("100", "user_initiated");
+        assertThat(session.getStatus()).isEqualTo(VoiceInterviewSessionStatus.PAUSED);
+
+        session.setStatus(VoiceInterviewSessionStatus.PAUSED);
+        SessionResponseDTO resumed = voiceInterviewService.resumeSession("100");
+        assertThat(resumed.getStatus()).isEqualTo("IN_PROGRESS");
+
+        session.setStatus(VoiceInterviewSessionStatus.IN_PROGRESS);
+        voiceInterviewService.endSession("100");
+        assertThat(session.getStatus()).isEqualTo(VoiceInterviewSessionStatus.COMPLETED);
+        verify(voiceEvaluateStreamProducer).sendEvaluateTask("100");
+        verify(bucket, times(2)).set(any(VoiceInterviewSessionEntity.class), any(Duration.class));
     }
 }

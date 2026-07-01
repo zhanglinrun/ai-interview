@@ -10,7 +10,10 @@ import com.linrun.interview.infrastructure.file.FileValidationService;
 import com.linrun.interview.modules.interview.model.ResumeAnalysisResponse;
 import com.linrun.interview.modules.resume.listener.AnalyzeStreamProducer;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
-import com.linrun.interview.modules.resume.repository.ResumeRepository;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
+import com.linrun.interview.modules.resume.model.ResumeEntity;
+import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,7 +39,7 @@ public class ResumeUploadService {
     private final AppConfigProperties appConfig;
     private final FileValidationService fileValidationService;
     private final AnalyzeStreamProducer analyzeStreamProducer;
-    private final ResumeRepository resumeRepository;
+    private final ResumeEntityMapper resumeEntityMapper;
 
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -174,7 +177,8 @@ public class ResumeUploadService {
     @Transactional
     public void reanalyze(Long resumeId) {
         Long userId = UserContext.requireUserId();
-        ResumeEntity resume = resumeRepository.findByUserIdAndId(userId, resumeId)
+        ResumeEntity resume = EntityQueries.byUserAndId(
+            resumeEntityMapper, userId, resumeId, ResumeEntity::getUserId, ResumeEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
 
         log.info("开始重新分析简历: resumeId={}, filename={}", resumeId, resume.getOriginalFilename());
@@ -193,7 +197,7 @@ public class ResumeUploadService {
         // 更新状态为 PENDING
         resume.setAnalyzeStatus(AsyncTaskStatus.PENDING);
         resume.setAnalyzeError(null);
-        resumeRepository.save(resume);
+        MapperUtils.save(resumeEntityMapper, resume);
 
         // 发送分析任务到 Stream
         analyzeStreamProducer.sendAnalyzeTask(resumeId, resumeText);

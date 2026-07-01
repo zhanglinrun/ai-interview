@@ -1,16 +1,10 @@
 package com.linrun.interview.modules.resume.model;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 
 import java.time.LocalDateTime;
 
@@ -18,22 +12,18 @@ import java.time.LocalDateTime;
  * 简历评测结果实体
  * Resume Analysis Entity
  */
-@Entity
-@Table(name = "resume_analyses", indexes = {
-    @Index(name = "idx_resume_analyses_user_id", columnList = "userId")
-})
+@TableName("resume_analyses")
 public class ResumeAnalysisEntity {
     
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(nullable = false)
     private Long userId;
     
     // 关联的简历
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "resume_id", nullable = false)
+    private Long resumeId;
+
+    @TableField(exist = false)
     private ResumeEntity resume;
     
     // 总分 (0-100)
@@ -47,25 +37,17 @@ public class ResumeAnalysisEntity {
     private Integer projectScore;      // 项目经验 (0-15)
     
     // 简历摘要
-    @Column(columnDefinition = "TEXT")
     private String summary;
     
     // 优点列表 (JSON格式)
-    @Column(columnDefinition = "TEXT")
     private String strengthsJson;
     
     // 改进建议列表 (JSON格式)
-    @Column(columnDefinition = "TEXT")
     private String suggestionsJson;
     
     // 评测时间
-    @Column(nullable = false)
     private LocalDateTime analyzedAt;
     
-    @PrePersist
-    protected void onCreate() {
-        analyzedAt = LocalDateTime.now();
-    }
     
     // Getters and Setters
     public Long getId() {
@@ -88,8 +70,16 @@ public class ResumeAnalysisEntity {
         return resume;
     }
     
+    public Long getResumeId() {
+        return resumeId;
+    }
+
+    public void setResumeId(Long resumeId) {
+        this.resumeId = resumeId;
+    }
+
     public void setResume(ResumeEntity resume) {
-        this.resume = resume;
+        this.resumeId = resume != null ? resume.getId() : null;
     }
     
     public Integer getOverallScore() {

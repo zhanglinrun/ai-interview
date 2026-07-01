@@ -1,5 +1,6 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 
 import java.util.List;
@@ -48,4 +49,11 @@ public interface KnowledgeDocumentService {
      * @param version 版本实体
      */
     void activateVersion(KnowledgeBaseVersionEntity version);
+
+    /**
+     * 单调推进文档主表与版本表状态（对齐 know-engine advanceDocumentAndVersionStatus）。
+     *
+     * @return 主表或版本表至少有一处被更新时返回 true
+     */
+    boolean advanceDocumentAndVersionStatus(Long docId, Long versionId, DocumentStatus targetStatus);
 }

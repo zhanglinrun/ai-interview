@@ -12,6 +12,8 @@ export type DocStatus =
   | 'VECTOR_STORED'
   | 'STORED';
 
+export type KnowledgeBaseType = 'DOCUMENT_SEARCH' | 'DATA_QUERY';
+
 export interface KnowledgeBaseItem {
   id: number;
   name: string;
@@ -27,6 +29,7 @@ export interface KnowledgeBaseItem {
   currentVersionId: number | null;
   dataTableName: string | null;
   dataRowCount: number | null;
+  knowledgeBaseType: KnowledgeBaseType | null;
 }
 
 // 统计信息
@@ -201,7 +204,12 @@ export const knowledgeBaseApi = {
   /**
    * 上传知识库文件
    */
-  async uploadKnowledgeBase(file: File, name?: string, category?: string): Promise<UploadKnowledgeBaseResponse> {
+  async uploadKnowledgeBase(
+    file: File,
+    name?: string,
+    category?: string,
+    knowledgeBaseType: KnowledgeBaseType = 'DOCUMENT_SEARCH',
+  ): Promise<UploadKnowledgeBaseResponse> {
     const formData = new FormData();
     formData.append('file', file);
     if (name) {
@@ -210,7 +218,22 @@ export const knowledgeBaseApi = {
     if (category) {
       formData.append('category', category);
     }
+    formData.append('knowledgeBaseType', knowledgeBaseType);
     return request.upload<UploadKnowledgeBaseResponse>('/api/knowledgebase/upload', formData);
+  },
+
+  async splitDocument(
+    id: number,
+    splitParam?: {
+      splitType: string;
+      chunkSize?: number;
+      overlap?: number;
+      titleLevel?: number;
+      separator?: string;
+      regex?: string;
+    },
+  ): Promise<{ segmentCount: number }> {
+    return request.post<{ segmentCount: number }>(`/api/knowledgebase/${id}/split`, splitParam ?? {});
   },
 
     /**

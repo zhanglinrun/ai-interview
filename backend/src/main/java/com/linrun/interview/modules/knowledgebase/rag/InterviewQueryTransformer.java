@@ -9,7 +9,7 @@ import dev.langchain4j.rag.query.Metadata;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.rag.query.transformer.QueryTransformer;
 import com.linrun.interview.common.ai.PromptTemplate;
-import com.linrun.interview.modules.knowledgebase.repository.RagChatMessageRepository;
+import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -47,7 +47,7 @@ public class InterviewQueryTransformer implements QueryTransformer {
     private final boolean enabled;
     private final Consumer<String> progressCallback;
     private final Long assistantMessageId;
-    private final RagChatMessageRepository messageRepository;
+    private final RagChatMessageMapper messageRepository;
     private final RagQueryTrace trace;
 
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled) {
@@ -56,20 +56,20 @@ public class InterviewQueryTransformer implements QueryTransformer {
 
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled,
                                      Consumer<String> progressCallback, Long assistantMessageId,
-                                     RagChatMessageRepository messageRepository) {
+                                     RagChatMessageMapper messageMapper) {
         this(chatModel, rewritePromptTemplate, enabled, progressCallback, assistantMessageId,
-            messageRepository, null);
+            messageMapper, null);
     }
 
     public InterviewQueryTransformer(ChatModel chatModel, PromptTemplate rewritePromptTemplate, boolean enabled,
                                      Consumer<String> progressCallback, Long assistantMessageId,
-                                     RagChatMessageRepository messageRepository, RagQueryTrace trace) {
+                                     RagChatMessageMapper messageMapper, RagQueryTrace trace) {
         this.chatModel = chatModel;
         this.rewritePromptTemplate = rewritePromptTemplate;
         this.enabled = enabled;
         this.progressCallback = progressCallback;
         this.assistantMessageId = assistantMessageId;
-        this.messageRepository = messageRepository;
+        this.messageRepository = messageMapper;
         this.trace = trace;
     }
 
@@ -81,9 +81,10 @@ public class InterviewQueryTransformer implements QueryTransformer {
         if (progressCallback != null) {
             progressCallback.accept(PROGRESS_REWRITING);
         }
+        String ruleApplied = InterviewQueryRewriteRules.applyRules(query.text());
         try {
             Map<String, Object> variables = new HashMap<>();
-            variables.put("question", query.text());
+            variables.put("question", ruleApplied);
             variables.put("history", formatHistory(query.metadata()));
             String prompt = rewritePromptTemplate.render(variables);
             String rewritten = chatModel.chat(ChatRequest.builder()
@@ -91,7 +92,7 @@ public class InterviewQueryTransformer implements QueryTransformer {
                     .build())
                 .aiMessage().text();
             if (rewritten == null || rewritten.isBlank()) {
-                return singletonList(query);
+                return buildResultQuery(query, ruleApplied);
             }
             String normalized = rewritten.trim();
             log.info("[InterviewQueryTransformer] 改写: origin='{}', rewritten='{}'",
@@ -99,16 +100,25 @@ public class InterviewQueryTransformer implements QueryTransformer {
             if (trace != null) {
                 trace.rewrittenQuestion(normalized);
             }
-            // 改写结果异步回写 DB（亮点5，虚拟线程）
-            persistTransformContent(normalized);
-            Query rewrittenQuery = query.metadata() == null
-                ? Query.from(normalized)
-                : Query.from(normalized, query.metadata());
-            return singletonList(rewrittenQuery);
+            return buildResultQuery(query, normalized);
         } catch (Exception e) {
-            log.warn("[InterviewQueryTransformer] 改写失败，使用原问题: {}", e.getMessage(), e);
+            log.warn("[InterviewQueryTransformer] 改写失败，使用规则/原问题: {}", e.getMessage(), e);
+            return buildResultQuery(query, ruleApplied);
+        }
+    }
+
+    private List<Query> buildResultQuery(Query query, String text) {
+        if (text == null || text.isBlank() || text.equals(query.text())) {
             return singletonList(query);
         }
+        if (trace != null) {
+            trace.rewrittenQuestion(text.trim());
+        }
+        persistTransformContent(text.trim());
+        Query rewrittenQuery = query.metadata() == null
+            ? Query.from(text.trim())
+            : Query.from(text.trim(), query.metadata());
+        return singletonList(rewrittenQuery);
     }
 
     /**
@@ -122,11 +132,12 @@ public class InterviewQueryTransformer implements QueryTransformer {
         final Long msgId = assistantMessageId;
         Thread.ofVirtual().name("query-transform-" + msgId).start(() -> {
             try {
-                messageRepository.findById(msgId).ifPresent(msg -> {
+                var msg = messageRepository.selectById(msgId);
+                if (msg != null) {
                     msg.setTransformContent(transformed);
-                    messageRepository.save(msg);
+                    messageRepository.updateById(msg);
                     log.info("[InterviewQueryTransformer] 改写结果已回写: assistantMsgId={}", msgId);
-                });
+                }
             } catch (Exception e) {
                 log.warn("[InterviewQueryTransformer] 改写结果回写失败: assistantMsgId={}, error={}",
                     msgId, e.getMessage(), e);

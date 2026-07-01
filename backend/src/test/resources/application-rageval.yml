@@ -1,11 +1,11 @@
 # RAG 检索评测专用 profile
 #
-# 与默认 test profile（H2 内存库）不同，评测必须连真实的 pgvector + Redis + DashScope，
+# 与默认 test profile 不同，评测必须连真实的 Elasticsearch + MySQL + Redis + DashScope，
 # 才能反映线上真实检索表现。通过 @ActiveProfiles("rageval") + @Tag("rag-eval") 隔离，
 # 默认不随普通 mvn test 运行。
 #
 # 运行前提：
-#   1. docker compose -f docker-compose.dev.yml up -d 起好 pgvector / redis / rustfs
+#   1. docker compose -f docker-compose.dev.yml up -d 起好 ES / mysql / redis / minio
 #   2. 评测语料已入库（见 rag-eval/README.md），知识库 id 通过 ragdataset.kb-* 配置传入
 #   3. .env 里 AI_BAILIAN_API_KEY 就绪（embedding 与 rerank 都要用）
 
@@ -16,18 +16,11 @@ spring:
       - optional:file:../.env[.properties]
 
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:interview_guide}
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:123456}
-    driver-class-name: org.postgresql.Driver
-
-  jpa:
-    hibernate:
-      ddl-auto: none
-    show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+    type: com.alibaba.druid.pool.DruidDataSource
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:interview_guide}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:interview_guide}
+    password: ${MYSQL_PASSWORD:interview_guide}
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
   redis:
     redisson:
@@ -36,17 +29,14 @@ spring:
           address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"
           database: 0
 
-  ai:
-    retry:
-      max-attempts: 1
-      on-client-errors: false
-    vectorstore:
-      pgvector:
-        index-type: HNSW
-        distance-type: COSINE_DISTANCE
-        dimensions: 1024
-        initialize-schema: false
-        remove-existing-vector-store-table: false
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+elasticsearch:
+  host: ${ES_HOST:http://localhost:9200}
+  index-name: interview-guide-vector
+  dimensions: 1536
 
 # 评测必须保证三档策略真正生效、互相可区分，所以这里显式打开混合检索与重排开关，
 # 不依赖主配置默认值。测试里分别调用 similaritySearch / hybridSearch / rerank 三个入口，

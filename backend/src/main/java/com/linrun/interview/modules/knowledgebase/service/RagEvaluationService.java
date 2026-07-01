@@ -4,12 +4,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.model.RagEvaluationRunEntity;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
-import com.linrun.interview.modules.knowledgebase.repository.RagEvaluationRunRepository;
+import com.linrun.interview.modules.knowledgebase.mapper.RagEvaluationRunMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,13 +22,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
 public class RagEvaluationService {
 
     private final KnowledgeBaseQueryService queryService;
-    private final RagEvaluationRunRepository runRepository;
+    private final RagEvaluationRunMapper runRepository;
     private final ObjectMapper objectMapper;
 
     public RagEvalResponse evaluate(RagEvalRequest request) {
@@ -56,7 +58,7 @@ public class RagEvaluationService {
         String runId = "rag-eval-" + UUID.randomUUID();
         try {
             int hitCount = (int) response.items().stream().filter(RagEvalResponse.ItemResult::hit).count();
-            runRepository.save(RagEvaluationRunEntity.builder()
+            MapperUtils.save(runRepository, RagEvaluationRunEntity.builder()
                 .userId(UserContext.requireUserId())
                 .runId(runId)
                 .title(titleOrDefault(request.title()))
@@ -76,6 +78,7 @@ public class RagEvaluationService {
                 .citationHitRate(response.citationHitRate())
                 .citationCoverage(response.citationCoverage())
                 .topk(response.k())
+                .createdAt(LocalDateTime.now())
                 .build());
             return runId;
         } catch (JsonProcessingException e) {

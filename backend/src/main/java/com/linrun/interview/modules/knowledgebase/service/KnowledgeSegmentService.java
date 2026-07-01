@@ -2,28 +2,18 @@ package com.linrun.interview.modules.knowledgebase.service;
 
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 
 /**
  * 知识库分段 Service（对齐 know-engine KnowledgeSegmentService）。
- *
- * <p>负责分段落库、分页查询待向量化分段、按版本/文档删除分段、回写 embeddingId 与状态。
  */
 public interface KnowledgeSegmentService {
 
-    /**
-     * 批量保存分段（split 落库用）。
-     */
     List<KnowledgeBaseSegmentEntity> saveBatch(List<KnowledgeBaseSegmentEntity> segments);
 
-    /**
-     * 分页查待向量化的分段（状态 STORED + skipEmbedding=0 + embeddingId 为空）。
-     */
-    Page<KnowledgeBaseSegmentEntity> pagePendingEmbedding(
-        Long docId, Long versionId, SegmentStatus status, Pageable pageable);
+    List<KnowledgeBaseSegmentEntity> listPendingEmbedding(
+        Long docId, Long versionId, SegmentStatus status, int limit);
 
     /**
      * 按 docId 查所有分段（顺序排列）。
