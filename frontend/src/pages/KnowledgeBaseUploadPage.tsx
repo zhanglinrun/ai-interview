@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { knowledgeBaseApi, type KnowledgeBaseType } from '../api/knowledgebase';
+import { knowledgeBaseApi, type DocumentAccessScope, type KnowledgeBaseType } from '../api/knowledgebase';
 import type { UploadKnowledgeBaseResponse } from '../api/knowledgebase';
 import { getErrorMessage } from '../api/request';
 import FileUploadCard from '../components/FileUploadCard';
@@ -14,6 +14,8 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [knowledgeBaseType, setKnowledgeBaseType] = useState<KnowledgeBaseType>('DOCUMENT_SEARCH');
+  const [accessibleBy, setAccessibleBy] = useState<DocumentAccessScope>('PRIVATE');
+  const [expireDate, setExpireDate] = useState('');
 
   const handleUpload = async (file: File, name?: string) => {
     setUploading(true);
@@ -21,7 +23,16 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     setNotice('');
 
     try {
-      const data = await knowledgeBaseApi.uploadKnowledgeBase(file, name, undefined, knowledgeBaseType);
+      const data = await knowledgeBaseApi.uploadKnowledgeBase(
+        file,
+        name,
+        undefined,
+        knowledgeBaseType,
+        {
+          accessibleBy,
+          expireDate: expireDate.trim() || undefined,
+        },
+      );
       if (data.duplicate) {
         setNotice(`该文件已存在，对应知识库「${data.knowledgeBase.name}」，无需重复上传。`);
         setUploading(false);
@@ -63,6 +74,39 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
             数据查询（Excel/CSV → Text2SQL，不向量化）
           </label>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-4 space-y-3">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200">访问与有效期</p>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="kbAccess"
+              checked={accessibleBy === 'PRIVATE'}
+              onChange={() => setAccessibleBy('PRIVATE')}
+            />
+            仅自己可见
+          </label>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="kbAccess"
+              checked={accessibleBy === 'PUBLIC'}
+              onChange={() => setAccessibleBy('PUBLIC')}
+            />
+            公开可读
+          </label>
+        </div>
+        <label className="block text-sm text-slate-600 dark:text-slate-300">
+          到期日（可选）
+          <input
+            type="date"
+            value={expireDate}
+            onChange={(e) => setExpireDate(e.target.value)}
+            className="mt-1 block w-full max-w-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+          />
+        </label>
       </div>
 
       <FileUploadCard

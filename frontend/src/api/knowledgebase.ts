@@ -14,6 +14,8 @@ export type DocStatus =
 
 export type KnowledgeBaseType = 'DOCUMENT_SEARCH' | 'DATA_QUERY';
 
+export type DocumentAccessScope = 'PRIVATE' | 'PUBLIC';
+
 export interface KnowledgeBaseItem {
   id: number;
   name: string;
@@ -30,6 +32,8 @@ export interface KnowledgeBaseItem {
   dataTableName: string | null;
   dataRowCount: number | null;
   knowledgeBaseType: KnowledgeBaseType | null;
+  accessibleBy: DocumentAccessScope | null;
+  expireDate: string | null;
 }
 
 // 统计信息
@@ -209,6 +213,7 @@ export const knowledgeBaseApi = {
     name?: string,
     category?: string,
     knowledgeBaseType: KnowledgeBaseType = 'DOCUMENT_SEARCH',
+    options?: { accessibleBy?: DocumentAccessScope; expireDate?: string },
   ): Promise<UploadKnowledgeBaseResponse> {
     const formData = new FormData();
     formData.append('file', file);
@@ -219,7 +224,22 @@ export const knowledgeBaseApi = {
       formData.append('category', category);
     }
     formData.append('knowledgeBaseType', knowledgeBaseType);
+    if (options?.accessibleBy) {
+      formData.append('accessibleBy', options.accessibleBy);
+    }
+    if (options?.expireDate) {
+      formData.append('expireDate', options.expireDate);
+    }
     return request.upload<UploadKnowledgeBaseResponse>('/api/knowledgebase/upload', formData);
+  },
+
+  async generateDataset(question: string, knowledgeBaseIds: number[]) {
+    const params = new URLSearchParams();
+    params.set('question', question);
+    knowledgeBaseIds.forEach((id) => params.append('knowledgeBaseIds', String(id)));
+    return request.get<{ question: string; answer: string; sources: unknown[] }>(
+      `/api/knowledgebase/dataset/generate?${params.toString()}`,
+    );
   },
 
   async splitDocument(
@@ -357,6 +377,19 @@ export const knowledgeBaseApi = {
    */
   async switchVersion(id: number, versionId: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/versions/${versionId}/switch`);
+  },
+
+  async uploadNewVersion(
+    id: number,
+    file: File,
+    changelog?: string,
+  ): Promise<{ docId: number; versionId: number; message: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (changelog?.trim()) {
+      formData.append('changelog', changelog.trim());
+    }
+    return request.upload(`/api/knowledgebase/${id}/versions`, formData);
   },
 
   /**

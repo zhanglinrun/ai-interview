@@ -23,11 +23,13 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEnti
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
 import com.linrun.interview.modules.knowledgebase.service.SegmentTextCacheService;
+import com.linrun.interview.modules.knowledgebase.util.DocumentPermissionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.RestClient;
 
 import java.io.InputStream;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -358,9 +360,18 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         Metadata metadata = content.textSegment().metadata();
         if (accessibleUserId != null) {
             String accessibleBy = metadata.getString(MetadataKeyConstant.ACCESSIBLE_BY);
-            if (accessibleBy != null && !accessibleBy.isBlank()
-                && !accessibleBy.equals(String.valueOf(accessibleUserId))) {
+            if (!DocumentPermissionUtils.canAccess(accessibleBy, accessibleUserId)) {
                 return false;
+            }
+        }
+        String expireRaw = metadata.getString(MetadataKeyConstant.EXPIRE_DATE);
+        if (expireRaw != null && !expireRaw.isBlank()) {
+            try {
+                if (LocalDate.parse(expireRaw).isBefore(LocalDate.now())) {
+                    return false;
+                }
+            } catch (Exception ignored) {
+                // 非法日期格式不过滤
             }
         }
         if (knowledgeBaseIdSet.isEmpty()) {
@@ -462,9 +473,18 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         }
         ArrayNode must = objectMapper.createArrayNode();
         if (accessibleUserId != null) {
-            must.addObject().putObject("term")
+            ObjectNode accessBool = objectMapper.createObjectNode();
+            ObjectNode innerBool = accessBool.putObject("bool");
+            ArrayNode should = objectMapper.createArrayNode();
+            should.addObject().putObject("term")
                 .putObject("metadata." + MetadataKeyConstant.ACCESSIBLE_BY + ".keyword")
                 .put("value", String.valueOf(accessibleUserId));
+            should.addObject().putObject("term")
+                .putObject("metadata." + MetadataKeyConstant.ACCESSIBLE_BY + ".keyword")
+                .put("value", DocumentPermissionUtils.PUBLIC_TOKEN);
+            innerBool.set("should", should);
+            innerBool.put("minimum_should_match", 1);
+            must.add(accessBool);
         }
         if (!knowledgeBaseIdSet.isEmpty()) {
             ArrayNode terms = must.addObject().putObject("terms")

@@ -33,7 +33,7 @@ import java.util.Optional;
  *
  * <p>与 know-engine 差异（遵守 ai-interview AGENTS.md）：
  * <ul>
- *   <li>MyBatis-Plus → JPA：物理删除用 {@code @Modifying @Query}（JPA 无 @TableLogic，deleteById 即物理删）。</li>
+ *   <li>主表 {@code @TableLogic} 软删；级联删除走 {@code physicalDeleteById} 物理清库。</li>
  *   <li>{@code Assert} → {@link BusinessException}（Assert 抒 IllegalArgument 绕过全局异常处理）。</li>
  *   <li>{@code deactivateVersion} 直接调 {@link VectorStoreService#removeByDocIdAndVersion}，
  *       不经 DocumentCleanupService（避免前向依赖，cleanup service 是封装层）。</li>
@@ -76,8 +76,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         segmentService.physicalDeleteByDocumentId(docId);
         // 4. 物理删 version
         versionService.physicalDeleteByDocId(docId);
-        // 5. 物理删文档
-        knowledgeBaseEntityMapper.deleteById(docId);
+        // 5. 物理删文档主表（绕过逻辑删除，与 segment/version 一致）
+        knowledgeBaseEntityMapper.physicalDeleteById(docId);
         log.info("删除知识库 DB 记录完成: docId={}", docId);
 
         // 5. ES 删向量 + RustFS 删文件：外部 IO，移到事务提交后执行（事务内禁止外部 API）
@@ -104,7 +104,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             dataTableService.deleteByDoc(userId, docId);
             segmentService.physicalDeleteByDocumentId(docId);
             versionService.physicalDeleteByDocId(docId);
-            knowledgeBaseEntityMapper.deleteById(docId);
+            knowledgeBaseEntityMapper.physicalDeleteById(docId);
             schedulePostCommitCleanup(docId, doc.getStorageKey());
         }
         log.info("批量删除知识库 DB 记录完成: count={}", docIds.size());

@@ -24,6 +24,8 @@ import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewSqlContentRetriever;
+import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentAggregator;
+import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.RagQueryTrace;
 import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
 import com.linrun.interview.common.util.JsonUtil;
@@ -35,6 +37,7 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.rag.content.aggregator.ContentAggregator;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
@@ -152,6 +155,7 @@ public class KnowledgeBaseQueryService {
     private final KnowledgeBaseQueryProperties.Graph graph;
     private final KnowledgeBaseQueryProperties.Generation generation;
     private final dev.langchain4j.model.input.PromptTemplate cypherPromptTemplate;
+    private final dev.langchain4j.model.input.PromptTemplate sqlPromptTemplate;
     private final Driver neo4jDriver;
     private final KnowledgeBaseQueryProperties.IntentRecognition intentRecognition;
     private final MeterRegistry meterRegistry;
@@ -242,6 +246,9 @@ public class KnowledgeBaseQueryService {
         this.generation = queryProperties.getGeneration();
         this.cypherPromptTemplate = dev.langchain4j.model.input.PromptTemplate.from(
             resourceLoader.getResource(graph.getCypherPromptPath())
+                .getContentAsString(StandardCharsets.UTF_8));
+        this.sqlPromptTemplate = dev.langchain4j.model.input.PromptTemplate.from(
+            resourceLoader.getResource(sql.getPromptPath())
                 .getContentAsString(StandardCharsets.UTF_8));
         this.neo4jDriver = neo4jDriver;
         this.intentRecognition = queryProperties.getIntentRecognition();
@@ -407,7 +414,7 @@ public class KnowledgeBaseQueryService {
                     }
                     if (intent != null) {
                         ACTIVE_INTENT.set(intent);
-                        var cardFlux = ragCardService.maybeResumeSelectionCards(intent);
+                        var cardFlux = ragCardService.maybeInteractionCards(intent);
                         if (cardFlux.isPresent()) {
                             cardFlux.get().subscribe(
                                 sink::next,
@@ -485,44 +492,20 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
-     * 调用意图识别服务并容错解析结果（亮点4）。
+     * 调用意图识别服务（LangChain4j Structured Output）。
      *
-     * <p>用 {@link IntentRecognitionService#recognize(String)} 拿原始 JSON 字符串，经
-     * {@link JsonUtil#fixAndParse(String)} 容错解析为 {@link IntentRecognitionResult}。
-     * 任何异常（LLM 调用失败 / 解析失败 / 字段缺失）都返回 null，由调用方按"相关"兜底走 RAG，
-     * 不阻断主流程。
+     * <p>任何异常都返回 null，由调用方按「相关」兜底走 RAG，不阻断主流程。
      */
     private IntentRecognitionResult recognizeIntent(String question) {
         try {
-            String json = intentRecognitionService.recognize(question);
-            if (json == null || json.isBlank()) {
+            IntentRecognitionResult result = intentRecognitionService.recognize(question);
+            if (result == null) {
                 log.warn("意图识别返回空，按相关兜底走 RAG");
                 return null;
             }
-            var node = JsonUtil.fixAndParse(json);
-            if (node == null || node.isMissingNode() || node.isNull()) {
-                log.warn("意图识别解析为空节点，按相关兜底走 RAG: raw={}", json);
-                return null;
-            }
-            var relatedNode = node.get("related");
-            if (relatedNode == null || !relatedNode.isBoolean()) {
-                log.warn("意图识别缺少 related 布尔字段，按相关兜底走 RAG: raw={}", json);
-                return null;
-            }
-            boolean related = relatedNode.asBoolean();
-            String reason = node.hasNonNull("reason") ? node.get("reason").asText() : null;
-            String intent = node.hasNonNull("intent") ? node.get("intent").asText() : InterviewIntent.TECH_KB.name();
-            IntentRecognitionResult.Entities entities = null;
-            var entitiesNode = node.get("entities");
-            if (entitiesNode != null && entitiesNode.isObject()) {
-                Long resumeId = entitiesNode.hasNonNull("resumeId") ? entitiesNode.get("resumeId").asLong() : null;
-                Long sessionId = entitiesNode.hasNonNull("sessionId") ? entitiesNode.get("sessionId").asLong() : null;
-                String skill = entitiesNode.hasNonNull("skill") ? entitiesNode.get("skill").asText(null) : null;
-                String company = entitiesNode.hasNonNull("company") ? entitiesNode.get("company").asText(null) : null;
-                entities = new IntentRecognitionResult.Entities(skill, resumeId, sessionId, company);
-            }
-            log.debug("意图识别结果: related={}, intent={}, reason={}", related, intent, reason);
-            return new IntentRecognitionResult(related, reason, intent, entities);
+            log.debug("意图识别结果: related={}, intent={}, reason={}",
+                result.related(), result.intent(), result.reason());
+            return result;
         } catch (Exception e) {
             log.warn("意图识别失败，按相关兜底走 RAG: error={}", e.getMessage(), e);
             return null;
@@ -574,38 +557,49 @@ public class KnowledgeBaseQueryService {
                                               RagQueryTrace trace, boolean knowledgeBaseOnly) {
         Long userId = UserContext.requireUserId();
         List<InterviewElasticsearchContentRetriever> esRetrievers =
-            buildElasticsearchRetrievers(knowledgeBaseIds, progressCallback, trace, userId);
-        List<ContentRetriever> esRouterRetrievers = new ArrayList<>(esRetrievers);
-        ContentRetriever esFallback = esRetrievers.size() == 1
-            ? esRetrievers.getFirst()
-            : new CompositeContentRetriever(new ArrayList<>(esRetrievers));
+            buildElasticsearchRetrievers(knowledgeBaseIds, null, trace, userId);
+        List<ContentRetriever> esRouterRetrievers = esRetrievers.stream()
+            .map(r -> ProgressAwareContentRetriever.wrap(
+                r, progressCallback, ProgressAwareContentRetriever.Kind.ES))
+            .toList();
+        ContentRetriever esFallback = esRouterRetrievers.size() == 1
+            ? esRouterRetrievers.getFirst()
+            : new CompositeContentRetriever(new ArrayList<>(esRouterRetrievers));
         InterviewSqlContentRetriever sqlRetriever = sql.isEnabled() && !knowledgeBaseOnly
             ? new InterviewSqlContentRetriever(dataSource, getChatModel(), esFallback,
                 dataTableService.databaseStructure(userId),
                 dataTableService.allowedDynamicTables(userId),
                 sql.getQueryTimeoutSeconds(),
                 sql.getMaxRows(),
-                userId)
+                userId,
+                sqlPromptTemplate)
             : null;
+        ContentRetriever routedSql = sqlRetriever == null ? null
+            : ProgressAwareContentRetriever.wrap(
+                sqlRetriever, progressCallback, ProgressAwareContentRetriever.Kind.SQL);
         InterviewNeo4jContentRetriever neo4jRetriever = buildNeo4jRetriever(esFallback, knowledgeBaseOnly);
+        ContentRetriever routedNeo4j = neo4jRetriever == null ? null
+            : ProgressAwareContentRetriever.wrap(
+                neo4jRetriever, progressCallback, ProgressAwareContentRetriever.Kind.NEO4J);
         InterviewQueryTransformer rewriteTransformer = new InterviewQueryTransformer(
             getRewriteChatModel(), rewritePromptTemplate, rewriteEnabled, progressCallback,
             assistantMessageId, ragChatMessageMapper, trace);
         InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
             rewriteTransformer, getRewriteChatModel(), hydePromptTemplate, hydeEnabled, hydeMaxChars);
-        InterviewReRankingContentAggregator aggregator = rerankEnabled && rerankService.isEnabled()
+        InterviewReRankingContentAggregator rerankAggregator = rerankEnabled && rerankService.isEnabled()
             ? InterviewReRankingContentAggregator.builder()
                 .scoringModel(rerankService)
                 .maxResults(rerankTopN > 0 ? rerankTopN : null)
                 .querySelector(qtc -> qtc.keySet().iterator().next())
-                .progressCallback(progressCallback)
+                .progressCallback(null)
                 .trace(trace)
                 .build()
             : null;
         ContentInjector contentInjector = new DefaultContentInjector();
-        var finalAggregator = sql.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewHybridContentAggregator(aggregator)
-            : aggregator;
+        ContentAggregator hybridAggregator = sql.isEnabled() && !knowledgeBaseOnly
+            ? new InterviewHybridContentAggregator(rerankAggregator)
+            : rerankAggregator;
+        ContentAggregator finalAggregator = ProgressAwareContentAggregator.wrap(hybridAggregator, progressCallback);
 
         InterviewIntent intentHint = ACTIVE_INTENT.get() != null
             ? ACTIVE_INTENT.get().resolvedIntent()
@@ -613,7 +607,7 @@ public class KnowledgeBaseQueryService {
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
             .queryRouter(knowledgeBaseOnly
                 ? new InterviewQueryRouter(esRouterRetrievers, null, null, null, false, null, null, intentHint)
-                : new InterviewQueryRouter(esRouterRetrievers, sqlRetriever, neo4jRetriever, getRoutingChatModel(),
+                : new InterviewQueryRouter(esRouterRetrievers, routedSql, routedNeo4j, getRoutingChatModel(),
                     isRouterEnabled(sqlRetriever, neo4jRetriever), progressCallback, trace, intentHint))
             .queryTransformer(transformer)
             .contentInjector(contentInjector);

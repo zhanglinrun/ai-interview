@@ -22,6 +22,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
             .excludePathPatterns(
                 "/api/auth/**",           // 认证接口（注册/登录/刷新）
                 "/api/llm-provider/status", // 公开：LLM Provider 状态查询
+                "/api/dingtalk/**",         // 钉钉 Webhook（签名校验）
                 "/actuator/**",           // Actuator 监控端点
                 "/swagger-ui/**",         // Swagger UI
                 "/v3/api-docs/**",        // OpenAPI 文档

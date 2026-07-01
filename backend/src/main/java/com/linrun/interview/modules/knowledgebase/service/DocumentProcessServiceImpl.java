@@ -11,6 +11,7 @@ import com.linrun.interview.infrastructure.file.ContentTypeDetectionService;
 import com.linrun.interview.infrastructure.file.FileHashService;
 import com.linrun.interview.infrastructure.file.FileStorageService;
 import com.linrun.interview.infrastructure.file.FileValidationService;
+import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.constant.FileType;
 import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
@@ -27,6 +28,7 @@ import com.linrun.interview.modules.knowledgebase.service.parse.FileProcessServi
 import com.linrun.interview.modules.knowledgebase.service.parse.FileTypeResolver;
 import com.linrun.interview.modules.knowledgebase.service.parse.SpreadsheetProcessService;
 import com.linrun.interview.modules.knowledgebase.service.splitter.ExcelSplitter;
+import com.linrun.interview.modules.knowledgebase.util.DocumentPermissionUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +38,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -90,6 +93,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.common.security.UserContext).requireUserId() + ':' + #file.originalFilename",
         waitTime = 0, leaseTime = 300, message = "同名文件正在上传，请稍后再试")
     public Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType) {
+        return upload(file, title, category, knowledgeBaseType, DocumentAccessScope.PRIVATE, null);
+    }
+
+    @Override
+    @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.common.security.UserContext).requireUserId() + ':' + #file.originalFilename",
+        waitTime = 0, leaseTime = 300, message = "同名文件正在上传，请稍后再试")
+    public Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType,
+                       DocumentAccessScope accessScope, LocalDate expireDate) {
         KnowledgeBaseType type = knowledgeBaseType != null ? knowledgeBaseType : KnowledgeBaseType.DOCUMENT_SEARCH;
         Long userId = UserContext.requireUserId();
         String fileName = file.getOriginalFilename();
@@ -139,6 +150,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         entity.setStorageKey(storageKey);
         entity.setStorageUrl(docUrl);
         entity.setKnowledgeBaseType(type.name());
+        entity.setAccessibleBy(accessScope != null ? accessScope.name() : DocumentAccessScope.PRIVATE.name());
+        entity.setExpireDate(expireDate);
         entity.setDocStatus(DocumentStatus.UPLOADED);
         entity = MapperUtils.save(knowledgeBaseEntityMapper, entity);
 
@@ -294,6 +307,10 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
                 "文档状态不为 CONVERTED，无法切块，当前状态: " + entity.getDocStatus());
         }
 
+        if (DocumentPermissionUtils.isExpired(entity.getExpireDate())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文档已过期，无法切块");
+        }
+
         List<TextSegment> segments;
         if (fileValidationService.isSpreadsheetExtension(entity.getOriginalFilename())) {
             if (entity.getStorageKey() == null || entity.getStorageKey().isBlank()) {
@@ -329,7 +346,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             metadataMap.put(MetadataKeyConstant.FILE_NAME, entity.getName());
             metadataMap.put(MetadataKeyConstant.URL, version.getDocUrl());
             metadataMap.put(MetadataKeyConstant.VERSION, String.valueOf(version.getVersionId()));
-            metadataMap.put(MetadataKeyConstant.ACCESSIBLE_BY, String.valueOf(userId));
+            metadataMap.put(MetadataKeyConstant.ACCESSIBLE_BY, DocumentPermissionUtils.metadataAccessibleBy(entity));
+            DocumentPermissionUtils.putExpireDate(metadataMap, entity.getExpireDate());
 
             KnowledgeBaseSegmentEntity segEntity = new KnowledgeBaseSegmentEntity();
             segEntity.setText(seg.text());

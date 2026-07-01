@@ -14,8 +14,7 @@ import dev.langchain4j.service.UserMessage;
  * 二分类（related / reason），不做意图细分，避免过度工程。system prompt 从 classpath
  * {@code prompts/intent-recognition.st} 加载。
  *
- * <p>返回原始 JSON 字符串（而非 LC4j 结构化 record），由调用方经 {@link com.linrun.interview.common.util.JsonUtil}
- * 容错解析为 {@link IntentRecognitionResult}，更可控（结构化输出与 fixJson 互补）。
+ * <p>返回 {@link IntentRecognitionResult}（LangChain4j Structured Output + {@code @JsonPropertyDescription}）。
  *
  * <p>无状态单轮，弃 know-engine 的 {@code @MemoryId} + ChatMemory（意图识别不需要历史记忆）。
  */
@@ -23,5 +22,5 @@ public interface IntentRecognitionService {
 
     @SystemMessage(fromResource = "prompts/intent-recognition.st")
     @UserMessage("{{it}}")
-    String recognize(String question);
+    IntentRecognitionResult recognize(String question);
 }

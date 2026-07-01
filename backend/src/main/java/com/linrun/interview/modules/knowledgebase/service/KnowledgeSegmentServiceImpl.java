@@ -1,6 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.mybatis.MapperUtils;
@@ -183,5 +184,35 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
     } catch (JsonProcessingException e) {
       log.debug("写入 parent chunk 缓存失败: chunkId={}", chunkId, e);
     }
+  }
+
+  @Override
+  public KnowledgeBaseSegmentEntity findById(Long segmentId) {
+    if (segmentId == null) {
+      return null;
+    }
+    return segmentMapper.selectById(segmentId);
+  }
+
+  @Override
+  public Page<KnowledgeBaseSegmentEntity> pageByDocument(Long docId, Long versionId, int page, int size) {
+    Page<KnowledgeBaseSegmentEntity> pageReq = new Page<>(Math.max(page, 1), Math.max(size, 1));
+    var wrapper = Wrappers.<KnowledgeBaseSegmentEntity>lambdaQuery()
+        .eq(KnowledgeBaseSegmentEntity::getDocumentId, docId)
+        .orderByAsc(KnowledgeBaseSegmentEntity::getChunkOrder);
+    if (versionId != null) {
+      wrapper.eq(KnowledgeBaseSegmentEntity::getDocumentVersion, versionId);
+    }
+    return segmentMapper.selectPage(pageReq, wrapper);
+  }
+
+  @Override
+  public long countByDocument(Long docId, Long versionId) {
+    var wrapper = Wrappers.<KnowledgeBaseSegmentEntity>lambdaQuery()
+        .eq(KnowledgeBaseSegmentEntity::getDocumentId, docId);
+    if (versionId != null) {
+      wrapper.eq(KnowledgeBaseSegmentEntity::getDocumentVersion, versionId);
+    }
+    return segmentMapper.selectCount(wrapper);
   }
 }

@@ -1,9 +1,12 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
 import com.linrun.interview.modules.knowledgebase.model.DocumentSplitParam;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.time.LocalDate;
 
 /**
  * 知识库文档处理编排接口（对齐 know-engine DocumentProcessService）。
@@ -30,9 +33,15 @@ public interface DocumentProcessService {
     Long upload(MultipartFile file, String title, String category);
 
     /**
-     * 上传并解析文档，指定知识库类型。
+     * 上传并解析文档，指定知识库类型（默认私有、无到期日）。
      */
     Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType);
+
+    /**
+     * 上传并解析文档，指定知识库类型与访问范围。
+     */
+    Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType,
+                DocumentAccessScope accessScope, LocalDate expireDate);
 
     /**
      * 上传新版本（版本号自动递增，旧版本即时失效）。

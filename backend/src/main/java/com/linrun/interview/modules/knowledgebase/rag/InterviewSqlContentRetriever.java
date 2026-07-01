@@ -3,6 +3,7 @@ package com.linrun.interview.modules.knowledgebase.rag;
 import com.linrun.interview.common.security.UserContext;
 import dev.langchain4j.experimental.rag.content.retriever.sql.SqlDatabaseContentRetriever;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
@@ -115,18 +116,33 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
                                         int queryTimeoutSeconds,
                                         int maxRows,
                                         Long userId) {
+        this(dataSource, chatModel, fallbackRetriever, dynamicDatabaseStructure, dynamicTables,
+            queryTimeoutSeconds, maxRows, userId, null);
+    }
+
+    public InterviewSqlContentRetriever(DataSource dataSource, ChatModel chatModel,
+                                        ContentRetriever fallbackRetriever,
+                                        String dynamicDatabaseStructure,
+                                        Collection<String> dynamicTables,
+                                        int queryTimeoutSeconds,
+                                        int maxRows,
+                                        Long userId,
+                                        PromptTemplate promptTemplate) {
         this.maxRows = Math.max(maxRows, 1);
         this.userId = userId;
         String databaseStructure = DATABASE_STRUCTURE
             + (dynamicDatabaseStructure == null ? "" : dynamicDatabaseStructure);
-        this.sqlRetriever = SqlDatabaseContentRetriever.builder()
+        var sqlBuilder = SqlDatabaseContentRetriever.builder()
             .dataSource(new SafeReadOnlyDataSource(dataSource, allowedTables(dynamicTables),
                 queryTimeoutSeconds, this.maxRows, userId))
             .sqlDialect("MySQL")
             .databaseStructure(databaseStructure)
             .chatModel(chatModel)
-            .maxRetries(1)
-            .build();
+            .maxRetries(1);
+        if (promptTemplate != null) {
+            sqlBuilder.promptTemplate(promptTemplate);
+        }
+        this.sqlRetriever = sqlBuilder.build();
         this.fallbackRetriever = fallbackRetriever;
     }
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import com.linrun.interview.common.mybatis.BaseEntity;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 
 import java.time.LocalDateTime;
@@ -16,7 +17,7 @@ import java.time.LocalDateTime;
  * 转换后 Markdown 文本内容、内容哈希与状态。{@link KnowledgeBaseEntity#getCurrentVersionId()} 指向当前激活版本。
  */
 @TableName("knowledge_base_version")
-public class KnowledgeBaseVersionEntity {
+public class KnowledgeBaseVersionEntity extends BaseEntity {
 
     @TableId(value = "version_id", type = IdType.AUTO)
     private Long versionId;

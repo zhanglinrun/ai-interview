@@ -238,6 +238,24 @@
         </exclusion>
       </exclusions>
     </dependency>
+
+    <!-- 钉钉 Stream 机器人（对齐 know-engine） -->
+    <dependency>
+      <groupId>com.dingtalk.open</groupId>
+      <artifactId>dingtalk-stream</artifactId>
+      <version>1.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.aliyun</groupId>
+      <artifactId>dingtalk</artifactId>
+      <version>1.5.59</version>
+    </dependency>
+    <dependency>
+      <groupId>com.aliyun</groupId>
+      <artifactId>alibaba-dingtalk-service-sdk</artifactId>
+      <version>2.0.0</version>
+    </dependency>
+
     <dependency>
       <groupId>jakarta.annotation</groupId>
       <artifactId>jakarta.annotation-api</artifactId>

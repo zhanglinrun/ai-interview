@@ -23,6 +23,8 @@ public record KnowledgeBaseListItemDTO(
     Long currentVersionId,
     String dataTableName,
     Integer dataRowCount,
-    String knowledgeBaseType
+    String knowledgeBaseType,
+    String accessibleBy,
+    java.time.LocalDate expireDate
 ) {
 }

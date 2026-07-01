@@ -86,8 +86,8 @@ public class KnowledgeBaseQueryProperties {
     public static class Rerank {
         /** 是否启用重排；关闭或失败时退回 RRF 融合排序 */
         private boolean enabled = true;
-        /** 重排实现：cloud（DashScope gte-rerank）或 local（本地 ONNX BGE）；默认 cloud */
-        private String provider = "cloud";
+        /** 重排实现：local（本地 ONNX BGE，优先）或 cloud（DashScope gte-rerank）；local 不可用时自动降级 cloud */
+        private String provider = "local";
         /** 重排服务 baseUrl（DashScope 默认 https://dashscope.aliyuncs.com） */
         private String baseUrl = "https://dashscope.aliyuncs.com";
         /** 重排模型名 */
@@ -230,6 +230,8 @@ public class KnowledgeBaseQueryProperties {
         private boolean routerEnabled = true;
         private int queryTimeoutSeconds = 8;
         private int maxRows = 100;
+        /** Text2SQL Prompt 模板（对齐 know-engine text-to-sql-prompt.txt） */
+        private String promptPath = "classpath:prompts/text-to-sql-prompt.txt";
     }
 
     /**

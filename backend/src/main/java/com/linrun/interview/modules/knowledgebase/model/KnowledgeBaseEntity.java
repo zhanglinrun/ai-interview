@@ -5,15 +5,17 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import com.linrun.interview.common.mybatis.BaseEntity;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
  * 知识库实体
  */
 @TableName("knowledge_bases")
-public class KnowledgeBaseEntity {
+public class KnowledgeBaseEntity extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -74,7 +76,11 @@ public class KnowledgeBaseEntity {
     /** 知识库类型：语义检索 / 数据查询。 */
     private String knowledgeBaseType;
 
-    
+    /** 可见范围：PRIVATE / PUBLIC（对齐 know-engine accessibleBy）。 */
+    private String accessibleBy;
+
+    /** 到期日；过期后不参与检索。 */
+    private LocalDate expireDate;
     // Getters and Setters
     public Long getId() {
         return id;
@@ -252,6 +258,22 @@ public class KnowledgeBaseEntity {
 
     public void setKnowledgeBaseType(String knowledgeBaseType) {
         this.knowledgeBaseType = knowledgeBaseType;
+    }
+
+    public String getAccessibleBy() {
+        return accessibleBy;
+    }
+
+    public void setAccessibleBy(String accessibleBy) {
+        this.accessibleBy = accessibleBy;
+    }
+
+    public LocalDate getExpireDate() {
+        return expireDate;
+    }
+
+    public void setExpireDate(LocalDate expireDate) {
+        this.expireDate = expireDate;
     }
 }
 

@@ -650,7 +650,19 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                           type="button"
                                           className="text-xs px-3 py-1.5 rounded-full border border-primary-200 text-primary-700 hover:bg-primary-50 dark:border-primary-700 dark:text-primary-300"
                                           onClick={() => {
-                                            setQuestion(`请分析简历「${choice.label}」（resumeId=${choice.id}）`);
+                                            const followUp = (() => {
+                                              switch (choice.type) {
+                                                case 'schedule':
+                                                  return `请查询面试安排「${choice.label}」（scheduleId=${choice.id}）`;
+                                                case 'session':
+                                                  return `请总结面试报告「${choice.label}」（sessionId=${choice.id}）`;
+                                                case 'skill':
+                                                  return `请针对「${choice.label}」方向（skillId=${choice.id}）给出面试准备建议`;
+                                                default:
+                                                  return `请分析简历「${choice.label}」（resumeId=${choice.id}）`;
+                                              }
+                                            })();
+                                            setQuestion(followUp);
                                           }}
                                         >
                                           {choice.label}

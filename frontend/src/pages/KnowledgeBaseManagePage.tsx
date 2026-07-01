@@ -102,6 +102,9 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [versions, setVersions] = useState<KnowledgeBaseVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [switchingVersionId, setSwitchingVersionId] = useState<number | null>(null);
+  const [versionUploadFile, setVersionUploadFile] = useState<File | null>(null);
+  const [versionChangelog, setVersionChangelog] = useState('');
+  const [versionUploading, setVersionUploading] = useState(false);
   const [previewKb, setPreviewKb] = useState<KnowledgeBaseItem | null>(null);
   const [dataPreview, setDataPreview] = useState<DataTablePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -216,6 +219,29 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     setVersionModalKb(null);
     setVersions([]);
     setSwitchingVersionId(null);
+    setVersionUploadFile(null);
+    setVersionChangelog('');
+    setVersionUploading(false);
+  };
+
+  const handleUploadNewVersion = async () => {
+    if (!versionModalKb || !versionUploadFile) return;
+    try {
+      setVersionUploading(true);
+      await knowledgeBaseApi.uploadNewVersion(
+        versionModalKb.id,
+        versionUploadFile,
+        versionChangelog,
+      );
+      setVersionUploadFile(null);
+      setVersionChangelog('');
+      setVersions(await knowledgeBaseApi.listVersions(versionModalKb.id));
+      await loadDataSilent();
+    } catch (error) {
+      console.error('上传新版本失败:', error);
+    } finally {
+      setVersionUploading(false);
+    }
   };
 
   // 切换当前激活版本
@@ -709,6 +735,36 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 >
                   <X className="w-5 h-5" />
                 </button>
+              </div>
+
+              <div className="px-5 pb-4 border-b border-slate-100 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">上传新版本</p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls"
+                    onChange={(e) => setVersionUploadFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-primary-50 file:text-primary-700"
+                  />
+                  <input
+                    type="text"
+                    value={versionChangelog}
+                    onChange={(e) => setVersionChangelog(e.target.value)}
+                    placeholder="变更说明（可选）"
+                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUploadNewVersion}
+                    disabled={!versionUploadFile || versionUploading}
+                    className="shrink-0 px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-40"
+                  >
+                    {versionUploading ? '上传中...' : '上传'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">
+                  上传完成后状态为 CONVERTED，请在列表中对文档执行「切块」以触发向量化。
+                </p>
               </div>
 
               <div className="flex-1 overflow-y-auto p-5">

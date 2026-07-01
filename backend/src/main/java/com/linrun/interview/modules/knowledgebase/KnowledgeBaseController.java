@@ -11,7 +11,10 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionDTO;
+import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
+import com.linrun.interview.modules.knowledgebase.model.RagDatasetResult;
+import com.linrun.interview.modules.knowledgebase.service.RagDatasetService;
 import com.linrun.interview.modules.knowledgebase.model.DocumentSplitParam;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
@@ -45,6 +48,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -66,6 +70,7 @@ public class KnowledgeBaseController {
     private final RagEvaluationService ragEvaluationService;
     private final RagQueryTraceService ragQueryTraceService;
     private final KnowledgeBaseDataTableService dataTableService;
+    private final RagDatasetService ragDatasetService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
 
@@ -204,9 +209,13 @@ public class KnowledgeBaseController {
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "knowledgeBaseType", required = false, defaultValue = "DOCUMENT_SEARCH")
-            String knowledgeBaseType) {
+            String knowledgeBaseType,
+            @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy,
+            @RequestParam(value = "expireDate", required = false) String expireDate) {
         KnowledgeBaseType type = parseKnowledgeBaseType(knowledgeBaseType);
-        return Result.success(uploadSingle(file, name, category, type));
+        DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
+        LocalDate expire = parseExpireDate(expireDate);
+        return Result.success(uploadSingle(file, name, category, type, scope, expire));
     }
 
     /**
@@ -279,16 +288,32 @@ public class KnowledgeBaseController {
         return Result.success(dataTableService.preview(UserContext.requireUserId(), id, page, size));
     }
 
+    @GetMapping("/api/knowledgebase/dataset/generate")
+    public Result<RagDatasetResult> generateDataset(
+            @RequestParam("question") String question,
+            @RequestParam("knowledgeBaseIds") List<Long> knowledgeBaseIds) {
+        return Result.success(ragDatasetService.generate(knowledgeBaseIds, question));
+    }
+
     /**
      * 单文件上传内部逻辑：仅 upload（解析落库至 CONVERTED），不自动 split。
      */
     private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
                                              KnowledgeBaseType knowledgeBaseType) {
-        String fileName = file.getOriginalFilename();
-        log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, type={}",
-            fileName, file.getSize(), category, knowledgeBaseType);
+        return uploadSingle(file, name, category, knowledgeBaseType,
+            DocumentAccessScope.PRIVATE, null);
+    }
 
-        Long docId = documentProcessService.upload(file, name, category, knowledgeBaseType);
+    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
+                                             KnowledgeBaseType knowledgeBaseType,
+                                             DocumentAccessScope accessScope,
+                                             LocalDate expireDate) {
+        String fileName = file.getOriginalFilename();
+        log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, type={}, access={}, expire={}",
+            fileName, file.getSize(), category, knowledgeBaseType, accessScope, expireDate);
+
+        Long docId = documentProcessService.upload(
+            file, name, category, knowledgeBaseType, accessScope, expireDate);
 
         KnowledgeBaseEntity entity = EntityQueries.byUserAndId(
             knowledgeBaseEntityMapper, UserContext.requireUserId(), docId,
@@ -442,6 +467,17 @@ public class KnowledgeBaseController {
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "无效的知识库类型: " + raw + "，可选 DOCUMENT_SEARCH / DATA_QUERY");
+        }
+    }
+
+    private static LocalDate parseExpireDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(raw.trim());
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "无效的到期日期格式，请使用 yyyy-MM-dd");
         }
     }
 

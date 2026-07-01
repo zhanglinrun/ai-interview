@@ -2,6 +2,7 @@ package com.linrun.interview.modules.knowledgebase.mapper;
 
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -23,4 +24,8 @@ public interface KnowledgeBaseEntityMapper extends BaseMapper<KnowledgeBaseEntit
       "</script>"
   })
   int incrementQuestionCountBatch(@Param("userId") Long userId, @Param("ids") List<Long> ids);
+
+  /** 级联删除时物理删主表，绕过 {@code @TableLogic} 软删。 */
+  @Delete("DELETE FROM knowledge_bases WHERE id = #{id}")
+  int physicalDeleteById(@Param("id") Long id);
 }

@@ -66,4 +66,20 @@ public interface KnowledgeSegmentService {
      * 按 brotherChunkId 集合查同组兄弟分段（兄弟扩展：按 brotherChunkIndex 顺序拼接成完整段落）。
      */
     List<KnowledgeBaseSegmentEntity> findByBrotherChunkIdIn(List<String> brotherChunkIds);
+
+    /**
+     * 按 ID 查分段（需校验文档归属）。
+     */
+    KnowledgeBaseSegmentEntity findById(Long segmentId);
+
+    /**
+     * 按文档分页查分段。
+     */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<KnowledgeBaseSegmentEntity> pageByDocument(
+        Long docId, Long versionId, int page, int size);
+
+    /**
+     * 按文档统计分段数。
+     */
+    long countByDocument(Long docId, Long versionId);
 }

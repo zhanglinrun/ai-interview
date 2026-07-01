@@ -75,9 +75,8 @@ public class RerankService implements ScoringModel {
 
         this.cloudAvailable = apiKey != null && !apiKey.isBlank();
         String configuredProvider = rerankProps.getProvider();
-        this.localRerankModel = PROVIDER_CLOUD.equalsIgnoreCase(configuredProvider)
-            ? null
-            : new LocalOnnxRerankModel(rerankProps.getLocal());
+        // 始终初始化本地模型，供 local 优先或 cloud 降级使用
+        this.localRerankModel = new LocalOnnxRerankModel(rerankProps.getLocal());
         this.effectiveProvider = resolveEffectiveProvider(configuredProvider);
         if (!cloudAvailable) {
             log.warn("[RerankService] 未找到 dashscope API Key，云端 rerank 不可用");

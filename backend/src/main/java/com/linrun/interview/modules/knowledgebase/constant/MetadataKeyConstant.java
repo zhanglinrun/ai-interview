@@ -37,8 +37,11 @@ public final class MetadataKeyConstant {
     /** 标题级别（1-6，对应 Markdown # 的个数） */
     public static final String HEADER_LEVEL = "headerLevel";
 
-    /** 访问权限（用户隔离用，存 user_id） */
+    /** 访问权限（PRIVATE 存 user_id，PUBLIC 存 PUBLIC） */
     public static final String ACCESSIBLE_BY = "accessibleBy";
+
+    /** 文档到期日（ISO-8601，过期分段不参与检索） */
+    public static final String EXPIRE_DATE = "expireDate";
 
     /** 文件地址 */
     public static final String URL = "url";

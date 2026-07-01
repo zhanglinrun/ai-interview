@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import com.linrun.interview.common.mybatis.BaseEntity;
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 
 import java.time.LocalDateTime;
@@ -17,7 +18,7 @@ import java.time.LocalDateTime;
  * 也可按 embeddingId 单条删。
  */
 @TableName("knowledge_base_segment")
-public class KnowledgeBaseSegmentEntity {
+public class KnowledgeBaseSegmentEntity extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
