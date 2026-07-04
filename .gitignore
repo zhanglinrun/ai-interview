@@ -66,8 +66,9 @@ SETUP_API_KEYS.md
 docs/
 
 # Markdown documentation (local notes — do not commit)
-# 保留面试 Skill 资源与测试夹具中的 .md
+# 保留根目录 README、面试 Skill 资源与测试夹具中的 .md
 **/*.md
+!/README.md
 !backend/src/main/resources/skills/**/*.md
 !backend/src/test/resources/test-files/sample-resume.md
 
