@@ -11,7 +11,7 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动时校验本地 Rerank 模型是否就绪（对齐 know-engine BgeScoringModel 预加载检查）。
+ * 启动时校验本地 Rerank 模型是否就绪（对齐业界实践 BgeScoringModel 预加载检查）。
  */
 @Slf4j
 @Component

@@ -31,9 +31,9 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   const variantStyles = {
-    danger: 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700',
-    primary: 'bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700',
-    warning: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
+    danger: 'bg-red-600 hover:bg-red-700',
+    primary: 'btn-primary',
+    warning: 'bg-amber-600 hover:bg-amber-700',
   };
 
   return (
@@ -56,7 +56,7 @@ export default function ConfirmDialog({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6"
+              className="surface-card max-w-md w-full p-6"
             >
               {/* 标题 */}
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
@@ -88,7 +88,7 @@ export default function ConfirmDialog({
                   <motion.button
                     onClick={onConfirm}
                     disabled={loading}
-                    className={`px-5 py-2.5 text-white rounded-xl font-semibold shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variantStyles[confirmVariant]}`}
+                    className={`px-5 py-2.5 text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variantStyles[confirmVariant]}`}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >

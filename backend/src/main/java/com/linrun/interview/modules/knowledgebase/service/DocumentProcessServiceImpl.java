@@ -39,17 +39,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 知识库文档处理编排实现（对齐 know-engine DocumentProcessServiceImpl）。
+ * 知识库文档处理编排实现（对齐业界实践 DocumentProcessServiceImpl）。
  *
  * <p>编排 upload（UPLOADED→CONVERTING→CONVERTED）→ 手动 split（CHUNKED + 事件）→ 异步向量化。
  *
- * <p>与 know-engine 差异（遵守 ai-interview AGENTS.md）：
+ * <p>与早期实现差异（遵守 ai-interview AGENTS.md）：
  * <ul>
  *   <li>用户隔离用 {@link UserContext#requireUserId()}（非 accessibleBy/uploadUser 字符串）。</li>
  *   <li>解析产物 Markdown 直接存版本表 {@code convertedContent}（Lob），split 时直接取，省存储往返。</li>
@@ -63,7 +64,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class DocumentProcessServiceImpl implements DocumentProcessService {
 
-    private static final long MAX_FILE_SIZE = 50L * 1024 * 1024;
+    private static final long MAX_FILE_SIZE = 100L * 1024 * 1024;
     private static final String INITIAL_VERSION = "1.0.0";
 
     private final FileProcessServiceFactory fileProcessServiceFactory;
@@ -139,6 +140,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         }
 
         // 4. 落库主表 + 版本（UPLOADED），再同步转换（UPLOADED → CONVERTING → CONVERTED）
+        LocalDateTime now = LocalDateTime.now();
         KnowledgeBaseEntity entity = new KnowledgeBaseEntity();
         entity.setUserId(userId);
         entity.setFileHash(contentHash);
@@ -149,6 +151,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         entity.setContentType(contentType);
         entity.setStorageKey(storageKey);
         entity.setStorageUrl(docUrl);
+        entity.setUploadedAt(now);
         entity.setKnowledgeBaseType(type.name());
         entity.setAccessibleBy(accessScope != null ? accessScope.name() : DocumentAccessScope.PRIVATE.name());
         entity.setExpireDate(expireDate);
@@ -162,6 +165,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         version.setContentHash(contentHash);
         version.setStatus(DocumentStatus.UPLOADED);
         version.setUploadUser(String.valueOf(userId));
+        version.setCreatedAt(now);
+        version.setUpdatedAt(now);
         version = versionService.save(version);
 
         entity.setCurrentVersionId(version.getVersionId());
@@ -224,22 +229,17 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         version.setStatus(DocumentStatus.UPLOADED);
         version.setUploadUser(String.valueOf(userId));
         version.setChangelog(changelog);
+        LocalDateTime now = LocalDateTime.now();
+        version.setCreatedAt(now);
+        version.setUpdatedAt(now);
         version = versionService.save(version);
 
-        // 先挂到新版本，便于 convert 阶段推进版本状态（主表 currentVersionId 在转换成功后再切换）
-        Long previousVersionId = entity.getCurrentVersionId();
-        entity.setCurrentVersionId(version.getVersionId());
-        MapperUtils.save(knowledgeBaseEntityMapper, entity);
-
+        // convert 成功后才切主表 currentVersionId（见 finalizeAfterConvert）：
+        // 转换可能耗时数分钟（MinerU），期间指针必须始终指向旧的可用版本；
+        // convert 失败时指针从未切换，无需回滚
         KnowledgeBaseType kbType = resolveKnowledgeBaseType(entity);
-        ConvertResult convertResult;
-        try {
-            convertResult = convertFile(docId, version.getVersionId(), fileBytes, fileName, contentType, kbType);
-        } catch (Exception e) {
-            entity.setCurrentVersionId(previousVersionId);
-            MapperUtils.save(knowledgeBaseEntityMapper, entity);
-            throw e;
-        }
+        ConvertResult convertResult =
+            convertFile(docId, version.getVersionId(), fileBytes, fileName, contentType, kbType);
 
         // 即时失效旧当前版本：若旧版本已向量化，主动清 ES 向量 + segment 降 STORED，不等补偿任务。
         if (latest.getStatus() == DocumentStatus.VECTOR_STORED) {
@@ -271,9 +271,11 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 120,
         message = "该知识库正在切块，请稍后再试")
     public int split(Long docId, DocumentSplitParam splitParam) {
+        return splitInternal(docId, splitParam);
+    }
+
+    private int splitInternal(Long docId, DocumentSplitParam splitParam) {
         Long userId = UserContext.requireUserId();
-        log.info("切块请求: docId={}, splitType={}", docId,
-            splitParam != null ? splitParam.splitType() : "default");
         KnowledgeBaseEntity entity = EntityQueries.byUserAndId(knowledgeBaseEntityMapper, userId, docId, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
 
@@ -311,13 +313,16 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "文档已过期，无法切块");
         }
 
+        splitParam = chunkingService.resolveSplitParam(splitParam);
+        log.info("切块请求: docId={}, splitType={}", docId, splitParam.splitType());
+
         List<TextSegment> segments;
         if (fileValidationService.isSpreadsheetExtension(entity.getOriginalFilename())) {
             if (entity.getStorageKey() == null || entity.getStorageKey().isBlank()) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "表格原文件缺失，无法 ExcelSplitter 切块");
             }
             byte[] fileBytes = storageService.downloadFile(entity.getStorageKey());
-            int chunkSize = splitParam != null && splitParam.chunkSize() != null
+            int chunkSize = splitParam.chunkSize() != null
                 ? splitParam.chunkSize() : chunkingService.defaultSplitParam().chunkSize();
             try {
                 segments = new ExcelSplitter(chunkSize).split(fileBytes);
@@ -330,8 +335,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             if (markdown == null || markdown.isBlank()) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "转换后内容为空，请重新上传");
             }
-            DocumentSplitParam effective = splitParam != null ? splitParam : chunkingService.defaultSplitParam();
-            segments = chunkingService.split(markdown, effective);
+            segments = chunkingService.split(markdown, splitParam);
         }
         log.info("切块完成: docId={}, segmentCount={}", docId, segments.size());
 
@@ -368,7 +372,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         }
         segmentService.saveBatch(segmentEntities);
 
-        // 状态升 CHUNKED（单调推进，对齐 know-engine split）
+        // 状态升 CHUNKED（单调推进，对齐业界实践 split）
         knowledgeDocumentService.advanceDocumentAndVersionStatus(
             docId, version.getVersionId(), DocumentStatus.CHUNKED);
 
@@ -388,8 +392,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @DistributeLock(key = "'kb:rechunk:' + #docId", waitTime = 0, leaseTime = 180,
-        message = "该知识库正在重新向量化，请稍后再试")
+    // 与 split 共用同一把锁，rechunk 直接调用 splitInternal 避免同类调用绕过代理。
+    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 180,
+        message = "该知识库正在切块或重新向量化，请稍后再试")
     public int rechunk(Long docId) {
         Long userId = UserContext.requireUserId();
         log.info("重新切块请求: docId={}", docId);
@@ -403,7 +408,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         KnowledgeBaseVersionEntity version = versionService.getById(versionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本记录不存在"));
 
-        // 1. 清 ES 旧向量（按 docId+versionId，失败仅告警，不阻断重新切块）
+        // 1. 清 ES 旧向量（按 docId+versionId，失败抛异常回滚，避免残留孤儿向量）
         vectorStoreService.removeByDocIdAndVersion(docId, versionId);
         // 2. 物理删当前版本 segment
         segmentService.physicalDeleteByDocumentVersion(versionId);
@@ -415,7 +420,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         MapperUtils.save(knowledgeBaseEntityMapper, entity);
 
         // 5. 重新切块发事件触发异步向量化
-        return split(docId);
+        return splitInternal(docId, chunkingService.defaultSplitParam());
     }
 
     @Override
@@ -446,14 +451,10 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             return;
         }
 
-        // 目标版本已向量化：热切换——失效旧当前版本（清 ES 向量 + 降级，保留 segment 可再切回），
-        // 主表指向目标版本。目标版本 ES 向量本就存在（按 metadata version 过滤），无需重建。
-        if (currentVersionId != null && !currentVersionId.equals(versionId)) {
-            knowledgeDocumentService.deactivateVersion(currentVersionId);
-        }
-        doc.setCurrentVersionId(versionId);
-        doc.setDocStatus(DocumentStatus.VECTOR_STORED);
-        MapperUtils.save(knowledgeBaseEntityMapper, doc);
+        // 目标版本已向量化：热切换——旧版本 DB 降级 + 主表指针更新在一个事务内完成，
+        // 旧版本 ES 向量清理移到事务提交后（事务内禁止外部 API）。
+        // 目标版本 ES 向量本就存在（按 metadata version 过滤），无需重建。
+        knowledgeDocumentService.switchActiveVersion(docId, versionId);
         log.info("切换完成（热切换，无重建）: docId={}, versionId={}", docId, versionId);
     }
 
@@ -491,7 +492,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     }
 
     /**
-     * 同步转换阶段（对齐 know-engine processFile）：UPLOADED → CONVERTING → CONVERTED/STORED。
+     * 同步转换阶段（对齐业界实践 processFile）：UPLOADED → CONVERTING → CONVERTED/STORED。
      */
     private ConvertResult convertFile(Long docId, Long versionId, byte[] fileBytes, String fileName,
                                       String contentType, KnowledgeBaseType type) {
@@ -554,8 +555,10 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     }
 
     private void rollbackToUploaded(Long docId, Long versionId) {
+        // 主表状态仅在指针确实指向失败版本时回滚；
+        // 新版本上传失败时指针仍指向旧激活版本，不能篡改其状态
         KnowledgeBaseEntity entity = knowledgeBaseEntityMapper.selectById(docId);
-        if (entity != null) {
+        if (entity != null && versionId.equals(entity.getCurrentVersionId())) {
             entity.setDocStatus(DocumentStatus.UPLOADED);
             MapperUtils.save(knowledgeBaseEntityMapper, entity);
         }

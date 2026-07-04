@@ -139,13 +139,6 @@ export const historyApi = {
   },
 
   /**
-   * 获取简历统计信息
-   */
-  async getStatistics(): Promise<ResumeStats> {
-    return request.get<ResumeStats>('/api/resumes/statistics');
-  },
-
-  /**
    * 重新分析简历
    */
   async reanalyze(id: number): Promise<void> {

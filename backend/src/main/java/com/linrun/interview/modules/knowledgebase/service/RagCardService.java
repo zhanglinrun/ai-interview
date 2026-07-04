@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * RAG 流式交互卡片（对齐 know-engine CARD 协议，前缀 {@code card:}/{@code card_choice:}）。
+ * RAG 流式交互卡片（对齐业界实践 CARD 协议，前缀 {@code card:}/{@code card_choice:}）。
  */
 @Slf4j
 @Service

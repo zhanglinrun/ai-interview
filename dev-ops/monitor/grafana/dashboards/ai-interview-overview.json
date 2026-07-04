@@ -1,0 +1,248 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "RAG 检索延迟 (P99 / P95 / P50)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(app_ai_rag_retrieval_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(app_ai_rag_retrieval_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(app_ai_rag_retrieval_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P50",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "RAG 首 token 延迟 (流式 TTFB, P99 / P95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(app_ai_rag_stream_first_token_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(app_ai_rag_stream_first_token_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "RAG 检索请求量 (QPS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(app_ai_rag_retrieval_requests_total[1m]))",
+          "legendFormat": "总 QPS",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(app_ai_rag_retrieval_requests_total[1m])) by (hit)",
+          "legendFormat": "命中={{hit}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "活跃 RAG 流式连接数",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "app_ai_rag_stream_active",
+          "legendFormat": "活跃连接",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Stream 积压 (Stream 长度)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "app_async_stream_length",
+          "legendFormat": "{{pipeline}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Stream 待确认数 (PEL)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "app_async_stream_pending",
+          "legendFormat": "{{pipeline}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "死信队列长度 (DLQ)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "app_async_stream_dlq",
+          "legendFormat": "{{pipeline}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "向量化文档处理延迟 (P99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(app_ai_vectorize_document_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P99",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "在飞 embedding 调用数",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "app_ai_vectorize_embedding_inflight",
+          "legendFormat": "in-flight",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "结构化输出调用与重试",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(app_ai_structured_output_invocations_total[5m])) by (status)",
+          "legendFormat": "调用 {{status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(app_ai_structured_output_attempts_total[5m]))",
+          "legendFormat": "总尝试次数",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Multi-Agent 出题延迟 (P99 / P95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(app_ai_agent_question_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "question P99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(app_ai_agent_question_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "question P95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(app_ai_agent_plan_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "plan P99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Critic 审题结果",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(app_ai_agent_critic_verdicts_total[5m])) by (approved)",
+          "legendFormat": "approved={{approved}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Reflexion 重生成轮次",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(app_ai_agent_reflexion_rounds_sum[5m])) / clamp_min(sum(rate(app_ai_agent_reflexion_rounds_count[5m])), 1)",
+          "legendFormat": "avg rounds",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "HTTP 请求延迟 (P99, 按接口)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*\"}[5m])) by (le, uri))",
+          "legendFormat": "{{uri}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["ai-interview"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "AI Interview - RAG / 异步管道 / 稳定性",
+  "uid": "ai-interview-overview",
+  "version": 1
+}

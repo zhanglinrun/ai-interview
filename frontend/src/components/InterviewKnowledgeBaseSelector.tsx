@@ -23,7 +23,7 @@ export default function InterviewKnowledgeBaseSelector({
             关联知识库（可选）
           </p>
           <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
-            选中后，面试官 Agent 会检索资料再出题
+            选中后，出题前会先检索知识库资料，围绕资料要点出题
           </p>
         </div>
       </div>

@@ -20,7 +20,7 @@ import java.util.List;
  * <p>当意图识别判定问题与面试 / 技术知识 / 简历 / 求职等场景无关时，跳过知识库检索，直接走
  * {@link StreamingChatModel} 流式生成通用回答，避免越界问题强行检索导致幻觉或"未检索到"。
  *
- * <p>底层模型一律复用 {@link LlmProviderRegistry#getDefaultStreamingChatModel()}（弃 know-engine
+ * <p>底层模型一律复用 {@link LlmProviderRegistry#getDefaultStreamingChatModel()}（弃用早期
  * 每次 {@code new OpenAiChatModel}）。流式 token 经 {@link FluxStreamingBridge} 桥接为 {@code Flux<String>}，
  * 由调用方带 SSE 前缀协议推给前端（与 RAG 流同形，前端无需区分）。
  */

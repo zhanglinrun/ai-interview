@@ -56,19 +56,26 @@ public class InterviewSessionCache {
         private String questionsJson;  // 序列化的问题列表
         private int currentIndex;
         private SessionStatus status;
+        /** 计划总题数（Agent 编排模式下题目动态生成，questions.size() 会小于该值） */
+        private int plannedTotal;
+        /** 是否为 Multi-Agent 编排会话（动态出题） */
+        private boolean agentMode;
 
         public CachedSession() {
         }
 
         public CachedSession(String sessionId, Long userId, String resumeText, Long resumeId,
                             List<InterviewQuestionDTO> questions, int currentIndex,
-                            SessionStatus status, ObjectMapper objectMapper) {
+                            SessionStatus status, int plannedTotal, boolean agentMode,
+                            ObjectMapper objectMapper) {
             this.sessionId = sessionId;
             this.userId = userId;
             this.resumeText = resumeText;
             this.resumeId = resumeId;
             this.currentIndex = currentIndex;
             this.status = status;
+            this.plannedTotal = plannedTotal;
+            this.agentMode = agentMode;
             try {
                 this.questionsJson = objectMapper.writeValueAsString(questions);
             } catch (JsonProcessingException e) {
@@ -83,6 +90,21 @@ public class InterviewSessionCache {
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR, "反序列化问题列表失败", e);
             }
         }
+
+        /** 计划总题数（兼容旧缓存条目：未写入时回退 questions 数量） */
+        public int resolvePlannedTotal(ObjectMapper objectMapper) {
+            return plannedTotal > 0 ? plannedTotal : getQuestions(objectMapper).size();
+        }
+    }
+
+    /**
+     * 保存会话到缓存（旧批量出题路径：计划总题数 = 题目数）
+     */
+    public void saveSession(String sessionId, Long userId, String resumeText, Long resumeId,
+                           List<InterviewQuestionDTO> questions, int currentIndex,
+                           SessionStatus status) {
+        saveSession(sessionId, userId, resumeText, resumeId, questions, currentIndex, status,
+            questions.size(), false);
     }
 
     /**
@@ -90,10 +112,11 @@ public class InterviewSessionCache {
      */
     public void saveSession(String sessionId, Long userId, String resumeText, Long resumeId,
                            List<InterviewQuestionDTO> questions, int currentIndex,
-                           SessionStatus status) {
+                           SessionStatus status, int plannedTotal, boolean agentMode) {
         String key = buildSessionKey(sessionId);
         CachedSession cachedSession = new CachedSession(
-            sessionId, userId, resumeText, resumeId, questions, currentIndex, status, objectMapper
+            sessionId, userId, resumeText, resumeId, questions, currentIndex, status,
+            plannedTotal, agentMode, objectMapper
         );
 
         redisService.set(key, cachedSession, SESSION_TTL);
@@ -103,7 +126,8 @@ public class InterviewSessionCache {
             saveResumeSessionMapping(userId, resumeId, sessionId);
         }
 
-        log.debug("会话已缓存: sessionId={}, resumeId={}, status={}", sessionId, resumeId, status);
+        log.debug("会话已缓存: sessionId={}, resumeId={}, status={}, agentMode={}",
+            sessionId, resumeId, status, agentMode);
     }
 
     /**

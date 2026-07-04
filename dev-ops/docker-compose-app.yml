@@ -1,0 +1,178 @@
+# 全栈容器化部署（基础设施 + 后端 + 前端）
+# 用法：
+#   cd dev-ops
+#   docker compose -f docker-compose-app.yml up -d --build
+# 或在项目根目录：
+#   docker compose -f docker-compose.yml up -d --build
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: interview-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview}
+      MYSQL_USER: ${MYSQL_USER:-ai_interview}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "${MYSQL_HOST_PORT:-33306}:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: interview-redis
+    ports:
+      - "${REDIS_HOST_PORT:-26379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: interview-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "${ES_HOST_PORT:-29200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    container_name: interview-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "${MINIO_API_HOST_PORT:-29000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-29001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: |
+      /bin/sh -c "
+      set -e
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin
+      /usr/bin/mc mb --ignore-existing myminio/ai-interview
+      /usr/bin/mc anonymous set public myminio/ai-interview
+      "
+
+  app:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: interview-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+      rocketmq-namesrv:
+        condition: service_started
+      rocketmq-broker:
+        condition: service_started
+    environment:
+      SERVER_PORT: 8080
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: ${MYSQL_DB:-ai_interview}
+      MYSQL_USER: ${MYSQL_USER:-ai_interview}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      ES_HOST: http://elasticsearch:9200
+      ES_INDEX_NAME: ai-interview-vector
+      ES_DIMENSIONS: ${ES_DIMENSIONS:-1536}
+      APP_STORAGE_ENDPOINT: http://minio:9000
+      APP_STORAGE_ACCESS_KEY: minioadmin
+      APP_STORAGE_SECRET_KEY: minioadmin
+      APP_STORAGE_BUCKET: ai-interview
+      APP_STORAGE_REGION: us-east-1
+      AI_BAILIAN_API_KEY: ${AI_BAILIAN_API_KEY}
+      AI_MODEL: ${AI_MODEL:-qwen3.5-flash}
+      APP_INTERVIEW_FOLLOW_UP_COUNT: ${APP_INTERVIEW_FOLLOW_UP_COUNT:-1}
+      APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-8}
+      APP_ASYNC_ENGINE: ${APP_ASYNC_ENGINE:-rocketmq}
+      ROCKETMQ_NAME_SERVER: ${ROCKETMQ_NAME_SERVER:-rocketmq-namesrv:9876}
+    ports:
+      - "${APP_HOST_PORT:-28082}:8080"
+
+  frontend:
+    build: ../frontend
+    container_name: interview-frontend
+    depends_on:
+      - app
+    ports:
+      - "${FRONTEND_HOST_PORT:-28080}:80"
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.1
+    container_name: interview-rocketmq-namesrv
+    environment:
+      JAVA_OPT_EXT: "-server -Xms256m -Xmx256m -Xmn128m"
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.1
+    container_name: interview-rocketmq-broker
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      JAVA_OPT_EXT: "-server -Xms512m -Xmx512m -Xmn256m"
+    volumes:
+      - ./rocketmq/broker.conf:/etc/rocketmq/broker.conf:ro
+      - rocketmq_broker_data:/home/rocketmq/store
+    command: sh mqbroker -n rocketmq-namesrv:9876 -c /etc/rocketmq/broker.conf
+
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: interview-rocketmq-dashboard
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "${ROCKETMQ_DASHBOARD_HOST_PORT:-29888}:8080"
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876"
+
+volumes:
+  mysql_data:
+  elasticsearch_data:
+  redis_data:
+  minio_data:
+  rocketmq_broker_data:

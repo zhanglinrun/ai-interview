@@ -87,7 +87,10 @@ public class InterviewSessionEntity {
 
     // 关联知识库 ID 列表（JSON）
     private String knowledgeBaseIdsJson;
-    
+
+    // Multi-Agent 编排的面试大纲（JSON，null 表示旧批量出题会话）
+    private String interviewPlanJson;
+
     public enum SessionStatus {
         CREATED,      // 会话已创建
         IN_PROGRESS,  // 面试进行中
@@ -264,6 +267,14 @@ public class InterviewSessionEntity {
 
     public void setKnowledgeBaseIdsJson(String knowledgeBaseIdsJson) {
         this.knowledgeBaseIdsJson = knowledgeBaseIdsJson;
+    }
+
+    public String getInterviewPlanJson() {
+        return interviewPlanJson;
+    }
+
+    public void setInterviewPlanJson(String interviewPlanJson) {
+        this.interviewPlanJson = interviewPlanJson;
     }
 
     public String getSkillId() {

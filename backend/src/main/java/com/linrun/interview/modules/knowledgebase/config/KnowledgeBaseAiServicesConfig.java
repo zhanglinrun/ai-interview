@@ -8,11 +8,13 @@ import dev.langchain4j.service.AiServices;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 
 /**
  * 知识库 RAG AiServices Bean 配置（亮点4 / 亮点6）。
  */
 @Configuration
+@DependsOn("llmProviderBootstrapService")
 @Slf4j
 public class KnowledgeBaseAiServicesConfig {
 

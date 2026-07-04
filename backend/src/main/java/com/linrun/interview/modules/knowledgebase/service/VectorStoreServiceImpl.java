@@ -25,9 +25,9 @@ import java.util.Map;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 /**
- * 向量存储服务实现（对齐 know-engine VectorStoreServiceImpl）。
+ * 向量存储服务实现（对齐业界实践 VectorStoreServiceImpl）。
  *
- * <p>与 know-engine 差异（遵守 ai-interview AGENTS.md）：
+ * <p>与早期实现差异（遵守 ai-interview AGENTS.md）：
  * <ul>
  *   <li>embedding model 通过 {@link LlmProviderRegistry#getDefaultEmbeddingModel()} 获取，不直接 new OpenAiEmbeddingModel。</li>
  *   <li>metadata 从 segment 的 JSON 字符串解析（{@link KnowledgeBaseSegmentEntity#getMetadata()}），用 Jackson。</li>
@@ -99,6 +99,21 @@ public class VectorStoreServiceImpl implements VectorStoreService {
     }
 
     @Override
+    public void removeByEmbeddingIds(List<String> embeddingIds) {
+        if (embeddingIds == null || embeddingIds.isEmpty()) {
+            return;
+        }
+        try {
+            embeddingStore.removeAll(embeddingIds);
+            log.info("按embeddingIds批量删除向量成功: count={}", embeddingIds.size());
+        } catch (Exception e) {
+            log.error("按embeddingIds批量删除向量失败: count={}", embeddingIds.size(), e);
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED,
+                "按 embeddingId 批量删除向量失败", e);
+        }
+    }
+
+    @Override
     public void removeByDocId(Long docId) {
         try {
             Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(docId);
@@ -125,14 +140,17 @@ public class VectorStoreServiceImpl implements VectorStoreService {
 
     @Override
     public void removeByDocIdAndVersion(Long docId, Long versionId) {
+        // 删除失败必须阻断调用方的状态推进（否则 ES 残留孤儿向量、检索命中旧内容），
+        // 由调用方决定回滚或对账兜底
         try {
             Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(docId)
                 .and(metadataKey(VERSION_KEY).isEqualTo(versionId));
             embeddingStore.removeAll(filter);
             log.info("按docId+versionId删除向量成功: docId={}, versionId={}", docId, versionId);
         } catch (Exception e) {
-            log.warn("按docId+versionId删除向量失败: docId={}, versionId={}, error={}",
-                docId, versionId, e.getMessage());
+            log.error("按docId+versionId删除向量失败: docId={}, versionId={}", docId, versionId, e);
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED,
+                "删除知识库向量失败: docId=" + docId + ", versionId=" + versionId, e);
         }
     }
 

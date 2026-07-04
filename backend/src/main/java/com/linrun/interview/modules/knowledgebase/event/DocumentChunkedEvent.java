@@ -3,7 +3,7 @@ package com.linrun.interview.modules.knowledgebase.event;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 
 /**
- * 知识库文档切块完成事件（对齐 know-engine DocumentChunkedEvent）。
+ * 知识库文档切块完成事件（对齐业界实践 DocumentChunkedEvent）。
  *
  * <p>由 {@code DocumentProcessService.split} 在事务内切块落库 + 状态置 CHUNKED 后发布。
  * {@link DocumentEventListener} 以 {@code @Async} + {@code AFTER_COMMIT} 监听，

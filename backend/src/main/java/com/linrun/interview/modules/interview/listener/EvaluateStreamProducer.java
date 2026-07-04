@@ -1,11 +1,11 @@
 package com.linrun.interview.modules.interview.listener;
 
 import com.linrun.interview.common.async.AbstractStreamProducer;
+import com.linrun.interview.common.async.TaskQueueChannel;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.common.mybatis.MapperUtils;
-import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +15,7 @@ import java.util.Map;
 
 /**
  * 面试评估任务生产者
- * 负责发送评估任务到 Redis Stream
+ * 负责发送评估任务到异步任务管道
  */
 @Slf4j
 @Component
@@ -23,18 +23,20 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
 
     private final InterviewSessionMapper sessionRepository;
 
-    public EvaluateStreamProducer(RedisService redisService, InterviewSessionMapper interviewSessionMapper) {
-        super(redisService);
+    public EvaluateStreamProducer(TaskQueueChannel taskQueueChannel,
+                                  InterviewSessionMapper interviewSessionMapper) {
+        super(taskQueueChannel);
         this.sessionRepository = interviewSessionMapper;
     }
 
     /**
-     * 发送评估任务到 Redis Stream
+     * 发送评估任务（事务消息语义：RocketMQ 引擎下 half 消息 + 本地事务确认，
+     * Redis Stream 引擎退化为普通入队，DB-first + 补偿任务兜底）。
      *
      * @param sessionId 面试会话ID
      */
     public void sendEvaluateTask(String sessionId) {
-        sendTask(sessionId);
+        sendTaskInTransaction(sessionId);
     }
 
     @Override
@@ -62,7 +64,9 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
 
     @Override
     protected void onSendFailed(String sessionId, String error) {
-        updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, truncateError(error));
+        // 入队失败标记 PENDING（非 FAILED）：由 InterviewEvaluationCompensationJob 定时重派
+        log.error("评估任务入队失败，标记 PENDING 留待补偿任务重派: sessionId={}, error={}", sessionId, error);
+        updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, truncateError(error));
     }
 
     /**

@@ -31,7 +31,7 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-aop</artifactId>
     </dependency>
-    <!-- MyBatis-Plus（对齐 know-engine） -->
+    <!-- MyBatis-Plus（对齐业界实践） -->
     <dependency>
       <groupId>com.baomidou</groupId>
       <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
@@ -97,6 +97,12 @@
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j</artifactId>
     </dependency>
+    <!-- 显式引入 JDK HTTP client：classpath 同时存在 spring-restclient SPI 时，
+         模型构建需显式指定 httpClientBuilder(JdkHttpClient.builder()) 消除冲突 -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-http-client-jdk</artifactId>
+    </dependency>
     <dependency>
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-spring-boot-starter</artifactId>
@@ -119,7 +125,7 @@
       <artifactId>langchain4j-elasticsearch</artifactId>
       <version>${langchain4j-beta.version}</version>
     </dependency>
-    <!-- 本地 ONNX Reranker（进程内 BGE-RERANKER 精排，对齐 know-engine） -->
+    <!-- 本地 ONNX Reranker（进程内 BGE-RERANKER 精排，对齐业界实践） -->
     <dependency>
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-onnx-scoring</artifactId>
@@ -140,6 +146,12 @@
     <dependency>
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-experimental-sql</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <!-- MCP Client（LangChain4j 原生，McpToolProvider 把外部 MCP 工具挂进 AiServices） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-mcp</artifactId>
       <version>${langchain4j-beta.version}</version>
     </dependency>
     <!-- Neo4j Text2Cypher（面试知识点关系图谱） -->
@@ -163,11 +175,23 @@
       <artifactId>spring-boot-starter-data-neo4j</artifactId>
     </dependency>
 
-    <!-- XXL-Job 分布式任务调度：向量化失败补偿定时扫表重试 -->
+    <!-- ===== Spring AI MCP Server（SSE transport，业务能力 MCP 化）=====
+         Server 侧选 Spring AI starter：要 SSE/Streamable-HTTP transport + Servlet Filter 鉴权，
+         Spring 生态开箱；Client 侧用 langchain4j-mcp：要进 LC4j AiServices 工具链（见上）。 -->
     <dependency>
-      <groupId>com.xuxueli</groupId>
-      <artifactId>xxl-job-core</artifactId>
-      <version>${xxl-job.version}</version>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+    </dependency>
+
+    <!-- ===== RocketMQ（默认异步任务引擎）=====
+         app.async.engine=rocketmq（默认）时启用：事务消息 + broker 重试 + 原生死信队列。
+         Starter 2.3.x 用旧版 spring.factories，Spring Boot 3 不识别，故由
+         common/async/RocketMqEngineConfig 以 @ConditionalOnProperty(matchIfMissing=true) 显式
+         @Import(RocketMQAutoConfiguration)；显式切 redis-stream 时整段不装配、不连 broker。 -->
+    <dependency>
+      <groupId>org.apache.rocketmq</groupId>
+      <artifactId>rocketmq-spring-boot-starter</artifactId>
+      <version>${rocketmq-spring.version}</version>
     </dependency>
 
     <dependency>
@@ -190,7 +214,7 @@
       <artifactId>poi-ooxml</artifactId>
       <version>${poi.version}</version>
     </dependency>
-    <!-- MinIO 对象存储（对齐 know-engine） -->
+    <!-- MinIO 对象存储（对齐业界实践） -->
     <dependency>
       <groupId>io.minio</groupId>
       <artifactId>minio</artifactId>
@@ -239,23 +263,6 @@
       </exclusions>
     </dependency>
 
-    <!-- 钉钉 Stream 机器人（对齐 know-engine） -->
-    <dependency>
-      <groupId>com.dingtalk.open</groupId>
-      <artifactId>dingtalk-stream</artifactId>
-      <version>1.1.0</version>
-    </dependency>
-    <dependency>
-      <groupId>com.aliyun</groupId>
-      <artifactId>dingtalk</artifactId>
-      <version>1.5.59</version>
-    </dependency>
-    <dependency>
-      <groupId>com.aliyun</groupId>
-      <artifactId>alibaba-dingtalk-service-sdk</artifactId>
-      <version>2.0.0</version>
-    </dependency>
-
     <dependency>
       <groupId>jakarta.annotation</groupId>
       <artifactId>jakarta.annotation-api</artifactId>
@@ -293,14 +300,25 @@
 
   <build>
     <finalName>ai-interview-backend</finalName>
+    <testResources>
+      <testResource>
+        <directory>src/test/resources</directory>
+      </testResource>
+      <testResource>
+        <directory>${project.basedir}/../eval/rag-retrieval</directory>
+        <targetPath>rag-eval</targetPath>
+        <includes>
+          <include>eval-dataset.yaml</include>
+        </includes>
+      </testResource>
+    </testResources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <!-- rag-eval 标记的检索评测连真实 Elasticsearch + DashScope，默认不随普通构建运行。
-               默认值通过 ${test.excludedGroups} 注入，命令行可用 -Dtest.excludedGroups= 清空来触发评测：
-               mvn -pl backend test -Dtest=RagRetrievalEvalTest -Dtest.excludedGroups= -Dgroups=rag-eval -->
+               运行：mvn -pl backend test -Dtest=RagRetrievalEvalTest '-Dtest.excludedGroups=' -Dgroups=rag-eval -->
           <excludedGroups>${test.excludedGroups}</excludedGroups>
         </configuration>
       </plugin>

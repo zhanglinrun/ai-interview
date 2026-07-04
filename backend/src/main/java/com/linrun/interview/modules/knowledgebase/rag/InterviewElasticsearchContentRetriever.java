@@ -45,14 +45,14 @@ import java.util.stream.Collectors;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 /**
- * 知识库 Elasticsearch 内容检索器（移植自 know-engine 的 KnowEngineElasticsearchContentRetriever）。
+ * 知识库 Elasticsearch 内容检索器（参考业界实现的 ElasticsearchContentRetriever）。
  *
  * <p>实现 LC4j {@link ContentRetriever}，供 {@code DefaultRetrievalAugmentor} 编排。组合
  * {@link ElasticsearchEmbeddingStore} + {@link EmbeddingModel}（阶段5 已有的 bean），做 KNN 向量检索，
  * 把 {@code EmbeddingMatch} 转成带 {@link ContentMetadata#SCORE} 与
  * {@link ContentMetadata#EMBEDDING_ID} 的 {@link Content}，供 Aggregator 融合/rerank。
  *
- * <p>父子/兄弟分段扩展（small-to-big，对齐 know-engine）：检索命中小 chunk 后，开启
+ * <p>父子/兄弟分段扩展（small-to-big，对齐业界实践）：检索命中小 chunk 后，开启
  * {@code ParentExpand} 时按 {@code parentChunkId} 取父块章节文本拼接、按 {@code brotherChunkId}
  * 取同组兄弟按序拼接成完整段落，给 LLM 更完整上下文。扩展从 segment 表按冗余列批量查（避免 N+1），
  * 受 {@code maxChars/maxSiblings} 截断；扩展不改变命中 chunk 的 score。权限过滤由 docId + accessibleBy 限定。
@@ -233,7 +233,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                 case "vector" -> vectorSearch(request);
                 case "full_text" -> fullTextSearch(queryText);
                 default -> hybrid.isEnabled()
-                    ? embeddingStore.hybridSearch(request, queryText)
+                    ? localHybridSearch(request, queryText)
                     : embeddingStore.search(request);
             };
         } catch (Exception e) {
@@ -247,6 +247,28 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                 return new EmbeddingSearchResult<>(List.of());
             }
         }
+    }
+
+    private EmbeddingSearchResult<TextSegment> localHybridSearch(EmbeddingSearchRequest request,
+        String queryText) {
+        List<InterviewDefaultContent> vector = vectorSearch(request).matches().stream()
+            .map(this::toDefaultContent)
+            .toList();
+        List<InterviewDefaultContent> fullText = fullTextSearch(queryText).matches().stream()
+            .map(this::toDefaultContent)
+            .toList();
+        List<Content> fused = InterviewReciprocalRankFuser.fuse(
+            List.of(vector, fullText), hybrid.getRrfK());
+
+        List<EmbeddingMatch<TextSegment>> matches = new ArrayList<>();
+        for (int i = 0; i < Math.min(maxResults, fused.size()); i++) {
+            Content content = fused.get(i);
+            String embeddingId = content.textSegment().metadata()
+                .getString(MetadataKeyConstant.EMBEDDING_ID);
+            matches.add(new EmbeddingMatch<>(
+                1.0 / (i + 1), embeddingId, null, content.textSegment()));
+        }
+        return new EmbeddingSearchResult<>(matches);
     }
 
     private EmbeddingSearchResult<TextSegment> fullTextSearch(String queryText) {
@@ -513,6 +535,11 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         return Content.from(scored, Map.of(
             ContentMetadata.SCORE, match.score(),
             ContentMetadata.EMBEDDING_ID, match.embeddingId() != null ? match.embeddingId() : ""));
+    }
+
+    private InterviewDefaultContent toDefaultContent(EmbeddingMatch<TextSegment> match) {
+        Content content = toContent(match);
+        return new InterviewDefaultContent(content.textSegment(), content.metadata());
     }
 
     /**

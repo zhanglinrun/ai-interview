@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 知识库向量元数据键常量（对齐 know-engine MetadataKeyConstant）。
+ * 知识库向量元数据键常量（对齐业界实践 MetadataKeyConstant）。
  *
  * <p>用于 Elasticsearch 向量库的 metadata 字段：父子切片关系、来源、权限等。
  */

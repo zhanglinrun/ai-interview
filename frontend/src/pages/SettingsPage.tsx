@@ -290,6 +290,7 @@ export default function SettingsPage() {
   const [defaultProviderId, setDefaultProviderId] = useState('');
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -382,6 +383,19 @@ export default function SettingsPage() {
       setLoading(false);
     }
   }, [showToast]);
+
+  const handleReloadProviders = async () => {
+    try {
+      setReloading(true);
+      await llmProviderApi.reload();
+      await loadData();
+      showToast('Provider 配置已热重载');
+    } catch (err) {
+      showToast(getErrorMessage(err, '热重载失败'), 'error');
+    } finally {
+      setReloading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -705,17 +719,35 @@ export default function SettingsPage() {
                 <h2 className="text-lg font-bold text-slate-800 dark:text-white">
                   模型服务
                 </h2>
-                <motion.button
-                  onClick={openCreateModal}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
-                    bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/25
-                    hover:from-primary-600 hover:to-primary-700 transition-all"
-                >
-                  <Plus className="w-4 h-4" />
-                  新增 Provider
-                </motion.button>
+                <div className="flex items-center gap-2">
+                  <motion.button
+                    onClick={handleReloadProviders}
+                    disabled={reloading}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
+                      border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300
+                      hover:bg-slate-50 dark:hover:bg-slate-700 transition-all disabled:opacity-50"
+                  >
+                    <LoadingButtonContent loading={reloading} loadingText="重载中">
+                      <span className="inline-flex items-center gap-2">
+                        <RefreshCw className="w-4 h-4" />
+                        热重载
+                      </span>
+                    </LoadingButtonContent>
+                  </motion.button>
+                  <motion.button
+                    onClick={openCreateModal}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
+                      bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/25
+                      hover:from-primary-600 hover:to-primary-700 transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    新增 Provider
+                  </motion.button>
+                </div>
               </div>
 
               {/* Provider grid */}

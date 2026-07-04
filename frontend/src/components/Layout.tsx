@@ -1,6 +1,6 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {motion} from 'framer-motion';
-import {Calendar, ChevronRight, Database, FileStack, LogIn, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, Users,} from 'lucide-react';
+import {Calendar, ChevronRight, Database, FileStack, LogIn, LogOut, MessageSquare, Mic2, Moon, Settings, Sun, Users,} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
@@ -21,6 +21,26 @@ interface NavGroup {
   items: NavItem[];
 }
 
+const APP_NAME = 'AI面试平台';
+
+function resolveDocumentTitle(pathname: string): string {
+  if (pathname === '/login') return `登录 · ${APP_NAME}`;
+  if (pathname === '/upload') return `上传简历 · ${APP_NAME}`;
+  if (pathname.startsWith('/history/')) return `简历详情 · ${APP_NAME}`;
+  if (pathname === '/history' || pathname === '/') return `简历管理 · ${APP_NAME}`;
+  if (pathname === '/interview-hub') return `模拟面试 · ${APP_NAME}`;
+  if (pathname.startsWith('/interviews/')) return `面试报告 · ${APP_NAME}`;
+  if (pathname === '/interviews') return `面试记录 · ${APP_NAME}`;
+  if (pathname.startsWith('/voice-interview')) return `语音面试 · ${APP_NAME}`;
+  if (pathname.startsWith('/interview')) return `模拟面试 · ${APP_NAME}`;
+  if (pathname === '/interview-schedule') return `面试日程 · ${APP_NAME}`;
+  if (pathname === '/knowledgebase/upload') return `上传文档 · ${APP_NAME}`;
+  if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
+  if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
+  if (pathname === '/settings') return `设置 · ${APP_NAME}`;
+  return APP_NAME;
+}
+
 export default function Layout() {
   const location = useLocation();
   const currentPath = location.pathname;
@@ -34,6 +54,10 @@ export default function Layout() {
     subtitle: string;
     startButtonText: string;
   } | null>(null);
+
+  useEffect(() => {
+    document.title = resolveDocumentTitle(currentPath);
+  }, [currentPath]);
 
   useEffect(() => {
     const syncUser = () => setUser(getStoredUser());
@@ -107,7 +131,7 @@ export default function Layout() {
       title: '面试准备',
       items: [
         { id: 'resumes', path: '/history', label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' },
-        { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Sparkles, description: '文字/语音面试练习' },
+        { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Mic2, description: '文字/语音面试练习' },
         { id: 'interviews', path: '/interviews', label: '面试记录', icon: Users, description: '查看面试历史' },
         { id: 'interview-schedule', path: '/interview-schedule', label: '面试日程', icon: Calendar, description: '管理面试安排' },
       ],
@@ -151,53 +175,52 @@ export default function Layout() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800">
+    <div className="flex min-h-screen">
       {/* 左侧边栏 */}
-      <aside className="w-64 bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-700 fixed h-screen left-0 top-0 z-50 flex flex-col">
+      <aside className="w-64 bg-white/95 dark:bg-stone-950 border-r border-stone-200/80 dark:border-stone-800 fixed h-screen left-0 top-0 z-50 flex flex-col">
         {/* Logo */}
-        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-          <Link to="/history" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary-500/30">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-lg font-bold text-slate-800 dark:text-white tracking-tight block">AI Interview</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500">智能面试助手</span>
-            </div>
+        <div className="p-5 border-b border-stone-200/80 dark:border-stone-800">
+          <Link to="/history" className="flex items-center gap-3 group">
+            <img
+              src="/bear-doctor-logo.png"
+              alt="AI面试平台"
+              className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
+            />
+            <span className="text-base font-semibold text-stone-900 dark:text-stone-50 tracking-tight">AI面试平台</span>
           </Link>
         </div>
 
         {/* 主题切换按钮 */}
-        <div className="px-4 pb-2">
+        <div className="px-4 pt-3 pb-1">
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 transition-colors text-sm"
           >
             {theme === 'dark' ? (
               <>
                 <Sun className="w-4 h-4" />
-                <span className="text-sm font-medium">浅色模式</span>
+                <span className="font-medium">浅色模式</span>
               </>
             ) : (
               <>
                 <Moon className="w-4 h-4" />
-                <span className="text-sm font-medium">深色模式</span>
+                <span className="font-medium">深色模式</span>
               </>
             )}
           </button>
         </div>
 
         {/* 导航菜单 */}
-        <nav className="flex-1 p-4 overflow-y-auto">
-          <div className="space-y-6">
+        <nav className="flex-1 p-3 overflow-y-auto">
+          <div className="space-y-5">
             {navGroups.map((group) => (
               <div key={group.id}>
-                <div className="px-3 mb-2">
-                  <span className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                <div className="px-3 mb-1.5">
+                  <span className="text-[11px] font-medium text-stone-400 dark:text-stone-500 uppercase tracking-wider">
                     {group.title}
                   </span>
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {group.items.map((item) => {
                     const active = isActive(item.path);
 
@@ -205,31 +228,19 @@ export default function Layout() {
                       <Link
                         key={item.id}
                         to={item.path}
-                        className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
+                        className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-150
                           ${active
-                            ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            ? 'bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300'
+                            : 'text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-900 hover:text-stone-900 dark:hover:text-stone-100'
                           }`}
                       >
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors
-                          ${active
-                            ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 group-hover:bg-slate-200 dark:group-hover:bg-slate-700 group-hover:text-slate-700 dark:group-hover:text-white'
-                          }`}
-                        >
-                          <item.icon className="w-5 h-5" />
-                        </div>
+                        <item.icon className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} />
                         <div className="flex-1 min-w-0">
-                          <span className={`text-sm block ${active ? 'font-semibold' : 'font-medium'}`}>
+                          <span className={`text-sm block leading-tight ${active ? 'font-semibold' : 'font-medium'}`}>
                             {item.label}
                           </span>
-                          {item.description && (
-                            <span className="text-xs text-slate-400 dark:text-slate-500 truncate block">
-                              {item.description}
-                            </span>
-                          )}
                         </div>
-                        {active && <ChevronRight className="w-4 h-4 text-primary-400" />}
+                        {active && <ChevronRight className="w-3.5 h-3.5 text-primary-400 shrink-0" />}
                       </Link>
                     );
                   })}
@@ -240,21 +251,21 @@ export default function Layout() {
         </nav>
 
         {/* 底部信息 */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-700">
+        <div className="p-4 border-t border-stone-200/80 dark:border-stone-800">
           {user ? (
-            <div className="mb-3 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+            <div className="mb-2 rounded-xl bg-stone-50 dark:bg-stone-900 p-3">
               <div className="mb-2">
-                <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">
+                <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate">
                   {user.displayName || user.username}
                 </p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                <p className="text-xs text-stone-400 dark:text-stone-500 truncate">
                   @{user.username}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"
               >
                 <LogOut className="w-4 h-4" />
                 退出登录
@@ -264,27 +275,24 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => navigate('/login')}
-              className="mb-3 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600"
+              className="mb-2 w-full inline-flex items-center justify-center gap-2 rounded-lg btn-primary px-3 py-2 text-sm font-medium"
             >
               <LogIn className="w-4 h-4" />
               登录 / 注册
             </button>
           )}
-          <div className="px-3 py-2 bg-gradient-to-r from-primary-50 to-indigo-50 dark:from-primary-900/30 dark:to-slate-800 rounded-xl">
-            <p className="text-xs text-primary-600 dark:text-primary-400 font-medium">AI 面试助手 v1.0</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Powered by AI</p>
-          </div>
+          <p className="px-1 text-[11px] text-stone-400 dark:text-stone-600">v1.0</p>
         </div>
       </aside>
 
       {/* 主内容区 */}
-      <main className="flex-1 ml-64 p-10 min-h-screen overflow-y-auto">
+      <main className="flex-1 ml-64 p-8 md:p-10 min-h-screen overflow-y-auto">
         <motion.div
           key={currentPath}
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
-          transition={{ duration: 0.3 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.25 }}
         >
           <Outlet context={{ openInterviewModalWithResume }} />
         </motion.div>

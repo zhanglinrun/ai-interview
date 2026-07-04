@@ -26,7 +26,14 @@ class InterviewQueryRouterTest {
                                       ChatModel chatModel,
                                       boolean enabled,
                                       InterviewIntent intentHint) {
-    return new InterviewQueryRouter(esRetrievers, sql, neo4j, chatModel, enabled, null, null, intentHint);
+    return InterviewQueryRouter.builder()
+        .elasticsearchRetrievers(esRetrievers)
+        .sqlRetriever(sql)
+        .neo4jRetriever(neo4j)
+        .chatModel(chatModel)
+        .enabled(enabled)
+        .intentHint(intentHint)
+        .build();
   }
 
   @Test

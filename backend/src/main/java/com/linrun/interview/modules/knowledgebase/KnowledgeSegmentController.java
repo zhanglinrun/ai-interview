@@ -2,14 +2,11 @@ package com.linrun.interview.modules.knowledgebase;
 
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.common.result.Result;
-import com.linrun.interview.common.security.UserContext;
-import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
-import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentPageDTO;
+import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 知识库分段查询 API（对齐 know-engine KnowledgeSegmentController，只读 + DTO）。
+ * 知识库分段查询 API（对齐业界实践 KnowledgeSegmentController，只读 + DTO）。
  */
 @RestController
 @RequestMapping("/api/knowledgebase/segment")
@@ -27,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KnowledgeSegmentController {
 
   private final KnowledgeSegmentService segmentService;
-  private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
+  private final KnowledgeBaseListService listService;
 
   @GetMapping("/{id}")
   public Result<KnowledgeBaseSegmentDTO> getById(@PathVariable Long id) {
@@ -74,12 +71,7 @@ public class KnowledgeSegmentController {
   }
 
   private void requireDocumentAccess(Long docId) {
-    EntityQueries.byUserAndId(
-        knowledgeBaseEntityMapper,
-        UserContext.requireUserId(),
-        docId,
-        KnowledgeBaseEntity::getUserId,
-        KnowledgeBaseEntity::getId)
+    listService.findReadableEntity(docId)
       .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
   }
 }

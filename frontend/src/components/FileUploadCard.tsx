@@ -1,42 +1,30 @@
 import {ChangeEvent, DragEvent, MouseEvent, useCallback, useState} from 'react';
-import {AnimatePresence, motion} from 'framer-motion';
 import {AlertCircle, FileText, Info, Upload, X} from 'lucide-react';
 import LoadingButtonContent from './LoadingButtonContent';
 import {formatFileSize} from '../utils/format';
 
 export interface FileUploadCardProps {
-  /** 标题 */
   title: string;
-  /** 副标题 */
   subtitle: string;
-  /** 接受的文件类型 */
   accept: string;
-  /** 支持的格式说明 */
   formatHint: string;
-  /** 最大文件大小说明 */
   maxSizeHint: string;
-  /** 是否正在上传 */
   uploading?: boolean;
-  /** 上传按钮文字 */
   uploadButtonText?: string;
-  /** 选择按钮文字 */
   selectButtonText?: string;
-  /** 是否显示名称输入框 */
   showNameInput?: boolean;
-  /** 名称输入框占位符 */
   namePlaceholder?: string;
-  /** 名称输入框标签 */
   nameLabel?: string;
-  /** 错误信息 */
   error?: string;
-  /** 提示信息 */
   notice?: string;
-  /** 文件选择回调 */
   onFileSelect?: (file: File) => void;
-  /** 上传回调 */
   onUpload: (file: File, name?: string) => void;
-  /** 返回回调 */
+  onBatchUpload?: (files: File[]) => void;
+  multiple?: boolean;
   onBack?: () => void;
+  inputId?: string;
+  /** hero=独立大标题页；embedded=嵌入侧栏布局 */
+  variant?: 'hero' | 'embedded';
 }
 
 export default function FileUploadCard({
@@ -55,11 +43,29 @@ export default function FileUploadCard({
   notice,
   onFileSelect,
   onUpload,
+  onBatchUpload,
+  multiple = false,
   onBack,
+  inputId = 'file-upload-input',
+  variant = 'hero',
 }: FileUploadCardProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [name, setName] = useState('');
+  const isEmbedded = variant === 'embedded';
+
+  const applyFiles = useCallback((files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    if (multiple) {
+      setSelectedFiles(list);
+      onFileSelect?.(list[0]);
+    } else {
+      setSelectedFile(list[0]);
+      onFileSelect?.(list[0]);
+    }
+  }, [multiple, onFileSelect]);
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -74,239 +80,185 @@ export default function FileUploadCard({
   const handleDrop = useCallback((e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      setSelectedFile(files[0]);
-      onFileSelect?.(files[0]);
+    if (e.dataTransfer.files.length > 0) {
+      applyFiles(e.dataTransfer.files);
     }
-  }, [onFileSelect]);
+  }, [applyFiles]);
 
   const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      setSelectedFile(files[0]);
-      onFileSelect?.(files[0]);
+      applyFiles(files);
     }
-  }, [onFileSelect]);
+    e.target.value = '';
+  }, [applyFiles]);
 
   const handleUpload = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    if (multiple) {
+      if (selectedFiles.length === 0 || !onBatchUpload) return;
+      onBatchUpload(selectedFiles);
+      return;
+    }
     if (!selectedFile) return;
     onUpload(selectedFile, name.trim() || undefined);
   };
 
-  return (
-    <motion.div
-      className="max-w-3xl mx-auto pt-16"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-    >
-      {/* 标题 */}
-      <div className="text-center mb-12">
-        <motion.h1
-            className="text-4xl md:text-5xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
-          {title}
-        </motion.h1>
-        <motion.p
-            className="text-lg text-slate-500 dark:text-slate-400"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          {subtitle}
-        </motion.p>
-      </div>
+  const hasSelection = multiple ? selectedFiles.length > 0 : !!selectedFile;
 
-      {/* 上传区域 */}
-      <motion.div
-          className={`relative bg-white dark:bg-slate-800 rounded-2xl p-12 cursor-pointer transition-all duration-300
-          ${dragOver ? 'scale-[1.02] shadow-xl' : 'shadow-lg hover:shadow-xl dark:shadow-slate-900/50'}`}
+  return (
+    <div className={isEmbedded ? '' : 'max-w-3xl mx-auto'}>
+      {!isEmbedded && (
+        <div className="text-center mb-8 pt-4">
+          <h1 className="text-3xl font-display font-semibold text-stone-900 dark:text-stone-50 tracking-tight">
+            {title}
+          </h1>
+          <p className="mt-2 text-stone-500 dark:text-stone-400">{subtitle}</p>
+        </div>
+      )}
+
+      {isEmbedded && (
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">{title}</h2>
+          <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">{subtitle}</p>
+        </div>
+      )}
+
+      <div
+        className={`dropzone relative p-8 md:p-10 cursor-pointer ${dragOver ? 'dropzone-active' : ''} ${isEmbedded ? 'surface-card' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => document.getElementById('file-upload-input')?.click()}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
+        onClick={() => document.getElementById(inputId)?.click()}
       >
-        {/* 渐变边框效果 */}
-        <div
-          className={`absolute inset-0 rounded-2xl p-[2px] bg-gradient-to-r from-indigo-200 via-purple-200 to-indigo-200 -z-10
-            ${dragOver ? 'from-indigo-400 via-purple-400 to-indigo-400' : ''}`}
-        >
-          <div className="w-full h-full bg-white dark:bg-slate-800 rounded-2xl"/>
-        </div>
-
         <input
           type="file"
-          id="file-upload-input"
+          id={inputId}
           className="hidden"
           accept={accept}
+          multiple={multiple}
           onChange={handleFileChange}
           disabled={uploading}
         />
 
-        <div className="text-center">
-          <AnimatePresence mode="wait">
-            {selectedFile ? (
-              <motion.div
-                key="file-selected"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="space-y-4"
-              >
-                <div
-                    className="w-20 h-20 mx-auto bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center">
-                  <FileText className="w-10 h-10 text-primary-600 dark:text-primary-400"/>
-                </div>
-                <div
-                    className="flex items-center justify-center gap-4 bg-slate-50 dark:bg-slate-700/50 px-6 py-4 rounded-xl max-w-md mx-auto">
-                  <div className="text-left flex-1 min-w-0">
-                    <p className="font-semibold text-slate-900 dark:text-white truncate">{selectedFile.name}</p>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{formatFileSize(selectedFile.size)}</p>
-                  </div>
-                  <button
-                    type="button"
-                      className="w-8 h-8 bg-red-100 dark:bg-red-900/50 text-red-500 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors flex items-center justify-center"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setSelectedFile(null);
-                    }}
+        {!hasSelection ? (
+          <div className="text-center py-4">
+            <div className={`mx-auto mb-4 w-14 h-14 rounded-2xl flex items-center justify-center ${
+              dragOver ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/40' : 'bg-stone-100 text-stone-400 dark:bg-stone-800'
+            }`}>
+              <Upload className="w-7 h-7" />
+            </div>
+            <p className="text-base font-medium text-stone-800 dark:text-stone-200">
+              {multiple ? '拖拽多个文件到此处' : '拖拽文件到此处'}
+            </p>
+            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+              {formatHint} · {maxSizeHint}
+            </p>
+            <button
+              type="button"
+              className="mt-5 btn-secondary px-5 py-2.5 rounded-lg text-sm font-medium"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById(inputId)?.click();
+              }}
+            >
+              {multiple ? '选择多个文件' : selectButtonText}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+            {multiple ? (
+              <>
+                {selectedFiles.map((file) => (
+                  <div
+                    key={`${file.name}-${file.size}`}
+                    className="flex items-center gap-3 rounded-xl bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3"
                   >
-                    <X className="w-4 h-4" />
-                  </button>
+                    <FileText className="w-5 h-5 text-primary-600 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-stone-900 dark:text-stone-100 truncate">{file.name}</p>
+                      <p className="text-xs text-stone-500">{formatFileSize(file.size)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="p-1.5 rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      onClick={() => setSelectedFiles((prev) => prev.filter((f) => f !== file))}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <p className="text-center text-xs text-stone-500">已选 {selectedFiles.length} 个文件</p>
+              </>
+            ) : selectedFile && (
+              <div className="flex items-center gap-3 rounded-xl bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3 max-w-md mx-auto">
+                <FileText className="w-5 h-5 text-primary-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-stone-900 dark:text-stone-100 truncate">{selectedFile.name}</p>
+                  <p className="text-xs text-stone-500">{formatFileSize(selectedFile.size)}</p>
                 </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="no-file"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="space-y-4"
-              >
-                <motion.div
-                  className={`w-20 h-20 mx-auto rounded-2xl flex items-center justify-center transition-colors
-                    ${dragOver ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500'}`}
-                  animate={{ y: dragOver ? -5 : 0 }}
-                >
-                  <Upload className="w-10 h-10" />
-                </motion.div>
-                <div>
-                  <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">点击或拖拽文件至此处</h3>
-                  <p className="text-slate-400 dark:text-slate-500 mb-4">
-                    {formatHint}（{maxSizeHint}）
-                  </p>
-                </div>
-                <motion.button
+                <button
                   type="button"
-                  className="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 transition-all"
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    document.getElementById('file-upload-input')?.click();
-                  }}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-red-500"
+                  onClick={() => setSelectedFile(null)}
                 >
-                  {selectButtonText}
-                </motion.button>
-              </motion.div>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             )}
-          </AnimatePresence>
-        </div>
-      </motion.div>
+          </div>
+        )}
+      </div>
 
-      {/* 名称输入框 */}
-      {showNameInput && selectedFile && (
-        <motion.div
-            className="mt-6 bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg dark:shadow-slate-900/50"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">{nameLabel}</label>
+      {showNameInput && !multiple && selectedFile && (
+        <div className="mt-4 surface-card p-4">
+          <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">{nameLabel}</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={namePlaceholder}
-            className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
+            className="dark-input w-full px-3 py-2.5 rounded-lg text-sm"
             disabled={uploading}
-            onClick={(e) => e.stopPropagation()}
           />
-        </motion.div>
+        </div>
       )}
 
-      {/* 错误提示 */}
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mt-6 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-center flex items-center justify-center gap-2"
-          >
-            <AlertCircle className="w-5 h-5" />
-            {error}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {error && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
 
-      {/* 提示信息 */}
-      <AnimatePresence>
-        {notice && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-300 text-center flex items-center justify-center gap-2"
-          >
-            <Info className="w-5 h-5" />
-            {notice}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {notice && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <Info className="w-4 h-4 shrink-0" />
+          {notice}
+        </div>
+      )}
 
-      {/* 操作按钮 */}
-      <div className="mt-8 flex gap-4 justify-center">
+      <div className={`flex gap-3 ${isEmbedded ? 'mt-5' : 'mt-6 justify-center'}`}>
         {onBack && (
-          <motion.button
-            type="button"
-            onClick={onBack}
-            className="px-6 py-3 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
+          <button type="button" onClick={onBack} className="btn-secondary px-5 py-2.5 rounded-lg text-sm font-medium">
             返回
-          </motion.button>
+          </button>
         )}
-        {selectedFile && (
-          <motion.button
+        {hasSelection && (
+          <button
             type="button"
             onClick={handleUpload}
             disabled={uploading}
-            className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-semibold shadow-lg shadow-emerald-500/30 hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-            whileHover={{ scale: uploading ? 1 : 1.02 }}
-            whileTap={{ scale: uploading ? 1 : 0.98 }}
+            className="btn-primary px-6 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 inline-flex items-center gap-2"
           >
-            <LoadingButtonContent
-              loading={uploading}
-              loadingText="处理中..."
-              spinnerClassName="w-5 h-5 animate-spin"
-            >
+            <LoadingButtonContent loading={uploading} loadingText="处理中...">
               {uploadButtonText}
             </LoadingButtonContent>
-          </motion.button>
+          </button>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

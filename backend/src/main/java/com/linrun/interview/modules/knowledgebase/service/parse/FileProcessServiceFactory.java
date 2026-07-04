@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 文件解析器工厂（对齐 know-engine FileProcessServiceFactory）。
+ * 文件解析器工厂（对齐业界实践 FileProcessServiceFactory）。
  *
  * <p>Spring 注入所有 {@link FileProcessService} 实现，按 {@link FileType} 选第一个
  * {@link FileProcessService#supports(FileType)} 为 true 的实现。无匹配时抛业务异常。

@@ -13,7 +13,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import java.util.Optional;
 
 /**
- * 文档切块事件监听器（对齐 know-engine DocumentEventListener）。
+ * 文档切块事件监听器（对齐业界实践 DocumentEventListener）。
  *
  * <p>监听 {@link DocumentChunkedEvent}，在切块事务 {@code AFTER_COMMIT} 阶段以 {@code @Async}
  * 异步触发向量化（{@link KnowledgeDocumentService#activateVersion}）。{@code AFTER_COMMIT} 保证

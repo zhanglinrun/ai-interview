@@ -1,5 +1,8 @@
 import { AI_REQUEST_TIMEOUT_MS, request } from './request';
 import type {
+  AgentPlanProgress,
+  AgentTraceGroup,
+  CandidateMemoryProfile,
   CreateInterviewRequest,
   CurrentQuestionResponse,
   InterviewReport,
@@ -103,5 +106,27 @@ export const interviewApi = {
    */
   async completeInterview(sessionId: string): Promise<void> {
     return request.post<void>(`/api/interview/sessions/${sessionId}/complete`);
+  },
+
+  /**
+   * 获取会话的面试大纲与进度（Multi-Agent 侧栏进度条）
+   */
+  async getAgentPlan(sessionId: string): Promise<AgentPlanProgress> {
+    return request.get<AgentPlanProgress>(`/api/interview/sessions/${sessionId}/agent-plan`);
+  },
+
+  /**
+   * 获取会话的 Multi-Agent 决策轨迹（Planner→Interviewer→Critic→Reflexion，按题号分组）
+   */
+  async getAgentTrace(sessionId: string): Promise<AgentTraceGroup[]> {
+    return request.get<AgentTraceGroup[]>(`/api/interview/sessions/${sessionId}/agent-trace`);
+  },
+
+  /**
+   * 获取当前用户候选人画像（按 topic 聚合的历史薄弱点/掌握点），skillId 可选
+   */
+  async getCandidateProfile(skillId?: string): Promise<CandidateMemoryProfile[]> {
+    const qs = skillId ? `?skillId=${encodeURIComponent(skillId)}` : '';
+    return request.get<CandidateMemoryProfile[]>(`/api/interview/candidate-memory/profile${qs}`);
   },
 };

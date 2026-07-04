@@ -5,6 +5,9 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.common.web.AttachmentResponseBuilder;
+import com.linrun.interview.modules.interview.memory.CandidateMemoryService.CandidateMemoryProfileDTO;
+import com.linrun.interview.modules.interview.model.AgentPlanProgressDTO;
+import com.linrun.interview.modules.interview.model.AgentTraceGroupDTO;
 import com.linrun.interview.modules.interview.model.CreateInterviewRequest;
 import com.linrun.interview.modules.interview.model.InterviewDetailDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -152,6 +156,34 @@ public class InterviewController {
     public Result<InterviewDetailDTO> getInterviewDetail(@PathVariable String sessionId) {
         InterviewDetailDTO detail = historyService.getInterviewDetail(sessionId);
         return Result.success(detail);
+    }
+
+    /**
+     * 获取会话的 Multi-Agent 决策轨迹（Planner→Interviewer→Critic→Reflexion，按题号分组回放）
+     * GET /api/interview/sessions/{sessionId}/agent-trace
+     */
+    @GetMapping("/api/interview/sessions/{sessionId}/agent-trace")
+    public Result<List<AgentTraceGroupDTO>> getAgentTrace(@PathVariable String sessionId) {
+        return Result.success(sessionService.getAgentTrace(sessionId));
+    }
+
+    /**
+     * 获取会话的面试大纲与进度（前端侧栏大纲进度条）
+     * GET /api/interview/sessions/{sessionId}/agent-plan
+     */
+    @GetMapping("/api/interview/sessions/{sessionId}/agent-plan")
+    public Result<AgentPlanProgressDTO> getAgentPlan(@PathVariable String sessionId) {
+        return Result.success(sessionService.getAgentPlan(sessionId));
+    }
+
+    /**
+     * 获取当前用户的候选人画像（按 topic 聚合的历史薄弱点/掌握点），skillId 可选
+     * GET /api/interview/candidate-memory/profile
+     */
+    @GetMapping("/api/interview/candidate-memory/profile")
+    public Result<List<CandidateMemoryProfileDTO>> getCandidateProfile(
+            @RequestParam(required = false) String skillId) {
+        return Result.success(sessionService.getCandidateProfile(skillId));
     }
     
     /**

@@ -9,8 +9,10 @@ import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
 import com.linrun.interview.modules.llmprovider.mapper.LlmGlobalSettingMapper;
 import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
 import com.linrun.interview.modules.llmprovider.service.ApiKeyEncryptionService;
+import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
@@ -19,6 +21,7 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +48,8 @@ public class LlmProviderRegistry {
     private final LlmProviderMapper llmProviderMapper;
     private final LlmGlobalSettingMapper llmGlobalSettingMapper;
     private final ApiKeyEncryptionService encryptionService;
+    /** 全局 ChatModel 监听器（如 Langfuse generation 采集）；无则空列表。 */
+    private final List<ChatModelListener> chatModelListeners;
 
     private static final Map<String, String> RECOMMENDED_EMBEDDING_MODELS = Map.of(
         "dashscope", "text-embedding-v4",
@@ -58,11 +63,13 @@ public class LlmProviderRegistry {
             LlmProviderProperties properties,
             LlmProviderMapper llmProviderMapper,
             LlmGlobalSettingMapper llmGlobalSettingMapper,
-            ApiKeyEncryptionService encryptionService) {
+            ApiKeyEncryptionService encryptionService,
+            List<ChatModelListener> chatModelListeners) {
         this.properties = properties;
         this.llmProviderMapper = llmProviderMapper;
         this.llmGlobalSettingMapper = llmGlobalSettingMapper;
         this.encryptionService = encryptionService;
+        this.chatModelListeners = chatModelListeners == null ? List.of() : chatModelListeners;
     }
 
     /**
@@ -86,7 +93,7 @@ public class LlmProviderRegistry {
      * Get a {@link ChatModel} for the specified provider, falling back to the default if null or blank.
      */
     public ChatModel getChatModelOrDefault(String providerId) {
-        if (providerId != null && !providerId.isBlank()) {
+        if (isEffectiveProviderId(providerId)) {
             return getChatModel(providerId);
         }
         return getDefaultChatModel();
@@ -120,14 +127,22 @@ public class LlmProviderRegistry {
     }
 
     public StreamingChatModel getStreamingChatModelOrDefault(String providerId) {
-        if (providerId != null && !providerId.isBlank()) {
+        if (isEffectiveProviderId(providerId)) {
             return getStreamingChatModel(providerId);
         }
         return getDefaultStreamingChatModel();
     }
 
     /**
-     * 按指定模型名获取 {@link StreamingChatModel}（用于 RAG 流式生成，对齐 know-engine ragChatModel）。
+     * 会话持久化层会把「未指定 Provider」存成字面量 "default"（见 InterviewPersistenceService），
+     * 这里统一视为走默认 Provider，避免被当成真实 providerId 去 DB 查找而报「Provider 不存在」。
+     */
+    private boolean isEffectiveProviderId(String providerId) {
+        return providerId != null && !providerId.isBlank() && !"default".equalsIgnoreCase(providerId);
+    }
+
+    /**
+     * 按指定模型名获取 {@link StreamingChatModel}（用于 RAG 流式生成，对齐业界实践 ragChatModel）。
      */
     public StreamingChatModel getStreamingChatModelWithModel(String providerId, String modelName) {
         if (isBlank(modelName)) {
@@ -174,13 +189,17 @@ public class LlmProviderRegistry {
         log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
             config.id(), config.baseUrl(), modelName, properties.getThinking().isEnabled());
 
-        ChatModel raw = OpenAiChatModel.builder()
+        OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
+            // classpath 同时存在 spring-restclient 与 jdk 两个 HTTP client SPI，显式指定避免启动冲突
+            .httpClientBuilder(JdkHttpClient.builder())
             .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
             .apiKey(config.apiKey())
             .defaultRequestParameters(buildChatRequestParameters(config, modelName))
-            .maxRetries(1)
-            .build();
-        return new SafeGuardChatModel(raw, properties.getAdvisors());
+            .maxRetries(1);
+        if (!chatModelListeners.isEmpty()) {
+            builder.listeners(chatModelListeners);
+        }
+        return new SafeGuardChatModel(builder.build(), properties.getAdvisors());
     }
 
     private StreamingChatModel createStreamingChatModel(String providerId) {
@@ -197,12 +216,15 @@ public class LlmProviderRegistry {
         log.info("[LlmProviderRegistry] Building StreamingChatModel - Provider: {}, BaseUrl: {}, Model: {}, thinking={}",
             config.id(), config.baseUrl(), modelName, properties.getThinking().isEnabled());
 
-        StreamingChatModel raw = OpenAiStreamingChatModel.builder()
+        OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder = OpenAiStreamingChatModel.builder()
+            .httpClientBuilder(JdkHttpClient.builder())
             .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
             .apiKey(config.apiKey())
-            .defaultRequestParameters(buildChatRequestParameters(config, modelName))
-            .build();
-        return new SafeGuardStreamingChatModel(raw, properties.getAdvisors());
+            .defaultRequestParameters(buildChatRequestParameters(config, modelName));
+        if (!chatModelListeners.isEmpty()) {
+            builder.listeners(chatModelListeners);
+        }
+        return new SafeGuardStreamingChatModel(builder.build(), properties.getAdvisors());
     }
 
     /**
@@ -245,6 +267,7 @@ public class LlmProviderRegistry {
             providerId, config.baseUrl(), config.embeddingModel());
 
         return OpenAiEmbeddingModel.builder()
+            .httpClientBuilder(JdkHttpClient.builder())
             .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
             .apiKey(config.apiKey())
             .modelName(config.embeddingModel())
@@ -254,8 +277,7 @@ public class LlmProviderRegistry {
     }
 
     private String resolveProviderId(String providerId) {
-        return (providerId != null && !providerId.isBlank())
-            ? providerId : resolveDefaultChatProviderId();
+        return isEffectiveProviderId(providerId) ? providerId : resolveDefaultChatProviderId();
     }
 
     private String resolveDefaultChatProviderId() {

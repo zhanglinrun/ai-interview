@@ -34,6 +34,8 @@ export interface KnowledgeBaseItem {
   knowledgeBaseType: KnowledgeBaseType | null;
   accessibleBy: DocumentAccessScope | null;
   expireDate: string | null;
+  /** 当前用户是否为文档所有者（false 表示他人公开文档，只读） */
+  owned: boolean;
 }
 
 // 统计信息
@@ -168,6 +170,60 @@ export interface RagQueryTrace {
   createdAt: string;
 }
 
+export interface KnowledgeBaseSegment {
+  id: number;
+  chunkId: string;
+  textPreview: string;
+  documentId: number;
+  documentVersion: number;
+  chunkOrder: number;
+  status: string;
+  parentChunkId: string | null;
+  brotherChunkId: string | null;
+  brotherChunkIndex: number | null;
+}
+
+export interface KnowledgeBaseSegmentPage {
+  total: number;
+  current: number;
+  size: number;
+  records: KnowledgeBaseSegment[];
+}
+
+export interface BatchUploadItemResult {
+  filename: string;
+  status: 'success' | 'failed';
+  duplicate?: boolean;
+  error?: string;
+  detail?: UploadKnowledgeBaseResponse;
+}
+
+export interface BatchUploadResponse {
+  total: number;
+  success: number;
+  failed: number;
+  duplicate: number;
+  items: BatchUploadItemResult[];
+}
+
+export interface RagQaExportRequestItem {
+  question: string;
+  groundTruth: string;
+}
+
+export interface RagQaExportSample {
+  question: string;
+  answer: string;
+  contexts: string[];
+  groundTruth: string;
+  latencyMs: number;
+}
+
+export interface RagQaExportResponse {
+  total: number;
+  records: RagQaExportSample[];
+}
+
 function extractDataLineContent(line: string): string | null {
   if (!line.startsWith('data:')) {
     return null;
@@ -233,6 +289,20 @@ export const knowledgeBaseApi = {
     return request.upload<UploadKnowledgeBaseResponse>('/api/knowledgebase/upload', formData);
   },
 
+  async uploadKnowledgeBaseBatch(
+    files: File[],
+    category?: string,
+    accessibleBy: DocumentAccessScope = 'PRIVATE',
+  ): Promise<BatchUploadResponse> {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+    if (category?.trim()) {
+      formData.append('category', category.trim());
+    }
+    formData.append('accessibleBy', accessibleBy);
+    return request.upload<BatchUploadResponse>('/api/knowledgebase/upload/batch', formData);
+  },
+
   async generateDataset(question: string, knowledgeBaseIds: number[]) {
     const params = new URLSearchParams();
     params.set('question', question);
@@ -253,7 +323,10 @@ export const knowledgeBaseApi = {
       regex?: string;
     },
   ): Promise<{ segmentCount: number }> {
-    return request.post<{ segmentCount: number }>(`/api/knowledgebase/${id}/split`, splitParam ?? {});
+    return request.post<{ segmentCount: number }>(
+      `/api/knowledgebase/${id}/split`,
+      splitParam,
+    );
   },
 
     /**
@@ -363,6 +436,48 @@ export const knowledgeBaseApi = {
     return request.get<RagQueryTrace[]>(`/api/knowledgebase/traces?limit=${limit}`);
   },
 
+  async getTrace(traceId: string): Promise<RagQueryTrace> {
+    return request.get<RagQueryTrace>(`/api/knowledgebase/traces/${encodeURIComponent(traceId)}`);
+  },
+
+  async exportQa(
+    knowledgeBaseIds: number[],
+    items: RagQaExportRequestItem[],
+  ): Promise<RagQaExportResponse> {
+    return request.post<RagQaExportResponse>(
+      '/api/knowledgebase/eval/export-qa',
+      { knowledgeBaseIds, items },
+      { timeout: AI_REQUEST_TIMEOUT_MS },
+    );
+  },
+
+  async pageSegments(
+    documentId: number,
+    page = 1,
+    size = 20,
+    documentVersion?: number,
+  ): Promise<KnowledgeBaseSegmentPage> {
+    const params = new URLSearchParams({
+      documentId: String(documentId),
+      page: String(page),
+      size: String(size),
+    });
+    if (documentVersion != null) {
+      params.set('documentVersion', String(documentVersion));
+    }
+    return request.get<KnowledgeBaseSegmentPage>(
+      `/api/knowledgebase/segment/page-by-document?${params.toString()}`,
+    );
+  },
+
+  async countSegments(documentId: number, documentVersion?: number): Promise<number> {
+    const params = new URLSearchParams({ documentId: String(documentId) });
+    if (documentVersion != null) {
+      params.set('documentVersion', String(documentVersion));
+    }
+    return request.get<number>(`/api/knowledgebase/segment/count-by-document?${params.toString()}`);
+  },
+
   // ========== 版本管理 ==========
 
   /**
@@ -377,6 +492,14 @@ export const knowledgeBaseApi = {
    */
   async switchVersion(id: number, versionId: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/versions/${versionId}/switch`);
+  },
+
+  async activateVersion(id: number, versionId: number): Promise<void> {
+    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/activate`);
+  },
+
+  async deactivateVersion(id: number, versionId: number): Promise<void> {
+    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/deactivate`);
   },
 
   async uploadNewVersion(

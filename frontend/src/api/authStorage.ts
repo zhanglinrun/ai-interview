@@ -34,6 +34,11 @@ export function getAccessToken(): string | null {
   return window.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
+export function getRefreshToken(): string | null {
+  if (!hasStorage()) return null;
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
 export function getStoredUser(): StoredUser | null {
   if (!hasStorage()) return null;
   const raw = window.localStorage.getItem(USER_KEY);

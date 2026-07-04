@@ -7,6 +7,8 @@ import com.linrun.interview.common.ai.PromptSecurityConstants;
 import com.linrun.interview.common.ai.PromptTemplate;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.common.observability.LangfuseSpan;
+import com.linrun.interview.common.observability.LangfuseTracer;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
@@ -69,7 +71,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
- * 知识库查询服务（LangChain4j RetrievalAugmentor 编排版，对齐 know-engine）。
+ * 知识库查询服务（LangChain4j RetrievalAugmentor 编排版，对齐业界实践）。
  *
  * <p>检索/改写/融合/rerank 不再手写，改用 {@link DefaultRetrievalAugmentor} 编排
  * （{@link InterviewQueryTransformer} 改写 → {@link InterviewQueryRouter} 路由 →
@@ -81,7 +83,7 @@ import java.util.function.Consumer;
  * 流式 {@link #answerQuestionStream} 同样手动 augment 后用 {@link FluxStreamingBridge} 流式生成，
  * 流末尾拼接 sourcesMarkdown。统一手动编排以拿到检索中间结果。
  *
- * <p>已补齐 know-engine 的 3 个 RAG 编排亮点（取精华弃糟粕）：
+ * <p>已补齐 业界实现 的 3 个 RAG 编排亮点（取精华弃糟粕）：
  * <ul>
  *   <li><b>多轮历史喂生成</b>：{@code generateAnswer}/{@code streamGenerate} 把历史 {@code ChatMessage}
  *       拼进 {@link ChatRequest#messages()}（System + history + outcome.chatMessage），追问指代不再丢失</li>
@@ -169,6 +171,7 @@ public class KnowledgeBaseQueryService {
     private final RagPromptService ragPromptService;
     private final RagCardService ragCardService;
     private final SegmentTextCacheService segmentTextCacheService;
+    private final LangfuseTracer langfuseTracer;
     private final PromptTemplate hydePromptTemplate;
     private final boolean hydeEnabled;
     private final int hydeMaxChars;
@@ -195,6 +198,7 @@ public class KnowledgeBaseQueryService {
             RagPromptService ragPromptService,
             RagCardService ragCardService,
             SegmentTextCacheService segmentTextCacheService,
+            LangfuseTracer langfuseTracer,
             @Autowired(required = false) Driver neo4jDriver,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
@@ -216,6 +220,7 @@ public class KnowledgeBaseQueryService {
         this.ragPromptService = ragPromptService;
         this.ragCardService = ragCardService;
         this.segmentTextCacheService = segmentTextCacheService;
+        this.langfuseTracer = langfuseTracer;
         this.hydePromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getHydePromptPath())
                 .getContentAsString(StandardCharsets.UTF_8));
@@ -303,17 +308,24 @@ public class KnowledgeBaseQueryService {
 
         countService.updateQuestionCounts(knowledgeBaseIds);
 
+        langfuseTracer.startTrace("rag.query", UserContext.getUserId(), null, question);
         long start = System.nanoTime();
         RagQueryTrace trace = new RagQueryTrace();
+        LangfuseSpan retrieveSpan = langfuseTracer.span("rag-retrieve", question);
         AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, trace);
         List<Content> contents = outcome.contents();
+        langfuseTracer.end(retrieveSpan, "retrieved=" + contents.size());
         if (contents.isEmpty()) {
             traceService.save(UserContext.requireUserId(), knowledgeBaseIds, question, trace, List.of(),
                 NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
+            langfuseTracer.updateTraceOutput(NO_RESULT_RESPONSE);
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
+        LangfuseSpan generateSpan = langfuseTracer.span("rag-generate", question);
         String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of());
+        langfuseTracer.end(generateSpan, answer);
+        langfuseTracer.updateTraceOutput(answer);
         CitationAnalyzer.CitationAnalysis citation = citationEnabled
             ? citationAnalyzer.analyze(answer, contents.size())
             : new CitationAnalyzer.CitationAnalysis(List.of(), List.of(), 0.0d);
@@ -538,13 +550,26 @@ public class KnowledgeBaseQueryService {
             knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
+        long startNanos = System.nanoTime();
         dev.langchain4j.rag.AugmentationResult result =
             augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata));
+        recordRetrievalMetrics(startNanos, result.contents());
         // 生成前发一次"正在生成回答"进度
         if (progressCallback != null) {
             progressCallback.accept("正在生成回答...");
         }
         return new AugmentationOutcome(result.contents(), result.chatMessage());
+    }
+
+    /** Grafana 看板依赖：app.ai.rag.retrieval.latency（P99/P95/P50）+ requests（按 hit 分组）。 */
+    private void recordRetrievalMetrics(long startNanos, List<Content> contents) {
+        if (meterRegistry == null) {
+            return;
+        }
+        boolean hit = contents != null && !contents.isEmpty();
+        meterRegistry.timer("app.ai.rag.retrieval.latency")
+            .record(System.nanoTime() - startNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+        meterRegistry.counter("app.ai.rag.retrieval.requests", "hit", String.valueOf(hit)).increment();
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
@@ -604,11 +629,23 @@ public class KnowledgeBaseQueryService {
         InterviewIntent intentHint = ACTIVE_INTENT.get() != null
             ? ACTIVE_INTENT.get().resolvedIntent()
             : null;
+        InterviewQueryRouter queryRouter = knowledgeBaseOnly
+            ? InterviewQueryRouter.builder()
+                .elasticsearchRetrievers(esRouterRetrievers)
+                .intentHint(intentHint)
+                .build()
+            : InterviewQueryRouter.builder()
+                .elasticsearchRetrievers(esRouterRetrievers)
+                .sqlRetriever(routedSql)
+                .neo4jRetriever(routedNeo4j)
+                .chatModel(getRoutingChatModel())
+                .enabled(isRouterEnabled(sqlRetriever, neo4jRetriever))
+                .progressCallback(progressCallback)
+                .trace(trace)
+                .intentHint(intentHint)
+                .build();
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
-            .queryRouter(knowledgeBaseOnly
-                ? new InterviewQueryRouter(esRouterRetrievers, null, null, null, false, null, null, intentHint)
-                : new InterviewQueryRouter(esRouterRetrievers, routedSql, routedNeo4j, getRoutingChatModel(),
-                    isRouterEnabled(sqlRetriever, neo4jRetriever), progressCallback, trace, intentHint))
+            .queryRouter(queryRouter)
             .queryTransformer(transformer)
             .contentInjector(contentInjector);
         if (finalAggregator != null) {

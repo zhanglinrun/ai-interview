@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Markdown/TXT 文件解析器（对齐 know-engine MarkdownProcessServiceImpl）。
+ * Markdown/TXT 文件解析器（对齐业界实践 MarkdownProcessServiceImpl）。
  *
  * <p>Markdown 与纯文本无需结构化转换，直接按 UTF-8 读取为文本。
  * 图片描述增强（视觉模型）暂未启用，预留扩展点。

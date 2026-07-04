@@ -61,7 +61,7 @@ public class KnowledgeBaseEntity extends BaseEntity {
     // 当前激活版本 ID（指向 knowledge_base_version.version_id），三表重构后向量状态由版本承载
     private Long currentVersionId;
 
-    // 文档描述（对齐 know-engine KnowledgeDocument.description）
+    // 文档描述（对齐业界实践 KnowledgeDocument.description）
     private String description;
 
     private String dataTableName;
@@ -70,13 +70,13 @@ public class KnowledgeBaseEntity extends BaseEntity {
 
     private Integer dataRowCount;
 
-    // 文档状态机（对齐 know-engine DocumentStatus）
+    // 文档状态机（对齐业界实践 DocumentStatus）
     private DocumentStatus docStatus;
 
     /** 知识库类型：语义检索 / 数据查询。 */
     private String knowledgeBaseType;
 
-    /** 可见范围：PRIVATE / PUBLIC（对齐 know-engine accessibleBy）。 */
+    /** 可见范围：PRIVATE / PUBLIC（对齐业界实践 accessibleBy）。 */
     private String accessibleBy;
 
     /** 到期日；过期后不参与检索。 */

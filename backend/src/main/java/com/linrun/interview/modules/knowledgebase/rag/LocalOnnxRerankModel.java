@@ -17,13 +17,13 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
- * 本地 ONNX BGE-RERANKER 评分模型（移植自 know-engine 的 BgeScoringModel，取精华弃糟粕）。
+ * 本地 ONNX BGE-RERANKER 评分模型（参考业界实现 的 BgeScoringModel，取精华弃糟粕）。
  *
  * <p>在 Java 进程内通过 ONNX Runtime 跑 BGE-RERANKER 做 RAG 重排，省去云端调用网络延迟与计费。
  * 实现 LC4j {@link ScoringModel}，委托单例 {@link OnnxScoringModel}，供
  * {@link InterviewReRankingContentAggregator} 注入。
  *
- * <p>与 know-engine 的差异（弃糟粕）：
+ * <p>与早期实现的差异（弃糟粕）：
  * <ul>
  *   <li><b>路径/maxSequenceLength 不硬编码</b>：走 {@link KnowledgeBaseQueryProperties.Rerank.LocalOnnx} 配置</li>
  *   <li><b>加载失败不抛异常中断</b>：{@code getInstance} 抛错时记 warn，由 {@code RerankService} 路由层降级云端</li>

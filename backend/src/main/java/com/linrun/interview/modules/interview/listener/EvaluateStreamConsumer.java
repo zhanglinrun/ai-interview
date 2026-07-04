@@ -16,6 +16,7 @@ import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
+import com.linrun.interview.modules.interview.memory.CandidateMemoryService;
 import com.linrun.interview.modules.interview.service.AnswerEvaluationService;
 import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final InterviewPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final CandidateMemoryService candidateMemoryService;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -49,7 +51,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         AnswerEvaluationService evaluationService,
         InterviewPersistenceService persistenceService,
         ObjectMapper objectMapper,
-        LlmProviderRegistry llmProviderRegistry
+        LlmProviderRegistry llmProviderRegistry,
+        CandidateMemoryService candidateMemoryService
     ) {
         super(redisService);
         this.sessionRepository = interviewSessionMapper;
@@ -57,6 +60,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.persistenceService = persistenceService;
         this.objectMapper = objectMapper;
         this.llmProviderRegistry = llmProviderRegistry;
+        this.candidateMemoryService = candidateMemoryService;
     }
 
     record EvaluatePayload(String sessionId) {}
@@ -116,6 +120,12 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         }
 
         InterviewSessionEntity session = sessionOpt.get();
+        // 幂等：已评估的会话直接跳过（补偿任务重派可能与已完成的评估重复）
+        if (session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED
+            || session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+            log.info("会话已评估，跳过重复评估任务: sessionId={}", sessionId);
+            return;
+        }
         List<InterviewQuestionDTO> questions;
         try {
             questions = objectMapper.readValue(
@@ -144,6 +154,9 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
         persistenceService.saveReport(sessionId, report);
+        // 跨会话候选人画像：从评估报告 LLM 抽取薄弱点/掌握点入库（Planner 下次面试注入），
+        // 失败静默不阻断评估主链路；本消费者已幂等（EVALUATED 跳过），不会重复抽取
+        candidateMemoryService.extractAndSaveQuietly(session, report);
     }
 
     @Override

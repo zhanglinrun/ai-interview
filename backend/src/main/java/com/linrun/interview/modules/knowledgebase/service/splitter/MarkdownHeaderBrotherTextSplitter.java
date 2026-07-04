@@ -24,7 +24,7 @@ import static com.linrun.interview.modules.knowledgebase.constant.MetadataKeyCon
 /**
  * Markdown 文档分割器（兄弟切片），基于标题层级分段。
  *
- * <p>copy 自 know-engine 的 MarkdownHeaderBrotherTextSplitter（@author andyflury / Hollis），
+ * <p>copy 自 业界实现 的 MarkdownHeaderBrotherTextSplitter（@author andyflury / Hollis），
  * 适配本项目包名，移除调试 println。与父子切片的区别：超出 chunkSize 的章节按字符切割成同组兄弟 chunk，
  * 共享 brotherChunkId，并通过 brotherChunkIndex/brotherChunkTotal 记录顺序与总数，检索时可按序拼接。
  * 同时在 parentChildModel 模式下为非顶级标题建立 parentChunkId 父子关系。

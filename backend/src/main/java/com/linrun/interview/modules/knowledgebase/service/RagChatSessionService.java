@@ -46,6 +46,7 @@ public class RagChatSessionService {
   private final RagChatMessageMapper messageMapper;
   private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
   private final RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
+  private final KnowledgeBaseListService listService;
   private final KnowledgeBaseQueryService queryService;
   private final RagChatMapper ragChatMapper;
   private final KnowledgeBaseMapper knowledgeBaseMapper;
@@ -60,7 +61,7 @@ public class RagChatSessionService {
       : List.of();
     List<KnowledgeBaseEntity> knowledgeBases = loadKnowledgeBases(userId, knowledgeBaseIds);
     if (knowledgeBases.size() != knowledgeBaseIds.size()) {
-      throw new BusinessException(ErrorCode.NOT_FOUND, "????????");
+      throw new BusinessException(ErrorCode.NOT_FOUND, "部分知识库不存在");
     }
 
     RagChatSessionEntity session = new RagChatSessionEntity();
@@ -74,7 +75,7 @@ public class RagChatSessionService {
     saveKnowledgeBaseLinks(session.getId(), knowledgeBaseIds);
     session.setKnowledgeBases(new HashSet<>(knowledgeBases));
 
-    log.info("?? RAG ????: id={}, title={}", session.getId(), session.getTitle());
+    log.info("创建 RAG 会话成功: id={}, title={}", session.getId(), session.getTitle());
     return ragChatMapper.toSessionDTO(session);
   }
 
@@ -126,19 +127,19 @@ public class RagChatSessionService {
     session.setUpdatedAt(LocalDateTime.now());
     MapperUtils.save(sessionMapper, session);
 
-    log.info("??????: sessionId={}, messageId={}", sessionId, assistantMessage.getId());
+    log.info("准备流式消息: sessionId={}, messageId={}", sessionId, assistantMessage.getId());
     return assistantMessage.getId();
   }
 
   @Transactional
   public void completeStreamMessage(Long messageId, String content) {
     RagChatMessageEntity message = Optional.ofNullable(messageMapper.selectById(messageId))
-      .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "?????"));
+      .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "消息不存在"));
     message.setContent(content);
     message.setCompleted(true);
     message.setUpdatedAt(LocalDateTime.now());
     MapperUtils.save(messageMapper, message);
-    log.info("??????: messageId={}, contentLength={}",
+    log.info("完成流式消息: messageId={}, contentLength={}",
         messageId, content != null ? content.length() : 0);
   }
 
@@ -170,10 +171,10 @@ public class RagChatSessionService {
           session.setTitle(trimmed);
           session.setUpdatedAt(LocalDateTime.now());
           MapperUtils.save(sessionMapper, session);
-          log.info("[RagChatSessionService] LLM ??????: sessionId={}, title={}", sessionId, trimmed);
+          log.info("[RagChatSessionService] LLM 生成会话标题: sessionId={}, title={}", sessionId, trimmed);
         });
       } catch (Exception e) {
-        log.warn("[RagChatSessionService] LLM ??????: sessionId={}, error={}",
+        log.warn("[RagChatSessionService] LLM 生成标题失败: sessionId={}, error={}",
             sessionId, e.getMessage(), e);
       }
     });
@@ -185,7 +186,7 @@ public class RagChatSessionService {
     List<ChatMessage> history = queryProperties.getHistory().isEnabled()
       ? loadHistoryMessages(sessionId)
       : List.of();
-    log.info("???????: sessionId={}, historySize={}", sessionId, history.size());
+    log.info("流式问答开始: sessionId={}, historySize={}", sessionId, history.size());
     return queryService.answerQuestionStream(kbIds, question, history, assistantMessageId);
   }
 
@@ -195,7 +196,7 @@ public class RagChatSessionService {
     session.setTitle(title);
     session.setUpdatedAt(LocalDateTime.now());
     MapperUtils.save(sessionMapper, session);
-    log.info("??????: sessionId={}, title={}", sessionId, title);
+    log.info("更新会话标题: sessionId={}, title={}", sessionId, title);
   }
 
   @Transactional
@@ -205,7 +206,7 @@ public class RagChatSessionService {
     session.setIsPinned(!currentPinned);
     session.setUpdatedAt(LocalDateTime.now());
     MapperUtils.save(sessionMapper, session);
-    log.info("????????: sessionId={}, isPinned={}", sessionId, session.getIsPinned());
+    log.info("切换会话置顶状态: sessionId={}, isPinned={}", sessionId, session.getIsPinned());
   }
 
   @Transactional
@@ -215,11 +216,11 @@ public class RagChatSessionService {
     requireSession(userId, sessionId);
     List<KnowledgeBaseEntity> knowledgeBases = loadKnowledgeBases(userId, ids);
     if (knowledgeBases.size() != ids.size()) {
-      throw new BusinessException(ErrorCode.NOT_FOUND, "????????");
+      throw new BusinessException(ErrorCode.NOT_FOUND, "部分知识库不存在");
     }
     sessionKnowledgeBaseMapper.deleteBySessionId(sessionId);
     saveKnowledgeBaseLinks(sessionId, ids);
-    log.info("???????: sessionId={}, kbIds={}", sessionId, ids);
+    log.info("更新会话知识库: sessionId={}, kbIds={}", sessionId, ids);
   }
 
   @Transactional
@@ -230,13 +231,13 @@ public class RagChatSessionService {
       .eq(RagChatMessageEntity::getSessionId, sessionId));
     sessionKnowledgeBaseMapper.deleteBySessionId(sessionId);
     sessionMapper.deleteById(sessionId);
-    log.info("????: sessionId={}", sessionId);
+    log.info("删除会话: sessionId={}", sessionId);
   }
 
   private RagChatSessionEntity requireSession(Long userId, Long sessionId) {
     return EntityQueries.byUserAndId(sessionMapper, userId, sessionId,
         RagChatSessionEntity::getUserId, RagChatSessionEntity::getId)
-      .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "?????"));
+      .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
   }
 
   private RagChatSessionEntity requireSessionWithKnowledgeBases(Long userId, Long sessionId) {
@@ -255,12 +256,7 @@ public class RagChatSessionService {
   }
 
   private List<KnowledgeBaseEntity> loadKnowledgeBases(Long userId, List<Long> ids) {
-    if (ids == null || ids.isEmpty()) {
-      return List.of();
-    }
-    return EntityQueries.listByUserIdAndIdIn(
-      knowledgeBaseEntityMapper, userId, ids,
-      KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId);
+    return listService.listReadableByIds(userId, ids);
   }
 
   private void saveKnowledgeBaseLinks(Long sessionId, List<Long> knowledgeBaseIds) {
@@ -301,11 +297,11 @@ public class RagChatSessionService {
 
   private String generateTitle(List<KnowledgeBaseEntity> knowledgeBases) {
     if (knowledgeBases.isEmpty()) {
-      return "???";
+      return "新会话";
     }
     if (knowledgeBases.size() == 1) {
       return knowledgeBases.getFirst().getName();
     }
-    return knowledgeBases.size() + " ??????";
+    return knowledgeBases.size() + " 个知识库的会话";
   }
 }

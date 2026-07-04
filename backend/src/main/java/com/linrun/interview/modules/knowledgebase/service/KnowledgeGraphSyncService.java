@@ -18,7 +18,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 知识库向量化完成后，从分段标题抽取概念节点写入 Neo4j（对齐 know-engine 图检索数据闭环）。
+ * 知识库向量化完成后，从分段标题抽取概念节点写入 Neo4j（对齐业界实践 图检索数据闭环）。
  */
 @Slf4j
 @Service

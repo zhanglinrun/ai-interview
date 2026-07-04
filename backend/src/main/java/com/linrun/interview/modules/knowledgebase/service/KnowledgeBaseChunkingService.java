@@ -33,6 +33,23 @@ public class KnowledgeBaseChunkingService {
     return new DocumentSplitParam(SplitType.BROTHER.name(), chunkSize, overlap, null, null, null);
   }
 
+  /**
+   * 空 body / 缺省 splitType 时回落默认 BROTHER；保留调用方传入的 chunkSize/overlap 等。
+   */
+  public DocumentSplitParam resolveSplitParam(DocumentSplitParam param) {
+    DocumentSplitParam defaults = defaultSplitParam();
+    if (param == null || param.splitType() == null || param.splitType().isBlank()) {
+      return new DocumentSplitParam(
+          defaults.splitType(),
+          param != null && param.chunkSize() != null ? param.chunkSize() : defaults.chunkSize(),
+          param != null && param.overlap() != null ? param.overlap() : defaults.overlap(),
+          param != null ? param.titleLevel() : null,
+          param != null ? param.separator() : null,
+          param != null ? param.regex() : null);
+    }
+    return param;
+  }
+
   public List<TextSegment> split(String content) {
     return split(content, defaultSplitParam());
   }
@@ -41,7 +58,7 @@ public class KnowledgeBaseChunkingService {
     if (content == null || content.isBlank()) {
       return List.of();
     }
-    DocumentSplitParam effective = param != null ? param : defaultSplitParam();
+    DocumentSplitParam effective = resolveSplitParam(param);
     DocumentSplitter splitter = DocumentSplitterFactory.getInstance(effective);
     List<TextSegment> rawChunks = splitter.split(Document.from(content));
     List<TextSegment> effectiveChunks = new ArrayList<>(rawChunks.size());

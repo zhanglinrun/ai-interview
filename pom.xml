@@ -52,12 +52,15 @@
     <!-- commons-compress 1.27.x 运行时需要 ChecksumInputStream（commons-io 2.16+） -->
     <commons-io.version>2.16.1</commons-io.version>
 
-    <!-- LangChain4j（对齐 know-engine：核心 1.11.0，扩展模块 1.11.0-beta19） -->
+    <!-- LangChain4j（对齐业界实践：核心 1.11.0，扩展模块 1.11.0-beta19） -->
     <langchain4j.version>1.11.0</langchain4j.version>
     <langchain4j-beta.version>1.11.0-beta19</langchain4j-beta.version>
-    <!-- XXL-Job 分布式任务调度（对齐 know-engine 2.4.0） -->
-    <xxl-job.version>2.4.0</xxl-job.version>
-    <!-- surefire 默认排除的测试组：rag-eval 评测连真实 Elasticsearch + DashScope，不随普通构建运行。
+    <!-- Spring AI（仅用 MCP Server starter；1.1.x 对应 Spring Boot 3.5.x） -->
+    <spring-ai.version>1.1.8</spring-ai.version>
+    <!-- RocketMQ Spring Boot Starter（异步任务引擎可选实现，app.async.engine=rocketmq 启用）。
+         2.3.x 仍走 spring.factories，Spring Boot 3 下需手动补 AutoConfiguration.imports（见 backend resources）。 -->
+    <rocketmq-spring.version>2.3.5</rocketmq-spring.version>
+    <!-- surefire 默认排除 rag-eval 组（评测集见 eval/rag-retrieval/，连真实 ES + DashScope）。
          触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
     <test.excludedGroups>rag-eval</test.excludedGroups>
   </properties>
@@ -75,6 +78,13 @@
         <groupId>dev.langchain4j</groupId>
         <artifactId>langchain4j-community-bom</artifactId>
         <version>${langchain4j-beta.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

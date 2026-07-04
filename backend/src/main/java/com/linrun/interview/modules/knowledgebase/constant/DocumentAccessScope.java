@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 知识库文档可见范围（对齐 know-engine accessibleBy / RoleEnum 简化版）。
+ * 知识库文档可见范围（对齐业界实践 accessibleBy / RoleEnum 简化版）。
  */
 public enum DocumentAccessScope {
 

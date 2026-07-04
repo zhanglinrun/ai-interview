@@ -25,7 +25,7 @@ import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
 import static dev.langchain4j.rag.content.ContentMetadata.RERANKED_SCORE;
 
 /**
- * 带重排的内容聚合器（移植自 know-engine 的 KnowEngineReRankingContentAggregator）。
+ * 带重排的内容聚合器（参考业界实现的 ReRankingContentAggregator）。
  *
  * <p>实现 LC4j {@link ContentAggregator}，供 {@code DefaultRetrievalAugmentor} 编排：
  * <ol>
@@ -35,7 +35,7 @@ import static dev.langchain4j.rag.content.ContentMetadata.RERANKED_SCORE;
  *   <li>用 {@link ScoringModel}（即 {@code RerankService}）对融合结果精排，按分过滤+截断</li>
  * </ol>
  *
- * <p>与 know-engine 的差异仅在于 rerank 模型：know-engine 用本地 ONNX BgeScoringModel，
+ * <p>与早期实现的差异仅在于 rerank 模型：早期实现用本地 ONNX BgeScoringModel，
  * 本项目注入 DashScope gte-rerank 实现的 {@code RerankService}（同样实现 ScoringModel）。
  */
 @Slf4j
@@ -114,18 +114,18 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         // 每个 query 内融合多检索源结果
         Map<Query, List<Content>> queryToFusedContents = fuse(queryToContents);
 
-        List<List<InterviewDefaultContent>> knowEngineDefaultContents = queryToFusedContents.values().stream()
+        List<List<InterviewDefaultContent>> 参考实现DefaultContents = queryToFusedContents.values().stream()
             .map(contents -> contents.stream()
                 .map(content -> new InterviewDefaultContent((DefaultContent) content))
                 .toList())
             .toList();
 
-        if (knowEngineDefaultContents.isEmpty()) {
+        if (参考实现DefaultContents.isEmpty()) {
             return Collections.emptyList();
         }
 
         // 跨 query 二次 RRF 融合
-        List<Content> fusedContents = InterviewReciprocalRankFuser.fuse(knowEngineDefaultContents);
+        List<Content> fusedContents = InterviewReciprocalRankFuser.fuse(参考实现DefaultContents);
 
         if (fusedContents.isEmpty()) {
             return fusedContents;

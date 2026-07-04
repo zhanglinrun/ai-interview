@@ -12,7 +12,7 @@ import java.util.Map;
 import static dev.langchain4j.internal.ValidationUtils.ensureBetween;
 
 /**
- * Reciprocal Rank Fusion 融合器（移植自 know-engine 的 KnowEngineReciprocalRankFuser）。
+ * Reciprocal Rank Fusion 融合器（参考业界实现的 ReciprocalRankFuser）。
  *
  * <p>把多路召回的 {@code List<InterviewDefaultContent>} 按 RRF 公式 {@code 1/(k+rank)}
  * 跨路累加，分高者优先；去重依赖 {@link InterviewDefaultContent} 按 EMBEDDING_ID 的

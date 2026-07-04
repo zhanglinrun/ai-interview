@@ -9,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动时预热本地 BGE Rerank 模型，避免首问冷启动延迟（对齐 know-engine {@code BgeScoringModel#init}）。
+ * 启动时预热本地 BGE Rerank 模型，避免首问冷启动延迟（对齐业界实践 {@code BgeScoringModel#init}）。
  */
 @Slf4j
 @Component

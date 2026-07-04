@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.ai.PromptSanitizer;
 import com.linrun.interview.common.ai.PromptSecurityConstants;
-import com.linrun.interview.modules.interviewschedule.model.CreateInterviewRequest;
+import com.linrun.interview.modules.interviewschedule.model.CreateScheduleRequest;
 import com.linrun.interview.modules.interviewschedule.model.ParseResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -107,7 +107,7 @@ public class InterviewParseService {
         }
 
         // Step 1: Try rule-based parsing
-        CreateInterviewRequest result = tryRuleParsing(rawText, source);
+        CreateScheduleRequest result = tryRuleParsing(rawText, source);
         if (isValidResult(result)) {
             log.info("规则解析成功");
             return new ParseResponse(true, result, 0.95, "rule", "规则解析成功");
@@ -126,7 +126,7 @@ public class InterviewParseService {
         return new ParseResponse(false, null, 0.0, "none", "解析失败");
     }
 
-    private CreateInterviewRequest tryRuleParsing(String rawText, String source) {
+    private CreateScheduleRequest tryRuleParsing(String rawText, String source) {
         // Try source-specific format first
         if ("feishu".equalsIgnoreCase(source)) {
             return parseFeishu(rawText);
@@ -138,22 +138,22 @@ public class InterviewParseService {
 
         // No source specified, try all formats
         if (rawText.contains("飞书") || rawText.contains("Feishu") || rawText.contains("meeting.feishu.cn")) {
-            CreateInterviewRequest result = parseFeishu(rawText);
+            CreateScheduleRequest result = parseFeishu(rawText);
             if (isValidResult(result)) return result;
         }
 
         if (rawText.contains("腾讯会议") || rawText.contains("Tencent Meeting") || rawText.contains("会议号")) {
-            CreateInterviewRequest result = parseTencent(rawText);
+            CreateScheduleRequest result = parseTencent(rawText);
             if (isValidResult(result)) return result;
         }
 
         if (rawText.contains("Zoom") || rawText.contains("zoom.us")) {
-            CreateInterviewRequest result = parseZoom(rawText);
+            CreateScheduleRequest result = parseZoom(rawText);
             if (isValidResult(result)) return result;
         }
 
         // Try all formats
-        CreateInterviewRequest result = parseFeishu(rawText);
+        CreateScheduleRequest result = parseFeishu(rawText);
         if (isValidResult(result)) return result;
 
         result = parseTencent(rawText);
@@ -164,10 +164,10 @@ public class InterviewParseService {
 
     // ========== Feishu Parsing ==========
 
-    private CreateInterviewRequest parseFeishu(String rawText) {
+    private CreateScheduleRequest parseFeishu(String rawText) {
         log.debug("尝试解析飞书格式");
 
-        CreateInterviewRequest request = new CreateInterviewRequest();
+        CreateScheduleRequest request = new CreateScheduleRequest();
 
         try {
             // Extract time
@@ -213,10 +213,10 @@ public class InterviewParseService {
 
     // ========== Tencent Meeting Parsing ==========
 
-    private CreateInterviewRequest parseTencent(String rawText) {
+    private CreateScheduleRequest parseTencent(String rawText) {
         log.debug("尝试解析腾讯会议格式");
 
-        CreateInterviewRequest request = new CreateInterviewRequest();
+        CreateScheduleRequest request = new CreateScheduleRequest();
 
         try {
             // Extract time
@@ -264,10 +264,10 @@ public class InterviewParseService {
 
     // ========== Zoom Parsing ==========
 
-    private CreateInterviewRequest parseZoom(String rawText) {
+    private CreateScheduleRequest parseZoom(String rawText) {
         log.debug("尝试解析 Zoom 格式");
 
-        CreateInterviewRequest request = new CreateInterviewRequest();
+        CreateScheduleRequest request = new CreateScheduleRequest();
 
         try {
             // Extract link
@@ -297,7 +297,7 @@ public class InterviewParseService {
 
     // ========== AI Parsing ==========
 
-    private CreateInterviewRequest parseWithAI(String rawText, String provider) {
+    private CreateScheduleRequest parseWithAI(String rawText, String provider) {
         try {
             String currentDate = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
             String safeRawText = promptSanitizer.sanitize(rawText);
@@ -335,7 +335,7 @@ public class InterviewParseService {
                 return null;
             }
 
-            CreateInterviewRequest request = new CreateInterviewRequest();
+            CreateScheduleRequest request = new CreateScheduleRequest();
 
             // Extract and validate fields
             if (result.get("companyName") != null) {
@@ -428,7 +428,7 @@ public class InterviewParseService {
         return 1;
     }
 
-    private boolean isValidResult(CreateInterviewRequest result) {
+    private boolean isValidResult(CreateScheduleRequest result) {
         return result != null
                 && result.getCompanyName() != null
                 && result.getPosition() != null

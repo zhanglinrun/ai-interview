@@ -1,7 +1,6 @@
 package com.linrun.interview.common.async;
 
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
-import com.linrun.interview.infrastructure.redis.RedisService;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -9,30 +8,41 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Redis Stream 生产者模板基类。
- * 统一消息发送骨架与失败处理逻辑。
+ * 异步任务生产者模板基类。
+ * 统一消息发送骨架与失败处理逻辑；底层引擎（Redis Stream / RocketMQ）
+ * 由 {@link TaskQueueChannel} 屏蔽，{@code app.async.engine} 一行配置切换。
  */
 @Slf4j
 public abstract class AbstractStreamProducer<T> {
 
-    private final RedisService redisService;
+    private final TaskQueueChannel taskQueueChannel;
 
-    protected AbstractStreamProducer(RedisService redisService) {
-        this.redisService = redisService;
+    protected AbstractStreamProducer(TaskQueueChannel taskQueueChannel) {
+        this.taskQueueChannel = taskQueueChannel;
     }
 
     protected void sendTask(T payload) {
+        doSend(payload, false);
+    }
+
+    /**
+     * 以事务消息语义投递（RocketMQ 引擎下为 half 消息 → 本地事务 → commit；
+     * Redis Stream 引擎无事务消息，退化为普通入队，由补偿任务兜底）。
+     */
+    protected void sendTaskInTransaction(T payload) {
+        doSend(payload, true);
+    }
+
+    private void doSend(T payload, boolean transactional) {
         // 为每条任务生成稳定的 taskId 作为幂等去重键：消费侧据此保证"同一任务只真正执行一次"，
         // 重新入队重试、被认领接管时该 ID 都保持不变。子类的 buildMessage 返回不可变 Map，
         // 这里复制为可变 Map 后注入，子类无需感知。
         Map<String, String> message = new HashMap<>(buildMessage(payload));
         message.putIfAbsent(AsyncTaskStreamConstants.FIELD_TASK_ID, UUID.randomUUID().toString());
         try {
-            String messageId = redisService.streamAdd(
-                streamKey(),
-                message,
-                AsyncTaskStreamConstants.STREAM_MAX_LEN
-            );
+            String messageId = transactional
+                ? taskQueueChannel.sendInTransaction(streamKey(), message)
+                : taskQueueChannel.send(streamKey(), message);
             log.info("{}任务已发送到Stream: {}, messageId={}, taskId={}",
                 taskDisplayName(), payloadIdentifier(payload), messageId,
                 message.get(AsyncTaskStreamConstants.FIELD_TASK_ID));

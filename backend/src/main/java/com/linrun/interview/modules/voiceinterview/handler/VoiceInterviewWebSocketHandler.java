@@ -3,10 +3,12 @@ package com.linrun.interview.modules.voiceinterview.handler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.modules.voiceinterview.dto.WebSocketControlMessage;
 import com.linrun.interview.modules.voiceinterview.dto.WebSocketSubtitleMessage;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import com.linrun.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
+import com.linrun.interview.modules.voiceinterview.config.JwtHandshakeInterceptor;
 import com.linrun.interview.modules.voiceinterview.config.VoiceInterviewProperties;
 import com.linrun.interview.modules.voiceinterview.service.QwenAsrService;
 import com.linrun.interview.modules.voiceinterview.service.QwenTtsService;
@@ -17,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -32,8 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
@@ -71,8 +72,9 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     /**
      * LLM / TTS / JDBC 等阻塞工作全部跑在虚拟线程上，避免占满 utteranceMergeScheduler 的 2 个调度线程。
+     * 由 {@code AsyncConfig#voicePipelineExecutor} 提供（带并发上限，Spring 管理生命周期）。
      */
-    private final ExecutorService voicePipelineExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final AsyncTaskExecutor voicePipelineExecutor;
 
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
@@ -143,6 +145,14 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String sessionId = extractSessionId(session);
+
+        // 会话归属校验：握手拦截器已验证 JWT 并写入 userId，getSessionEntity 内嵌校验会话归属该用户
+        VoiceInterviewSessionEntity ownedEntity = getSessionEntity(session, sessionId);
+        if (ownedEntity == null) {
+            log.warn("语音面试 WebSocket 越权/无效连接被拒绝: sessionId={}", sessionId);
+            session.close(CloseStatus.POLICY_VIOLATION.withReason("无权访问该面试会话"));
+            return;
+        }
 
         // Increase message size limits for audio streaming
         // 1 second of PCM audio @ 16kHz, 16-bit = ~32KB raw, ~42KB base64
@@ -222,7 +232,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                     return;
                 }
 
-                VoiceInterviewSessionEntity sessionEntity = getSessionEntity(sessionId);
+                VoiceInterviewSessionEntity sessionEntity = getSessionEntity(session, sessionId);
                 if (sessionEntity == null) {
                     log.warn("Session entity not found when sending opening question: {}", sessionId);
                     return;
@@ -353,15 +363,8 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @Override
     public void destroy() {
-        voicePipelineExecutor.shutdownNow();
+        // voicePipelineExecutor 是 Spring Bean，由容器关闭时统一销毁
         utteranceMergeScheduler.shutdownNow();
-        try {
-            if (!voicePipelineExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                log.warn("voicePipelineExecutor did not terminate within 5s");
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     @Override
@@ -634,7 +637,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
             log.info("Getting LLM response for session {}, text: {}", sessionId, userText);
 
-            VoiceInterviewSessionEntity sessionEntity = getSessionEntity(sessionId);
+            VoiceInterviewSessionEntity sessionEntity = getSessionEntity(session, sessionId);
             if (sessionEntity == null) {
                 log.error("Session entity not found for session {}, cannot generate LLM response", sessionId);
                 sendError(session, "会话不存在，请重新开始面试");
@@ -1147,6 +1150,8 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     }
 
     @Scheduled(fixedRate = 300_000)
+    @DistributeLock(key = "'voice:compensation:stale-cleanup'", waitTime = 0, leaseTime = 240,
+        message = "语音会话清理任务已在其他实例执行")
     public void cleanupStaleSessions() {
         try {
             int cleaned = interviewService.cleanupStaleSessions();
@@ -1269,12 +1274,22 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     }
 
     /**
-     * Get session entity from database
+     * 读取语音面试会话并校验归属当前连接的认证用户（握手时写入的 userId）。
+     *
+     * <p>把「越权拦截」下沉到每次取会话，而非仅依赖连接建立时的一次校验：
+     * 会话不存在 / 未认证 / 归属不符一律返回 {@code null}，调用方据此拒绝后续处理。
      */
-    private VoiceInterviewSessionEntity getSessionEntity(String sessionId) {
+    private VoiceInterviewSessionEntity getSessionEntity(WebSocketSession session, String sessionId) {
         try {
             Long sessionIdLong = Long.parseLong(sessionId);
-            return interviewService.getSession(sessionIdLong);
+            VoiceInterviewSessionEntity entity = interviewService.getSession(sessionIdLong);
+            Object userId = session == null
+                ? null : session.getAttributes().get(JwtHandshakeInterceptor.ATTR_USER_ID);
+            if (entity == null || userId == null || !userId.equals(entity.getUserId())) {
+                log.warn("语音面试会话归属校验失败，拒绝访问: sessionId={}, userId={}", sessionId, userId);
+                return null;
+            }
+            return entity;
         } catch (NumberFormatException e) {
             log.error("Invalid session ID format: {}", sessionId);
             return null;

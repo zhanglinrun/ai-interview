@@ -1,13 +1,14 @@
 import {useCallback, useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {AnimatePresence, motion} from 'framer-motion';
-import {ChevronRight, FileStack, FileText, Sparkles, Trash2, Upload} from 'lucide-react';
+import {ChevronRight, FileText, Mic2, Trash2, Upload} from 'lucide-react';
 import {historyApi, ResumeListItem} from '../api/history';
 import {getErrorMessage} from '../api/request';
 import AnalyzeStatusBadge from '../components/AnalyzeStatusBadge';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import LoadingButtonContent from '../components/LoadingButtonContent';
 import {EmptyState, LoadingState} from '../components/PageState';
+import PageHeader from '../components/ui/PageHeader';
 import ResumeInterviewStatusBadge from '../components/ResumeInterviewStatusBadge';
 import SearchInput from '../components/SearchInput';
 import ScoreProgress from '../components/ScoreProgress';
@@ -100,32 +101,29 @@ export default function HistoryPage({onSelectResume}: HistoryPageProps) {
       initial={{opacity: 0}}
       animate={{opacity: 1}}
     >
-      {/* 头部 */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-3">
-            <FileStack className="w-7 h-7 text-primary-500" />
-            简历管理
-          </h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">管理您的简历，AI 智能分析与评分</p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => navigate(ROUTES.resumeUpload)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            上传简历
-          </button>
-          <button
-            onClick={() => navigate('/interview-hub')}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-          >
-            <Sparkles className="w-4 h-4" />
-            模拟面试
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="面试准备"
+        title="简历管理"
+        description="上传并管理简历，查看 AI 分析与评分结果。"
+        action={
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(ROUTES.resumeUpload)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 btn-primary rounded-lg text-sm font-medium"
+            >
+              <Upload className="w-4 h-4" />
+              上传简历
+            </button>
+            <button
+              onClick={() => navigate('/interview-hub')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 btn-secondary rounded-lg text-sm font-medium"
+            >
+              <Mic2 className="w-4 h-4" />
+              模拟面试
+            </button>
+          </div>
+        }
+      />
 
       {/* 搜索栏 */}
       <div className="mb-6">

@@ -9,13 +9,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * LLM 脏 JSON 容错解析工具（移植自 know-engine {@code infra/json/JsonUtil}，取精华弃糟粕）。
+ * LLM 脏 JSON 容错解析工具（参考业界实现 {@code infra/json/JsonUtil}，取精华弃糟粕）。
  *
  * <p>意图识别、查询路由等解析 LLM 返回 JSON 时前置容错：剥 markdown 代码块、裁前后垃圾字符、
  * 修中文引号 / 单引号 / 尾逗号 / 无引号键名，最后 jackson 验证；仍失败则兜底包成
  * {@code {"content":"..."}}。
  *
- * <p><b>弃糟粕</b>：删掉 know-engine 的 {@code fixEscapeChars}（用正则把字符串内裸
+ * <p><b>弃糟粕</b>：删掉 业界实现 的 {@code fixEscapeChars}（用正则把字符串内裸
  * {@code \n}/>{@code \r}/>{@code \t} 替换成空格，会破坏 JSON 字符串里合法的换行内容；
  * jackson 本身能正确处理转义，裸换行在标准 JSON 字符串里虽非法但 jackson 多数能容忍，
  * 该步收益低、风险高，直接去掉）。

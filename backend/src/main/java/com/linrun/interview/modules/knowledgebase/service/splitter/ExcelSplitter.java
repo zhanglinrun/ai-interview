@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 import static com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant.CHUNK_ID;
 
 /**
- * RAGFlow 风格 Excel/CSV 切块器（移植自 know-engine {@code ExcelSplitter}）。
+ * RAGFlow 风格 Excel/CSV 切块器（参考业界实现 {@code ExcelSplitter}）。
  */
 @Slf4j
 public class ExcelSplitter {

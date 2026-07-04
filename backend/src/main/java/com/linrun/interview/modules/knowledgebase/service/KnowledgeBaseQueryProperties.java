@@ -24,6 +24,9 @@ public class KnowledgeBaseQueryProperties {
     private Graph graph = new Graph();
     private Generation generation = new Generation();
     private TitleSummary titleSummary = new TitleSummary();
+    private Decompose decompose = new Decompose();
+    private Crag crag = new Crag();
+    private Adaptive adaptive = new Adaptive();
     private int chunkOverlapChars = 80;
     private String chunkStrategy = "hybrid";
     private int chunkSizeChars = 800;
@@ -31,12 +34,14 @@ public class KnowledgeBaseQueryProperties {
     private String userPromptPath = "classpath:prompts/knowledgebase-query-user.st";
     private String rewritePromptPath = "classpath:prompts/knowledgebase-query-rewrite.st";
     private String hydePromptPath = "classpath:prompts/knowledgebase-query-hyde.st";
+    private String decomposePromptPath = "classpath:prompts/rag/decompose.st";
+    private String cragPromptPath = "classpath:prompts/rag/crag-grade.st";
 
     @Data
     public static class Rewrite {
         private boolean enabled = true;
-        /** 查询改写专用模型（对齐 know-engine：qwen-max-latest） */
-        private String model = "qwen-max-latest";
+        /** 查询改写专用模型；空则复用默认 Provider 的 Chat 模型 */
+        private String model = "";
     }
 
     @Data
@@ -63,7 +68,7 @@ public class KnowledgeBaseQueryProperties {
         /** 是否启用混合检索；关闭时退回纯向量检索 */
         private boolean enabled = true;
         /**
-         * 双通道并行：注册独立的 vector + full_text 两路 ES retriever（对齐 know-engine），
+         * 双通道并行：注册独立的 vector + full_text 两路 ES retriever（对齐业界实践），
          * 由 Aggregator RRF 融合。开启后忽略 {@link #mode} 的单 retriever 模式切换。
          */
         private boolean dualChannel = true;
@@ -164,7 +169,7 @@ public class KnowledgeBaseQueryProperties {
         /** 是否启用 small-to-big 上下文扩展 */
         private boolean enabled = true;
         /**
-         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块，对齐 know-engine）。
+         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块，对齐业界实践）。
          */
         private String strategy = "replace";
         /** 单个命中 chunk 扩展后的最大字符数 */
@@ -187,15 +192,15 @@ public class KnowledgeBaseQueryProperties {
         /** 是否在意图识别前推"正在理解您的问题..."进度（关闭可省 ~0.4s 前端空进度） */
         private boolean progressEnabled = true;
         /** 意图识别专用模型；空则复用默认 ChatModel */
-        private String model = "qwen-max-latest";
+        private String model = "";
     }
 
     /**
-     * 查询路由 / Text2SQL / Text2Cypher 专用模型（对齐 know-engine）。
+     * 查询路由 / Text2SQL / Text2Cypher 专用模型（对齐业界实践）。
      */
     @Data
     public static class Routing {
-        private String model = "qwen-max-latest";
+        private String model = "";
     }
 
     /**
@@ -209,10 +214,37 @@ public class KnowledgeBaseQueryProperties {
         private boolean autoSyncOnVectorize = true;
         /** 启动时从 skills 目录各子目录 SKILL.md 预置 Skill 图谱 */
         private boolean skillBootstrapEnabled = true;
+        /** 实体级图谱（P2 加深）：LLM 实体抽取同步 + 实体锚点检索 */
+        private Entity entity = new Entity();
+
+        /**
+         * 实体级图谱配置：向量化完成后 LLM 从 chunk 抽取技术实体与关系，写
+         * {@code (:Entity)-[:RELATES{type}]->(:Entity)} 与 {@code (:Entity)-[:MENTIONED_IN]->(:Chunk)}；
+         * 检索期以问题命中的实体为锚点做 2 跳遍历回捞关联 chunk（带关系路径说明）。
+         */
+        @Data
+        public static class Entity {
+            /** 是否在向量化完成后追加 LLM 实体抽取同步（失败不阻断主链路） */
+            private boolean extractionEnabled = true;
+            /** 实体抽取专用模型（建议最便宜模型）；空则复用路由模型 */
+            private String model = "";
+            /** 每次 LLM 调用携带的 chunk 数 */
+            private int batchSize = 8;
+            /** 实体抽取批次并发上限（虚拟线程） */
+            private int maxConcurrency = 4;
+            /** 实体抽取 prompt 模板路径 */
+            private String promptPath = "classpath:prompts/rag/graph-entity-extract.st";
+            /** 检索期问题实体锚点上限 */
+            private int maxAnchors = 5;
+            /** 检索期图谱遍历路径条数上限 */
+            private int maxPaths = 20;
+            /** 检索期回捞关联 chunk 上限 */
+            private int maxChunks = 6;
+        }
     }
 
     /**
-     * RAG 流式生成模型配置（对齐 know-engine ragChatModel）。
+     * RAG 流式生成模型配置（对齐业界实践 ragChatModel）。
      */
     @Data
     public static class Generation {
@@ -226,12 +258,55 @@ public class KnowledgeBaseQueryProperties {
      */
     @Data
     public static class Sql {
-        private boolean enabled = true;
-        private boolean routerEnabled = true;
+        /** 默认关闭：面试备考知识库无结构化数据问答场景，保留实现按需开启 */
+        private boolean enabled = false;
+        private boolean routerEnabled = false;
         private int queryTimeoutSeconds = 8;
         private int maxRows = 100;
-        /** Text2SQL Prompt 模板（对齐 know-engine text-to-sql-prompt.txt） */
+        /** Text2SQL Prompt 模板（对齐业界实践 text-to-sql-prompt.txt） */
         private String promptPath = "classpath:prompts/text-to-sql-prompt.txt";
+    }
+
+    /**
+     * Query Decomposition（P2 Agentic RAG）：LLM 判定复杂问题（多跳/对比/综合）后拆解成
+     * 2-4 个可独立检索的子查询，子查询并行走现有检索链，结果由 RRF 聚合器融合去重。
+     * 简单问题经规则预筛直接跳过，不产生额外 LLM 调用。
+     */
+    @Data
+    public static class Decompose {
+        /** 是否启用复杂问题分解 */
+        private boolean enabled = true;
+        /** 单次分解产出的子查询上限 */
+        private int maxSubQueries = 4;
+        /** 分解专用模型；空则复用路由模型 */
+        private String model = "";
+    }
+
+    /**
+     * CRAG 纠正式检索（P2 Agentic RAG）：rerank 后让小模型对 top-N 打分
+     * correct / ambiguous / incorrect——correct 直接生成；ambiguous 用纠正查询重检索一次
+     * （硬上限 1，防循环）；incorrect 走通用对话兜底并明确告知「知识库无据」（防幻觉）。
+     */
+    @Data
+    public static class Crag {
+        /** 是否启用纠正式检索（每次查询增加一次小模型调用，默认关闭按需开启） */
+        private boolean enabled = false;
+        /** 参与打分的 top-N 片段数 */
+        private int gradeTopN = 3;
+        /** 打分片段单条截断字符数 */
+        private int snippetMaxChars = 400;
+        /** 打分专用模型（建议小模型）；空则复用路由模型 */
+        private String model = "";
+    }
+
+    /**
+     * 自适应检索路由（P2 Agentic RAG）：意图识别输出 needRetrieval 判定，寒暄/闲聊/
+     * 纯常识定义且模型自信时跳过检索直接生成（trace 记录「跳过检索」），节省检索与 token 成本。
+     */
+    @Data
+    public static class Adaptive {
+        /** 是否启用自适应跳过检索（依赖 intent-recognition.enabled=true） */
+        private boolean enabled = true;
     }
 
     /**
@@ -242,7 +317,7 @@ public class KnowledgeBaseQueryProperties {
     public static class TitleSummary {
         /** 是否启用 LLM 异步标题生成；关闭则保留原规则标题（知识库名 / "N 个知识库对话"） */
         private boolean enabled = true;
-        /** 标题摘要专用模型（对齐 know-engine：qwen3.5-flash） */
+        /** 标题摘要专用模型（对齐业界实践：qwen3.5-flash） */
         private String model = "qwen3.5-flash";
     }
 }

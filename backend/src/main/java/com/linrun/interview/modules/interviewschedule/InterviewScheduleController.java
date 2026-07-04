@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.interviewschedule;
 
 import com.linrun.interview.common.result.Result;
-import com.linrun.interview.modules.interviewschedule.model.CreateInterviewRequest;
+import com.linrun.interview.modules.interviewschedule.model.CreateScheduleRequest;
 import com.linrun.interview.modules.interviewschedule.model.InterviewScheduleDTO;
 import com.linrun.interview.modules.interviewschedule.model.InterviewStatus;
 import com.linrun.interview.modules.interviewschedule.model.ParseRequest;
@@ -59,7 +59,7 @@ public class InterviewScheduleController {
      * @return 创建的面试记录
      */
     @PostMapping
-    public Result<InterviewScheduleDTO> create(@Valid @RequestBody CreateInterviewRequest request) {
+    public Result<InterviewScheduleDTO> create(@Valid @RequestBody CreateScheduleRequest request) {
         log.info("创建面试记录: {} - {}", request.getCompanyName(), request.getPosition());
         InterviewScheduleDTO dto = scheduleService.create(request);
         return Result.success(dto);
@@ -105,7 +105,7 @@ public class InterviewScheduleController {
     @PutMapping("/{id}")
     public Result<InterviewScheduleDTO> update(
         @PathVariable Long id,
-        @Valid @RequestBody CreateInterviewRequest request
+        @Valid @RequestBody CreateScheduleRequest request
     ) {
         log.info("更新面试记录: ID={}", id);
         InterviewScheduleDTO dto = scheduleService.update(id, request);

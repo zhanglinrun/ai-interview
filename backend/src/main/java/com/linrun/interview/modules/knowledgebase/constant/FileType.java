@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 知识库文件类型（对齐 know-engine FileType），用于选择文件解析器。
+ * 知识库文件类型（对齐业界实践 FileType），用于选择文件解析器。
  */
 public enum FileType {
     PDF("pdf"),

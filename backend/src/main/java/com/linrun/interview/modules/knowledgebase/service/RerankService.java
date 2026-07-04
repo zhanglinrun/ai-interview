@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * 文档重排服务（LangChain4j {@link ScoringModel} 实现的路由层）。
  *
- * <p>对齐 know-engine 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），但做成
+ * <p>对齐业界实践 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），但做成
  * <b>本地/云端可配置 + 自动降级</b>（亮点3）：
  * <ul>
  *   <li>{@code provider=local}：委托 {@link LocalOnnxRerankModel} 进程内跑 BGE-RERANKER，

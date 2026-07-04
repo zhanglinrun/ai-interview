@@ -11,7 +11,7 @@ import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 import java.time.LocalDateTime;
 
 /**
- * 知识库分段实体（对齐 know-engine KnowledgeSegment）。
+ * 知识库分段实体（对齐业界实践 KnowledgeSegment）。
  *
  * <p>每个版本切块后产生若干 segment，文本与元数据落本表，向量化后回写 {@link #embeddingId}
  * 与 {@link SegmentStatus#VECTOR_STORED}。ES 向量删除可按 metadata 中的 docId/version 过滤，

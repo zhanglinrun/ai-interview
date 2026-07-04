@@ -8,6 +8,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
+import dev.langchain4j.internal.JsonSchemaElementUtils;
 import dev.langchain4j.model.chat.request.json.JsonSchema;
 import dev.langchain4j.service.output.JsonSchemas;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -101,9 +102,13 @@ public class StructuredOutputInvoker {
     ) {
         long startNanos = System.nanoTime();
         String contextTag = normalizeContextTag(logContext);
-        String securedSystemPrompt = systemPromptWithFormat
-            + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
         JsonSchema jsonSchema = resolveJsonSchema(targetType, logContext, log);
+        // 把 Schema 以文本形式注入首轮 system prompt：部分 OpenAI 兼容网关（如 DashScope）
+        // 不支持 response_format=json_schema 会降级成 json_object（schema 被丢弃，字段名靠模型自造），
+        // 且要求 messages 中必须出现 "json" 字样，否则直接 400
+        String securedSystemPrompt = systemPromptWithFormat
+            + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION
+            + buildSchemaInstruction(jsonSchema, logContext, log);
         Exception lastError = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             String attemptSystemPrompt = attempt == 1
@@ -143,6 +148,26 @@ public class StructuredOutputInvoker {
             errorPrefix + (lastError != null ? lastError.getMessage() : "unknown"),
             lastError
         );
+    }
+
+    /**
+     * 把 JsonSchema 渲染成文本追加到 system prompt。双重目的：
+     * 1) 满足 DashScope 等网关「json_object 模式下 messages 必须含 'json' 字样」的硬校验；
+     * 2) json_object 模式不带 schema 约束，字段名全靠 prompt 文本锚定，注入后模型才能输出正确字段。
+     */
+    private String buildSchemaInstruction(JsonSchema jsonSchema, String logContext, Logger log) {
+        try {
+            String schemaJson = objectMapper.writeValueAsString(
+                JsonSchemaElementUtils.toMap(jsonSchema.rootElement()));
+            return "\n\n# 输出格式（必须严格遵守）\n"
+                + "请仅输出一个符合下面 JSON Schema 的 JSON 对象，字段名必须与 Schema 完全一致"
+                + "（不得增删字段、不得改名、不得使用 snake_case 变体），"
+                + "不要输出 Markdown 代码块或任何解释文字：\n"
+                + schemaJson;
+        } catch (Exception e) {
+            log.warn("{}JSON Schema 文本化失败，回退到通用 JSON 指令", logContext, e);
+            return "\n\n" + STRICT_JSON_INSTRUCTION;
+        }
     }
 
     private JsonSchema resolveJsonSchema(Type targetType, String logContext, Logger log) {

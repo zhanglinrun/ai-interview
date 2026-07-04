@@ -3,7 +3,7 @@ package com.linrun.interview.modules.knowledgebase.service.parse;
 import com.linrun.interview.modules.knowledgebase.constant.FileType;
 
 /**
- * 文件解析服务接口（对齐 know-engine FileProcessService）。
+ * 文件解析服务接口（对齐业界实践 FileProcessService）。
  *
  * <p>不同 {@link FileType} 由不同实现处理（PDF/DOC 走 MinerU，Markdown 直读），
  * 由 {@link FileProcessServiceFactory} 按 {@link #supports(FileType)} 选择。

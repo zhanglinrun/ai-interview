@@ -34,6 +34,15 @@ public class RagQueryTraceEntity {
 
     private String routeReasoning;
 
+    /** Query Decomposition 子查询列表 JSON（P2） */
+    private String decomposedQueriesJson;
+
+    /** CRAG 打分：correct / ambiguous / incorrect（P2） */
+    private String cragGrade;
+
+    /** CRAG 纠正动作：none / rewrite_retry / fallback_no_evidence（P2） */
+    private String cragAction;
+
     private String knowledgeBaseIdsJson;
 
     private String retrievedJson;

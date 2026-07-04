@@ -1,0 +1,26 @@
+# Prometheus 采集配置
+# 抓取后端 Spring Boot Actuator 暴露的 /actuator/prometheus 端点。
+# 后端通过 dev-ops/docker-compose-monitor.yml 与本服务同网络，用服务名 app 直连。
+# 本地直接 bootRun 时，默认 server.port=8082，Prometheus 容器通过 host.docker.internal 访问。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: ai-interview-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - app:8080
+        labels:
+          application: ai-interview-platform
+
+  - job_name: ai-interview-backend-local
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - host.docker.internal:8082
+        labels:
+          application: ai-interview-platform
+          runtime: local

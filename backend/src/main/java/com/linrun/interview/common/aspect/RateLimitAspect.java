@@ -2,6 +2,7 @@ package com.linrun.interview.common.aspect;
 
 import com.linrun.interview.common.annotation.RateLimit;
 import com.linrun.interview.common.exception.RateLimitExceededException;
+import com.linrun.interview.common.security.UserContext;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -243,6 +244,13 @@ public class RateLimitAspect {
     }
 
     private String getCurrentUserId() {
+        // JwtInterceptor 认证后写入 UserContext（ThreadLocal），这是登录用户的权威来源；
+        // request attribute / header 仅作为兜底（如内部调用带 X-User-Id）
+        Long contextUserId = UserContext.getUserId();
+        if (contextUserId != null) {
+            return contextUserId.toString();
+        }
+
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
             return "anonymous";

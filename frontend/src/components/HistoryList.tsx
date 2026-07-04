@@ -39,43 +39,36 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
   const [deleteItem, setDeleteItem] = useState<ResumeListItem | null>(null);
   const [reanalyzingId, setReanalyzingId] = useState<number | null>(null);
 
-  const fetchHistoryData = useCallback(() => (
-    Promise.all([
-      historyApi.getResumes(),
-      historyApi.getStatistics(),
-    ])
-  ), []);
-
-  const applyHistoryData = useCallback((
-    resumeData: ResumeListItem[],
-    statsData: ResumeStats,
-  ) => {
+  // 统计信息由列表本地聚合，无需独立统计接口
+  const applyHistoryData = useCallback((resumeData: ResumeListItem[]) => {
     setResumes(resumeData);
-    setStats(statsData);
+    setStats({
+      totalCount: resumeData.length,
+      totalInterviewCount: resumeData.reduce((sum, r) => sum + (r.interviewCount ?? 0), 0),
+      totalAccessCount: resumeData.reduce((sum, r) => sum + (r.accessCount ?? 0), 0),
+    });
   }, []);
 
   // 静默加载数据（用于轮询）
   const loadDataSilent = useCallback(async () => {
     try {
-      const [resumeData, statsData] = await fetchHistoryData();
-      applyHistoryData(resumeData, statsData);
+      applyHistoryData(await historyApi.getResumes());
     } catch (err) {
       console.error('加载数据失败', err);
     }
-  }, [applyHistoryData, fetchHistoryData]);
+  }, [applyHistoryData]);
 
   // 加载数据
   const loadResumes = useCallback(async () => {
     setLoading(true);
     try {
-      const [resumeData, statsData] = await fetchHistoryData();
-      applyHistoryData(resumeData, statsData);
+      applyHistoryData(await historyApi.getResumes());
     } catch (err) {
       console.error('加载数据失败', err);
     } finally {
       setLoading(false);
     }
-  }, [applyHistoryData, fetchHistoryData]);
+  }, [applyHistoryData]);
 
   useEffect(() => {
     loadResumes();

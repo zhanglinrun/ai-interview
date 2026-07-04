@@ -7,7 +7,7 @@ import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.interviewschedule.mapper.InterviewScheduleMapper;
-import com.linrun.interview.modules.interviewschedule.model.CreateInterviewRequest;
+import com.linrun.interview.modules.interviewschedule.model.CreateScheduleRequest;
 import com.linrun.interview.modules.interviewschedule.model.InterviewScheduleDTO;
 import com.linrun.interview.modules.interviewschedule.model.InterviewScheduleEntity;
 import com.linrun.interview.modules.interviewschedule.model.InterviewStatus;
@@ -26,7 +26,7 @@ public class InterviewScheduleService {
   private final InterviewScheduleMapper interviewScheduleMapper;
 
   @Transactional
-  public InterviewScheduleDTO create(CreateInterviewRequest request) {
+  public InterviewScheduleDTO create(CreateScheduleRequest request) {
     InterviewScheduleEntity entity = new InterviewScheduleEntity();
     BeanUtils.copyProperties(request, entity);
     entity.setUserId(UserContext.requireUserId());
@@ -37,7 +37,7 @@ public class InterviewScheduleService {
   }
 
   @Transactional
-  public InterviewScheduleDTO update(Long id, CreateInterviewRequest request) {
+  public InterviewScheduleDTO update(Long id, CreateScheduleRequest request) {
     InterviewScheduleEntity entity = getByIdOrThrow(id);
     BeanUtils.copyProperties(request, entity, "id", "status");
     entity.setUpdatedAt(LocalDateTime.now());

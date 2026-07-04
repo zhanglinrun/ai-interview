@@ -7,7 +7,9 @@ import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.infrastructure.file.FileStorageService;
+import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.infrastructure.mapper.KnowledgeBaseMapper;
+import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
@@ -20,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,30 +33,31 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class KnowledgeBaseListService {
 
+  private static final Duration NULL_ID_TTL = Duration.ofMinutes(2);
+  private static final String NULL_ID_PREFIX = "kb:null:";
+
   private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
   private final RagChatMessageMapper ragChatMessageMapper;
   private final KnowledgeBaseMapper knowledgeBaseMapper;
   private final FileStorageService fileStorageService;
+  private final RedisService redisService;
 
   public List<KnowledgeBaseListItemDTO> listKnowledgeBases(DocumentStatus docStatus, String sortBy) {
     Long userId = UserContext.requireUserId();
-    List<KnowledgeBaseEntity> entities;
+    var query = Wrappers.<KnowledgeBaseEntity>lambdaQuery()
+      .and(w -> w.eq(KnowledgeBaseEntity::getUserId, userId)
+        .or()
+        .eq(KnowledgeBaseEntity::getAccessibleBy, DocumentAccessScope.PUBLIC.name()))
+      .orderByDesc(KnowledgeBaseEntity::getUploadedAt);
     if (docStatus != null) {
-      entities = knowledgeBaseEntityMapper.selectList(
-        Wrappers.<KnowledgeBaseEntity>lambdaQuery()
-          .eq(KnowledgeBaseEntity::getUserId, userId)
-          .eq(KnowledgeBaseEntity::getDocStatus, docStatus)
-          .orderByDesc(KnowledgeBaseEntity::getUploadedAt));
-    } else {
-      entities = EntityQueries.listByUserIdOrderByDesc(
-        knowledgeBaseEntityMapper, userId,
-        KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getUploadedAt);
+      query.eq(KnowledgeBaseEntity::getDocStatus, docStatus);
     }
+    List<KnowledgeBaseEntity> entities = knowledgeBaseEntityMapper.selectList(query);
 
     if (sortBy != null && !sortBy.isBlank() && !sortBy.equalsIgnoreCase("time")) {
       entities = sortEntities(entities, sortBy);
     }
-    return knowledgeBaseMapper.toListItemDTOList(entities);
+    return toListItems(entities, userId);
   }
 
   public List<KnowledgeBaseListItemDTO> listKnowledgeBases() {
@@ -61,11 +65,11 @@ public class KnowledgeBaseListService {
   }
 
   public Optional<KnowledgeBaseListItemDTO> getKnowledgeBase(Long id) {
-    return findEntityByUserAndId(id).map(knowledgeBaseMapper::toListItemDTO);
+    return findReadableEntity(id).map(e -> toListItem(e, UserContext.requireUserId()));
   }
 
   public Optional<KnowledgeBaseEntity> getKnowledgeBaseEntity(Long id) {
-    return findEntityByUserAndId(id);
+    return findReadableEntity(id);
   }
 
   public List<String> getKnowledgeBaseNames(List<Long> ids) {
@@ -74,7 +78,7 @@ public class KnowledgeBaseListService {
     }
     Map<Long, String> nameMap = getKnowledgeBaseNameMap(ids);
     return ids.stream()
-      .map(id -> nameMap.getOrDefault(id, "?????"))
+      .map(id -> nameMap.getOrDefault(id, "未知知识库"))
       .toList();
   }
 
@@ -83,10 +87,7 @@ public class KnowledgeBaseListService {
       return Map.of();
     }
     List<Long> uniqueIds = ids.stream().distinct().toList();
-    return EntityQueries.listByUserIdAndIdIn(
-        knowledgeBaseEntityMapper, UserContext.requireUserId(), uniqueIds,
-        KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
-      .stream()
+    return listReadableByIds(UserContext.requireUserId(), uniqueIds).stream()
       .collect(Collectors.toMap(KnowledgeBaseEntity::getId, KnowledgeBaseEntity::getName));
   }
 
@@ -96,30 +97,26 @@ public class KnowledgeBaseListService {
 
   public List<KnowledgeBaseListItemDTO> listByCategory(String category) {
     Long userId = UserContext.requireUserId();
-    List<KnowledgeBaseEntity> entities;
+    var query = Wrappers.<KnowledgeBaseEntity>lambdaQuery()
+      .and(w -> w.eq(KnowledgeBaseEntity::getUserId, userId)
+        .or()
+        .eq(KnowledgeBaseEntity::getAccessibleBy, DocumentAccessScope.PUBLIC.name()))
+      .orderByDesc(KnowledgeBaseEntity::getUploadedAt);
     if (category == null || category.isBlank()) {
-      entities = knowledgeBaseEntityMapper.selectList(
-        Wrappers.<KnowledgeBaseEntity>lambdaQuery()
-          .eq(KnowledgeBaseEntity::getUserId, userId)
-          .isNull(KnowledgeBaseEntity::getCategory)
-          .orderByDesc(KnowledgeBaseEntity::getUploadedAt));
+      query.isNull(KnowledgeBaseEntity::getCategory);
     } else {
-      entities = knowledgeBaseEntityMapper.selectList(
-        Wrappers.<KnowledgeBaseEntity>lambdaQuery()
-          .eq(KnowledgeBaseEntity::getUserId, userId)
-          .eq(KnowledgeBaseEntity::getCategory, category)
-          .orderByDesc(KnowledgeBaseEntity::getUploadedAt));
+      query.eq(KnowledgeBaseEntity::getCategory, category);
     }
-    return knowledgeBaseMapper.toListItemDTOList(entities);
+    return toListItems(knowledgeBaseEntityMapper.selectList(query), userId);
   }
 
   @Transactional
   public void updateCategory(Long id, String category) {
     KnowledgeBaseEntity entity = findEntityByUserAndId(id)
-      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "??????"));
+      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
     entity.setCategory(category != null && !category.isBlank() ? category : null);
     MapperUtils.save(knowledgeBaseEntityMapper, entity);
-    log.info("???????: id={}, category={}", id, category);
+    log.info("更新知识库分类: id={}, category={}", id, category);
   }
 
   public List<KnowledgeBaseListItemDTO> search(String keyword) {
@@ -130,12 +127,14 @@ public class KnowledgeBaseListService {
     Long userId = UserContext.requireUserId();
     List<KnowledgeBaseEntity> entities = knowledgeBaseEntityMapper.selectList(
       Wrappers.<KnowledgeBaseEntity>lambdaQuery()
-        .eq(KnowledgeBaseEntity::getUserId, userId)
+        .and(w -> w.eq(KnowledgeBaseEntity::getUserId, userId)
+          .or()
+          .eq(KnowledgeBaseEntity::getAccessibleBy, DocumentAccessScope.PUBLIC.name()))
         .and(w -> w.like(KnowledgeBaseEntity::getName, kw)
           .or().like(KnowledgeBaseEntity::getOriginalFilename, kw)
           .or().like(KnowledgeBaseEntity::getDescription, kw))
         .orderByDesc(KnowledgeBaseEntity::getUploadedAt));
-    return knowledgeBaseMapper.toListItemDTOList(entities);
+    return toListItems(entities, userId);
   }
 
   public List<KnowledgeBaseListItemDTO> listSorted(String sortBy) {
@@ -184,24 +183,79 @@ public class KnowledgeBaseListService {
   }
 
   public byte[] downloadFile(Long id) {
-    KnowledgeBaseEntity entity = findEntityByUserAndId(id)
-      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "??????"));
+    KnowledgeBaseEntity entity = findReadableEntity(id)
+      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
     String storageKey = entity.getStorageKey();
     if (storageKey == null || storageKey.isBlank()) {
-      throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "?????????");
+      throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "存储文件路径不存在");
     }
-    log.info("???????: id={}, filename={}", id, entity.getOriginalFilename());
+    log.info("下载知识库文件: id={}, filename={}", id, entity.getOriginalFilename());
     return fileStorageService.downloadFile(storageKey);
   }
 
   public KnowledgeBaseEntity getEntityForDownload(Long id) {
-    return findEntityByUserAndId(id)
-      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "??????"));
+    return findReadableEntity(id)
+      .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
+  }
+
+  /** 可读：本人文档或他人公开文档 */
+  public Optional<KnowledgeBaseEntity> findReadableEntity(Long id) {
+    if (id == null) {
+      return Optional.empty();
+    }
+    Long userId = UserContext.requireUserId();
+    KnowledgeBaseEntity entity = knowledgeBaseEntityMapper.selectById(id);
+    if (entity == null) {
+      return Optional.empty();
+    }
+    if (userId.equals(entity.getUserId())) {
+      return Optional.of(entity);
+    }
+    if (DocumentAccessScope.PUBLIC.name().equalsIgnoreCase(entity.getAccessibleBy())) {
+      return Optional.of(entity);
+    }
+    return Optional.empty();
+  }
+
+  public List<KnowledgeBaseEntity> listReadableByIds(Long userId, List<Long> ids) {
+    if (ids == null || ids.isEmpty()) {
+      return List.of();
+    }
+    return ids.stream()
+      .map(this::findReadableEntity)
+      .flatMap(Optional::stream)
+      .toList();
+  }
+
+  private List<KnowledgeBaseListItemDTO> toListItems(List<KnowledgeBaseEntity> entities, Long userId) {
+    return entities.stream().map(e -> toListItem(e, userId)).toList();
+  }
+
+  private KnowledgeBaseListItemDTO toListItem(KnowledgeBaseEntity entity, Long userId) {
+    KnowledgeBaseListItemDTO base = knowledgeBaseMapper.toListItemDTO(entity);
+    boolean owned = userId.equals(entity.getUserId());
+    return new KnowledgeBaseListItemDTO(
+      base.id(), base.name(), base.category(), base.originalFilename(),
+      base.fileSize(), base.contentType(), base.uploadedAt(), base.lastAccessedAt(),
+      base.accessCount(), base.questionCount(), base.docStatus(), base.currentVersionId(),
+      base.dataTableName(), base.dataRowCount(), base.knowledgeBaseType(),
+      base.accessibleBy(), base.expireDate(), owned);
   }
 
   private Optional<KnowledgeBaseEntity> findEntityByUserAndId(Long id) {
-    return EntityQueries.byUserAndId(
-      knowledgeBaseEntityMapper, UserContext.requireUserId(), id,
-      KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId);
+    if (id == null) {
+      return Optional.empty();
+    }
+    Long userId = UserContext.requireUserId();
+    String nullKey = NULL_ID_PREFIX + userId + ":" + id;
+    if (Boolean.TRUE.equals(redisService.get(nullKey))) {
+      return Optional.empty();
+    }
+    Optional<KnowledgeBaseEntity> result = EntityQueries.byUserAndId(
+      knowledgeBaseEntityMapper, userId, id, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId);
+    if (result.isEmpty()) {
+      redisService.set(nullKey, true, NULL_ID_TTL);
+    }
+    return result;
   }
 }

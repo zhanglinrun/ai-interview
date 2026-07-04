@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.rag;
 
 /**
- * 面试领域 RAG 意图（对齐 know-engine 多意图路由，按面试场景裁剪）。
+ * 面试领域 RAG 意图（对齐业界实践 多意图路由，按面试场景裁剪）。
  */
 public enum InterviewIntent {
 

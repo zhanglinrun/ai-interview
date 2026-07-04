@@ -9,6 +9,7 @@ import {
   Eye,
   FileText,
   HardDrive,
+  Layers,
   History,
   MessageSquare,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
   DataTablePreview,
   knowledgeBaseApi,
   KnowledgeBaseItem,
+  KnowledgeBaseSegment,
   KnowledgeBaseStats,
   KnowledgeBaseVersion,
   RagQueryTrace,
@@ -111,10 +113,23 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [traceOpen, setTraceOpen] = useState(false);
   const [traces, setTraces] = useState<RagQueryTrace[]>([]);
   const [tracesLoading, setTracesLoading] = useState(false);
+  const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
+  const [traceDetail, setTraceDetail] = useState<RagQueryTrace | null>(null);
+  const [traceDetailLoading, setTraceDetailLoading] = useState(false);
+  const [segmentModalKb, setSegmentModalKb] = useState<KnowledgeBaseItem | null>(null);
+  const [segments, setSegments] = useState<KnowledgeBaseSegment[]>([]);
+  const [segmentTotal, setSegmentTotal] = useState(0);
+  const [segmentPage, setSegmentPage] = useState(1);
+  const [segmentsLoading, setSegmentsLoading] = useState(false);
+  const [versionActionId, setVersionActionId] = useState<number | null>(null);
+
+  const UNCategorized_KEY = '__uncategorized__';
 
   const fetchPageData = useCallback(async () => {
     const kbListPromise = searchKeyword
       ? knowledgeBaseApi.search(searchKeyword)
+      : selectedCategory === UNCategorized_KEY
+      ? knowledgeBaseApi.getUncategorized()
       : selectedCategory
       ? knowledgeBaseApi.getByCategory(selectedCategory)
       : knowledgeBaseApi.getAllKnowledgeBases(sortBy);
@@ -257,6 +272,69 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       console.error('切换版本失败:', error);
     } finally {
       setSwitchingVersionId(null);
+    }
+  };
+
+  const handleActivateVersion = async (versionId: number) => {
+    if (!versionModalKb) return;
+    try {
+      setVersionActionId(versionId);
+      await knowledgeBaseApi.activateVersion(versionModalKb.id, versionId);
+      setVersions(await knowledgeBaseApi.listVersions(versionModalKb.id));
+      await loadDataSilent();
+    } catch (error) {
+      console.error('激活版本失败:', error);
+    } finally {
+      setVersionActionId(null);
+    }
+  };
+
+  const handleDeactivateVersion = async (versionId: number) => {
+    if (!versionModalKb) return;
+    try {
+      setVersionActionId(versionId);
+      await knowledgeBaseApi.deactivateVersion(versionModalKb.id, versionId);
+      setVersions(await knowledgeBaseApi.listVersions(versionModalKb.id));
+      await loadDataSilent();
+    } catch (error) {
+      console.error('失效版本失败:', error);
+    } finally {
+      setVersionActionId(null);
+    }
+  };
+
+  const handleShowSegments = async (kb: KnowledgeBaseItem, page = 1) => {
+    setSegmentModalKb(kb);
+    setSegmentPage(page);
+    try {
+      setSegmentsLoading(true);
+      const result = await knowledgeBaseApi.pageSegments(kb.id, page, 20, kb.currentVersionId ?? undefined);
+      setSegments(result.records);
+      setSegmentTotal(result.total);
+    } catch (error) {
+      console.error('加载分段失败:', error);
+      setSegments([]);
+      setSegmentTotal(0);
+    } finally {
+      setSegmentsLoading(false);
+    }
+  };
+
+  const handleExpandTrace = async (traceId: string) => {
+    if (expandedTraceId === traceId) {
+      setExpandedTraceId(null);
+      setTraceDetail(null);
+      return;
+    }
+    setExpandedTraceId(traceId);
+    setTraceDetailLoading(true);
+    try {
+      setTraceDetail(await knowledgeBaseApi.getTrace(traceId));
+    } catch (error) {
+      console.error('加载 Trace 详情失败:', error);
+      setTraceDetail(null);
+    } finally {
+      setTraceDetailLoading(false);
     }
   };
 
@@ -455,6 +533,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
               className="appearance-none pl-4 pr-10 py-2 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white cursor-pointer"
             >
               <option value="">全部分类</option>
+              <option value={UNCategorized_KEY}>未分类</option>
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
                   {cat}
@@ -527,7 +606,19 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       <FileText className="w-5 h-5 text-slate-400" />
                       <div>
                           <p className="font-medium text-slate-800 dark:text-white">{kb.name}</p>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">{kb.originalFilename}</p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{kb.originalFilename}</p>
+                            {kb.accessibleBy === 'PUBLIC' && (
+                              <span className="px-1.5 py-0.5 text-[10px] rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                                公开
+                              </span>
+                            )}
+                            {kb.owned === false && (
+                              <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                只读
+                              </span>
+                            )}
+                          </div>
                       </div>
                     </div>
                   </td>
@@ -641,6 +732,15 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       >
                         <History className="w-4 h-4" />
                       </button>
+                      {kb.knowledgeBaseType !== 'DATA_QUERY' && (
+                        <button
+                          onClick={() => handleShowSegments(kb)}
+                          className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                          title="查看分段"
+                        >
+                          <Layers className="w-4 h-4" />
+                        </button>
+                      )}
                       {/* 下载按钮 */}
                       <button
                         onClick={() => handleDownload(kb)}
@@ -675,7 +775,8 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           </LoadingButtonContent>
                         </button>
                       )}
-                      {/* 删除按钮 */}
+                      {/* 删除按钮（仅文档所有者可删） */}
+                      {kb.owned !== false && (
                       <button
                         onClick={() => setDeleteItem(kb)}
                         className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
@@ -683,6 +784,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      )}
                     </div>
                   </td>
                 </motion.tr>
@@ -813,17 +915,33 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                               {formatDateTime(v.createdAt)}
                             </p>
                           </div>
-                          <button
-                            onClick={() => handleSwitchVersion(v.versionId)}
-                            disabled={isCurrent || switchingVersionId !== null}
-                            className="shrink-0 px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {switchingVersionId === v.versionId
-                              ? '切换中...'
-                              : isCurrent
-                              ? '当前版本'
-                              : '切换'}
-                          </button>
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <button
+                              onClick={() => handleSwitchVersion(v.versionId)}
+                              disabled={isCurrent || switchingVersionId !== null}
+                              className="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {switchingVersionId === v.versionId
+                                ? '切换中...'
+                                : isCurrent
+                                ? '当前版本'
+                                : '切换'}
+                            </button>
+                            <button
+                              onClick={() => handleActivateVersion(v.versionId)}
+                              disabled={versionActionId !== null}
+                              className="px-3 py-1.5 text-xs border border-emerald-300 text-emerald-700 dark:text-emerald-300 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-40"
+                            >
+                              {versionActionId === v.versionId ? '处理中...' : '激活'}
+                            </button>
+                            <button
+                              onClick={() => handleDeactivateVersion(v.versionId)}
+                              disabled={versionActionId !== null || isCurrent}
+                              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40"
+                            >
+                              失效
+                            </button>
+                          </div>
                         </li>
                       );
                     })}
@@ -939,14 +1057,21 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 ) : traces.length === 0 ? (
                   <div className="py-12 text-center text-slate-400">暂无 Trace</div>
                 ) : traces.map((trace) => {
-                  const retrieved = parseTraceList(trace.retrievedJson).slice(0, 5);
-                  const reranked = parseTraceList(trace.rerankedJson).slice(0, 5);
-                  const sources = parseSourceList(trace.finalSourcesJson).slice(0, 3);
+                  const activeTrace = expandedTraceId === trace.traceId && traceDetail ? traceDetail : trace;
+                  const retrieved = parseTraceList(activeTrace.retrievedJson).slice(0, 5);
+                  const reranked = parseTraceList(activeTrace.rerankedJson).slice(0, 5);
+                  const sources = parseSourceList(activeTrace.finalSourcesJson).slice(0, 3);
                   return (
-                    <div key={trace.traceId} className="p-4 rounded-lg border border-slate-100 dark:border-slate-700">
+                    <div
+                      key={trace.traceId}
+                      className="p-4 rounded-lg border border-slate-100 dark:border-slate-700 cursor-pointer hover:border-primary-200 dark:hover:border-primary-700 transition-colors"
+                      onClick={() => void handleExpandTrace(trace.traceId)}
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-slate-800 dark:text-white truncate">{trace.question}</p>
-                        <span className="text-xs text-slate-400 shrink-0">{formatDateTime(trace.createdAt)}</span>
+                        <span className="text-xs text-slate-400 shrink-0">
+                          {expandedTraceId === trace.traceId ? '收起' : '详情'}
+                        </span>
                       </div>
                       <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-500 dark:text-slate-400">
                         <span>路由：{trace.routeStrategy || '-'}</span>
@@ -998,10 +1123,99 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           ))}
                         </div>
                       </div>
+                      {expandedTraceId === trace.traceId && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                          {traceDetailLoading ? (
+                            <p className="text-xs text-slate-400">加载完整 Trace...</p>
+                          ) : activeTrace.answer ? (
+                            <>
+                              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">完整回答</p>
+                              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeTrace.answer}</p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-slate-400">无回答记录</p>
+                          )}
+                          <p className="text-xs text-slate-400 mt-2">{formatDateTime(trace.createdAt)}</p>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {segmentModalKb && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setSegmentModalKb(null)}
+          >
+            <motion.div
+              initial={{scale: 0.95, opacity: 0}}
+              animate={{scale: 1, opacity: 1}}
+              exit={{scale: 0.95, opacity: 0}}
+              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-primary-500" />
+                    分段预览
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                    {segmentModalKb.name} · 共 {segmentTotal} 段
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSegmentModalKb(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                {segmentsLoading ? (
+                  <div className="py-12 text-center text-slate-400">加载中...</div>
+                ) : segments.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400">暂无分段</div>
+                ) : segments.map((seg) => (
+                  <div key={seg.id} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3">
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400 mb-2">
+                      <span>#{seg.chunkOrder}</span>
+                      <span>chunk={seg.chunkId}</span>
+                      <span>status={seg.status}</span>
+                      {seg.parentChunkId && <span>parent={seg.parentChunkId}</span>}
+                    </div>
+                    <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{seg.textPreview}</p>
+                  </div>
+                ))}
+              </div>
+              {segmentTotal > 20 && (
+                <div className="flex items-center justify-between p-4 border-t border-slate-100 dark:border-slate-700">
+                  <button
+                    disabled={segmentPage <= 1 || segmentsLoading}
+                    onClick={() => segmentModalKb && void handleShowSegments(segmentModalKb, segmentPage - 1)}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-40"
+                  >
+                    上一页
+                  </button>
+                  <span className="text-sm text-slate-500">第 {segmentPage} 页</span>
+                  <button
+                    disabled={segmentPage * 20 >= segmentTotal || segmentsLoading}
+                    onClick={() => segmentModalKb && void handleShowSegments(segmentModalKb, segmentPage + 1)}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-40"
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}

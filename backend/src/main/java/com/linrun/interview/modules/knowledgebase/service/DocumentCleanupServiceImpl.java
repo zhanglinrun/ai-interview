@@ -6,10 +6,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 文档版本清理服务实现（对齐 know-engine DocumentCleanupServiceImpl）。
+ * 文档版本清理服务实现（对齐业界实践 DocumentCleanupServiceImpl）。
  *
  * <p>清理旧版本：删 ES 向量（按 docId+versionId filter）+ 物理删该版本 segment + 物理删版本记录。
- * 比 know-engine 多了物理删 segment 和版本记录（know-engine 仅删向量，DB 残留靠别的流程）。
+ * 比 业界实现 多了物理删 segment 和版本记录（业界实现 仅删向量，DB 残留靠别的流程）。
  */
 @Slf4j
 @Service

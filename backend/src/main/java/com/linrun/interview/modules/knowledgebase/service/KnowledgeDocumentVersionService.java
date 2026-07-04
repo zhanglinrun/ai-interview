@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 知识库版本 Service（对齐 know-engine KnowledgeDocumentVersionService）。
+ * 知识库版本 Service（对齐业界实践 KnowledgeDocumentVersionService）。
  */
 public interface KnowledgeDocumentVersionService {
 

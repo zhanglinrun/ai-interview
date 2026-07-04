@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class ParseResponse {
     private Boolean success;
-    private CreateInterviewRequest data;
+    private CreateScheduleRequest data;
     private Double confidence;
     private String parseMethod; // rule, ai
     private String log;

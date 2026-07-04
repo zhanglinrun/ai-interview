@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { LogIn, Sparkles, UserPlus } from 'lucide-react';
+import { LogIn, UserPlus } from 'lucide-react';
 import { authApi } from '../api/auth';
 import { getStoredUser } from '../api/authStorage';
 import { getErrorMessage } from '../api/request';
@@ -55,20 +55,24 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-7 shadow-sm">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 bg-primary-500 rounded-xl flex items-center justify-center text-white">
-            <Sparkles className="w-5 h-5" />
-          </div>
+      <div className="w-full max-w-sm surface-card p-7 md:p-8">
+        <div className="mb-6 flex items-center gap-3">
+          <img
+            src="/bear-doctor-logo.png"
+            alt="AI面试平台"
+            className="w-12 h-12 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
+          />
           <div>
-            <h1 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isRegister ? '注册' : '登录'}
+            <h1 className="text-xl font-display font-semibold text-stone-900 dark:text-stone-50">
+              {isRegister ? '创建账号' : '欢迎回来'}
             </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">进入 AI Interview</p>
+            <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+              {isRegister ? '注册后即可使用面试练习与知识库' : '登录 AI面试平台'}
+            </p>
           </div>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
+        <div className="mb-5 grid grid-cols-2 rounded-lg bg-stone-100 dark:bg-stone-900 p-1">
           {AUTH_MODES.map((item) => (
             <button
               key={item}
@@ -79,8 +83,8 @@ export default function LoginPage() {
               }}
               className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 mode === item
-                  ? 'bg-white dark:bg-slate-950 text-primary-600 shadow-sm'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+                  ? 'bg-white dark:bg-stone-950 text-primary-700 shadow-sm'
+                  : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100'
               }`}
             >
               {item === 'login' ? '登录' : '注册'}
@@ -149,7 +153,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg btn-primary px-4 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
           >
             <LoadingButtonContent
               loading={loading}

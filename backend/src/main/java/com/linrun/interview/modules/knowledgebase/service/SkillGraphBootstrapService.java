@@ -22,7 +22,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 启动时从 skills 目录各子目录 SKILL.md 预置 Skill 节点与 COVERS 关系（对齐 know-engine 技能图谱）。
+ * 启动时从 skills 目录各子目录 SKILL.md 预置 Skill 节点与 COVERS 关系（对齐业界实践 技能图谱）。
  */
 @Slf4j
 @Component

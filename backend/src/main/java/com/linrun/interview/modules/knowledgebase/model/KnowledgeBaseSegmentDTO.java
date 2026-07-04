@@ -3,7 +3,7 @@ package com.linrun.interview.modules.knowledgebase.model;
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 
 /**
- * 知识库分段列表项 DTO（对齐 know-engine KnowledgeSegmentController，禁止直接返回 Entity）。
+ * 知识库分段列表项 DTO（对齐业界实践 KnowledgeSegmentController，禁止直接返回 Entity）。
  */
 public record KnowledgeBaseSegmentDTO(
     Long id,

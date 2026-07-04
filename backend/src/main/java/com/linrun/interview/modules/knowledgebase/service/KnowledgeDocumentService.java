@@ -6,7 +6,7 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEnti
 import java.util.List;
 
 /**
- * 知识库文档管理接口（对齐 know-engine KnowledgeDocumentService）。
+ * 知识库文档管理接口（对齐业界实践 KnowledgeDocumentService）。
  *
  * <p>负责文档级管理：删除级联（ES 向量 + segment + version + 文档）、版本激活/失效。
  * 向量化执行 {@link #activateVersion} 由 {@link DocumentProcessService#embedAndStore} 或
@@ -51,9 +51,20 @@ public interface KnowledgeDocumentService {
     void activateVersion(KnowledgeBaseVersionEntity version);
 
     /**
-     * 单调推进文档主表与版本表状态（对齐 know-engine advanceDocumentAndVersionStatus）。
+     * 单调推进文档主表与版本表状态（对齐业界实践 advanceDocumentAndVersionStatus）。
      *
      * @return 主表或版本表至少有一处被更新时返回 true
      */
     boolean advanceDocumentAndVersionStatus(Long docId, Long versionId, DocumentStatus targetStatus);
+
+    /**
+     * 热切换激活版本（目标版本 ES 向量已存在）：一个事务内完成
+     * 旧版本 DB 降级（segment 降 STORED + 版本降 CHUNKED）+ 主表指针/状态更新，
+     * 旧版本 ES 向量清理注册到事务提交后执行（事务内禁止外部 API），
+     * 清理失败留给向量对账任务兜底。
+     *
+     * @param docId           知识库 ID
+     * @param targetVersionId 目标版本 ID（须已 VECTOR_STORED）
+     */
+    void switchActiveVersion(Long docId, Long targetVersionId);
 }

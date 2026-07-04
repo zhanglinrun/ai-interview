@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 @Mapper
 public interface KnowledgeBaseSegmentMapper extends BaseMapper<KnowledgeBaseSegmentEntity> {
 
@@ -25,4 +27,26 @@ public interface KnowledgeBaseSegmentMapper extends BaseMapper<KnowledgeBaseSegm
       @Param("versionId") Long versionId,
       @Param("fromStatus") String fromStatus,
       @Param("toStatus") String toStatus);
+
+  /**
+   * 向量化每批完成后一条 UPDATE 批量回写 embeddingId + status（消灭循环单条 update）。
+   */
+  @Update("""
+      <script>
+      UPDATE knowledge_base_segment
+      SET status = #{status},
+          embedding_id = CASE id
+          <foreach collection="segments" item="seg">
+            WHEN #{seg.id} THEN #{seg.embeddingId}
+          </foreach>
+          END
+      WHERE id IN
+      <foreach collection="segments" item="seg" open="(" separator="," close=")">
+        #{seg.id}
+      </foreach>
+      </script>
+      """)
+  int batchUpdateEmbedding(
+      @Param("segments") List<KnowledgeBaseSegmentEntity> segments,
+      @Param("status") String status);
 }

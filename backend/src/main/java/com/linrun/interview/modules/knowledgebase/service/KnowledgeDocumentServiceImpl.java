@@ -15,6 +15,7 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEnti
 import com.linrun.interview.modules.knowledgebase.model.RagChatSessionEntity;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.modules.knowledgebase.mapper.RagSessionKnowledgeBaseMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -22,16 +23,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 知识库文档管理实现（对齐 know-engine KnowledgeDocumentServiceImpl）。
+ * 知识库文档管理实现（对齐业界实践 KnowledgeDocumentServiceImpl）。
  *
  * <p>负责删除级联（ES 向量 + segment + version + 文档）、版本激活（向量化）/失效（清向量降状态）。
  *
- * <p>与 know-engine 差异（遵守 ai-interview AGENTS.md）：
+ * <p>与早期实现差异（遵守 ai-interview AGENTS.md）：
  * <ul>
  *   <li>主表 {@code @TableLogic} 软删；级联删除走 {@code physicalDeleteById} 物理清库。</li>
  *   <li>{@code Assert} → {@link BusinessException}（Assert 抒 IllegalArgument 绕过全局异常处理）。</li>
@@ -48,6 +52,13 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
     private static final int EMBED_PAGE_SIZE = 100;
 
+    /** Grafana 看板依赖的向量化指标名（app.ai 前缀已开 percentiles-histogram） */
+    private static final String METRIC_VECTORIZE_LATENCY = "app.ai.vectorize.document.latency";
+    private static final String METRIC_EMBEDDING_INFLIGHT = "app.ai.vectorize.embedding.inflight";
+
+    /** 正在执行嵌入批处理的文档数（注册为 gauge，跨实例聚合看并发压力） */
+    private final AtomicInteger embeddingInflight = new AtomicInteger();
+
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
     private final KnowledgeDocumentVersionService versionService;
     private final KnowledgeSegmentService segmentService;
@@ -55,9 +66,21 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final FileStorageService fileStorageService;
     private final RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
     private final KnowledgeBaseDataTableService dataTableService;
+    /** 向量化三段式的编程式小事务（方法级 @Transactional 会把外部 API 调用圈进长事务） */
+    private final TransactionTemplate transactionTemplate;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private KnowledgeGraphSyncService knowledgeGraphSyncService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MeterRegistry meterRegistry;
+
+    @jakarta.annotation.PostConstruct
+    void registerMetrics() {
+        if (meterRegistry != null) {
+            meterRegistry.gauge(METRIC_EMBEDDING_INFLIGHT, embeddingInflight);
+        }
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -156,16 +179,26 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void activateVersion(Long versionId) {
+        // 不加方法级 @Transactional：向量化含外部 API 调用，事务边界由 entity 重载内
+        // 的 transactionTemplate 分段控制（事务 A / 无事务嵌入段 / 事务 B）
         KnowledgeBaseVersionEntity version = versionService.getById(versionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "版本记录不存在: versionId=" + versionId));
         activateVersion(version);
     }
 
+    /**
+     * 三段式向量化（无方法级事务，消灭「嵌入外部 API 占住 DB 连接的分钟级长事务」）：
+     * <ol>
+     *   <li>事务 A：旧当前版本 DB 降级（segment 降 STORED + 版本降 CHUNKED），ES 清理在事务外；</li>
+     *   <li>无事务段：分页嵌入写 ES，每批用独立小事务批量回写 embeddingId/status，
+     *       批内 DB 回写失败按本批 embeddingIds 反向删 ES（消灭孤儿向量）；</li>
+     *   <li>事务 B：版本 + 主表状态推进 VECTOR_STORED。</li>
+     * </ol>
+     * 任一批失败版本停留 CHUNKED，补偿任务重扫时跳过已有 embeddingId 的分段（幂等）。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void activateVersion(KnowledgeBaseVersionEntity version) {
         // 幂等：已向量化直接返回
         if (version.getStatus() == DocumentStatus.VECTOR_STORED) {
@@ -180,40 +213,79 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         Long versionId = version.getVersionId();
         log.info("开始向量化版本: docId={}, versionId={}", docId, versionId);
 
-        // 切换/重新向量化前，先失效文档当前激活版本的 ES 向量（避免旧版本向量残留干扰检索）
         KnowledgeBaseEntity doc = Optional.ofNullable(knowledgeBaseEntityMapper.selectById(docId))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "知识库不存在: docId=" + docId));
+
+        // 事务 A：失效文档当前激活版本（DB 降级入事务，ES 清理在事务提交后执行）
         Long currentVersionId = doc.getCurrentVersionId();
         if (currentVersionId != null && !currentVersionId.equals(versionId)) {
-            versionService.getById(currentVersionId).ifPresent(this::deactivateVersionInternal);
+            KnowledgeBaseVersionEntity oldVersion = versionService.getById(currentVersionId).orElse(null);
+            if (oldVersion != null && oldVersion.getStatus() == DocumentStatus.VECTOR_STORED) {
+                transactionTemplate.executeWithoutResult(tx -> {
+                    segmentService.downgradeStatus(docId, currentVersionId,
+                        SegmentStatus.VECTOR_STORED, SegmentStatus.STORED);
+                    oldVersion.setStatus(DocumentStatus.CHUNKED);
+                    versionService.update(oldVersion);
+                });
+                // ES 删除失败抛异常阻断激活：目标版本停 CHUNKED，补偿任务下轮重试
+                vectorStoreService.removeByDocIdAndVersion(docId, currentVersionId);
+            }
         }
 
-        // 分页扫 STORED + skipEmbedding=0 + embeddingId IS NULL 的分段
-        List<KnowledgeBaseSegmentEntity> batch;
-        do {
-            batch = segmentService.listPendingEmbedding(
-                docId, versionId, SegmentStatus.STORED, EMBED_PAGE_SIZE);
-            if (batch.isEmpty()) {
-                break;
+        // 无事务段：分页扫 STORED + skipEmbedding=0 + embeddingId IS NULL 的分段，
+        // 嵌入（外部 API）+ ES 写入后，每批独立小事务一条 UPDATE 批量回写
+        long vectorizeStartNanos = System.nanoTime();
+        embeddingInflight.incrementAndGet();
+        try {
+            List<KnowledgeBaseSegmentEntity> batch;
+            do {
+                batch = segmentService.listPendingEmbedding(
+                    docId, versionId, SegmentStatus.STORED, EMBED_PAGE_SIZE);
+                if (batch.isEmpty()) {
+                    break;
+                }
+                List<String> embeddingIds = vectorStoreService.embedAndStore(batch);
+                for (int i = 0; i < batch.size(); i++) {
+                    KnowledgeBaseSegmentEntity seg = batch.get(i);
+                    seg.setEmbeddingId(embeddingIds.get(i));
+                    seg.setStatus(SegmentStatus.VECTOR_STORED);
+                }
+                try {
+                    segmentService.batchUpdateEmbedding(batch);
+                } catch (Exception e) {
+                    // N1：本批 DB 回写失败 → 反向删除本批 ES 向量，避免「ES 有、MySQL 无」孤儿
+                    log.error("分段 embeddingId 批量回写失败，反向清理本批 ES 向量: docId={}, versionId={}, batchSize={}",
+                        docId, versionId, batch.size(), e);
+                    try {
+                        vectorStoreService.removeByEmbeddingIds(embeddingIds);
+                    } catch (Exception cleanupEx) {
+                        log.error("反向清理本批 ES 向量失败，留待补偿任务对账兜底: docId={}, versionId={}",
+                            docId, versionId, cleanupEx);
+                    }
+                    if (e instanceof BusinessException be) {
+                        throw be;
+                    }
+                    throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                        "分段 embeddingId 回写失败: docId=" + docId, e);
+                }
+            } while (batch.size() == EMBED_PAGE_SIZE);
+        } finally {
+            embeddingInflight.decrementAndGet();
+            if (meterRegistry != null) {
+                meterRegistry.timer(METRIC_VECTORIZE_LATENCY)
+                    .record(System.nanoTime() - vectorizeStartNanos, TimeUnit.NANOSECONDS);
             }
-            List<String> embeddingIds = vectorStoreService.embedAndStore(batch);
-            for (int i = 0; i < batch.size(); i++) {
-                KnowledgeBaseSegmentEntity seg = batch.get(i);
-                seg.setEmbeddingId(embeddingIds.get(i));
-                seg.setStatus(SegmentStatus.VECTOR_STORED);
-                segmentService.update(seg);
-            }
-        } while (batch.size() == EMBED_PAGE_SIZE);
+        }
 
-        // 版本升 VECTOR_STORED
-        version.setStatus(DocumentStatus.VECTOR_STORED);
-        versionService.update(version);
-
-        // 同步文档主表
-        doc.setDocStatus(DocumentStatus.VECTOR_STORED);
-        doc.setCurrentVersionId(versionId);
-        MapperUtils.save(knowledgeBaseEntityMapper, doc);
+        // 事务 B：版本 + 主表状态推进 VECTOR_STORED
+        transactionTemplate.executeWithoutResult(tx -> {
+            version.setStatus(DocumentStatus.VECTOR_STORED);
+            versionService.update(version);
+            doc.setDocStatus(DocumentStatus.VECTOR_STORED);
+            doc.setCurrentVersionId(versionId);
+            MapperUtils.save(knowledgeBaseEntityMapper, doc);
+        });
         log.info("版本向量化完成: docId={}, versionId={}", docId, versionId);
         syncKnowledgeGraphIfEnabled(doc, versionId);
     }
@@ -304,5 +376,53 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             return true;
         }
         return current.ordinal() < target.ordinal();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void switchActiveVersion(Long docId, Long targetVersionId) {
+        KnowledgeBaseEntity doc = Optional.ofNullable(knowledgeBaseEntityMapper.selectById(docId))
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: docId=" + docId));
+        KnowledgeBaseVersionEntity target = versionService.getById(targetVersionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
+                "版本记录不存在: versionId=" + targetVersionId));
+        if (target.getStatus() != DocumentStatus.VECTOR_STORED) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "目标版本未向量化，无法热切换，当前状态: " + target.getStatus());
+        }
+
+        // 旧版本 DB 降级与主表指针更新在同一事务内，保证切换原子性
+        Long oldVersionId = doc.getCurrentVersionId();
+        if (oldVersionId != null && !oldVersionId.equals(targetVersionId)) {
+            versionService.getById(oldVersionId)
+                .filter(old -> old.getStatus() == DocumentStatus.VECTOR_STORED)
+                .ifPresent(old -> {
+                    segmentService.downgradeStatus(docId, oldVersionId,
+                        SegmentStatus.VECTOR_STORED, SegmentStatus.STORED);
+                    old.setStatus(DocumentStatus.CHUNKED);
+                    versionService.update(old);
+                    // ES 清理是外部 IO，注册到事务提交后执行；失败留给向量对账任务兜底
+                    scheduleVectorCleanupAfterCommit(docId, oldVersionId);
+                });
+        }
+        doc.setCurrentVersionId(targetVersionId);
+        doc.setDocStatus(DocumentStatus.VECTOR_STORED);
+        MapperUtils.save(knowledgeBaseEntityMapper, doc);
+        log.info("热切换激活版本完成: docId={}, oldVersionId={}, targetVersionId={}",
+            docId, oldVersionId, targetVersionId);
+    }
+
+    private void scheduleVectorCleanupAfterCommit(Long docId, Long versionId) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    vectorStoreService.removeByDocIdAndVersion(docId, versionId);
+                } catch (Exception e) {
+                    log.warn("切换版本后清理旧版本ES向量失败（DB已切换），留待向量对账兜底: docId={}, versionId={}",
+                        docId, versionId, e);
+                }
+            }
+        });
     }
 }

@@ -1,4 +1,4 @@
--- AI Interview Platform MySQL Schema (converted from Flyway V1-V10, aligned with know-engine)
+-- AI Interview Platform MySQL Schema (converted from Flyway V1-V10, aligned with industry practice)
 -- Charset: utf8mb4
 
 SET NAMES utf8mb4;
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `display_name`, `role`, `enabled`, `created_at`)
-VALUES (1, 'admin', 'admin@interview-guide.local',
+VALUES (1, 'admin', 'admin@ai-interview.local',
         '$2a$10$ITjz94ki.PdJE90jdYJMrOkwaopW3yLJy73ZbFUkJvGg4.kLjosC.',
         'Default Admin', 'ADMIN', 1, CURRENT_TIMESTAMP(6))
 ON DUPLICATE KEY UPDATE `id` = `id`;
@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS `knowledge_bases` (
     `data_table_name`      VARCHAR(80)  NULL,
     `data_schema_json`     TEXT         NULL,
     `data_row_count`       INT          NULL,
+    `knowledge_base_type`  VARCHAR(32)  NULL DEFAULT 'DOCUMENT_SEARCH',
+    `accessible_by`        VARCHAR(32)  NULL DEFAULT 'PRIVATE',
+    `expire_date`          DATE         NULL,
+    `lock_version`         INT          NOT NULL DEFAULT 0,
+    `deleted`              TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_kb_user_hash` (`user_id`, `file_hash`),
     KEY `idx_kb_category` (`category`),
@@ -105,13 +110,15 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
     `version`            VARCHAR(32)  NOT NULL,
     `doc_url`            VARCHAR(1000) NULL,
     `converted_doc_url`  VARCHAR(1000) NULL,
-    `converted_content`  TEXT         NULL,
+    `converted_content`  LONGTEXT     NULL,
     `content_hash`       VARCHAR(64)  NULL,
     `status`             VARCHAR(20)  NULL,
     `upload_user`        VARCHAR(64)  NULL,
     `changelog`          VARCHAR(500) NULL,
     `created_at`         DATETIME(6)  NOT NULL,
     `updated_at`         DATETIME(6)  NULL,
+    `lock_version`       INT          NOT NULL DEFAULT 0,
+    `deleted`            TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (`version_id`),
     UNIQUE KEY `uk_kbv_doc_version` (`doc_id`, `version`),
     KEY `idx_kbv_doc_id` (`doc_id`),
@@ -134,6 +141,8 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_segment` (
     `skip_embedding`      INT          NULL DEFAULT 0,
     `created_at`          DATETIME(6)  NOT NULL,
     `updated_at`          DATETIME(6)  NULL,
+    `lock_version`        INT          NOT NULL DEFAULT 0,
+    `deleted`             TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     KEY `idx_kbs_doc_version` (`document_id`, `document_version`),
     KEY `idx_kbs_status` (`status`),
@@ -231,6 +240,9 @@ CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     `rewritten_question`      TEXT         NULL,
     `route_strategy`          VARCHAR(40)  NULL,
     `route_reasoning`         VARCHAR(500) NULL,
+    `decomposed_queries_json` TEXT         NULL,
+    `crag_grade`              VARCHAR(20)  NULL,
+    `crag_action`             VARCHAR(200) NULL,
     `knowledge_base_ids_json` TEXT         NULL,
     `retrieved_json`          TEXT         NULL,
     `reranked_json`           TEXT         NULL,
@@ -268,6 +280,7 @@ CREATE TABLE IF NOT EXISTS `interview_sessions` (
     `evaluate_error`           VARCHAR(500) NULL,
     `llm_provider`             VARCHAR(50)  NULL,
     `knowledge_base_ids_json`  TEXT         NULL,
+    `interview_plan_json`      TEXT         NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_interview_session_id` (`session_id`),
     KEY `idx_interview_session_resume_created` (`resume_id`, `created_at`),
@@ -299,6 +312,38 @@ CREATE TABLE IF NOT EXISTS `interview_answers` (
     CONSTRAINT `fk_interview_answers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Multi-Agent 编排轨迹（Planner/Interviewer/Critic/Evaluator 决策步骤，按会话回放）
+CREATE TABLE IF NOT EXISTS `agent_run_steps` (
+    `id`              BIGINT        NOT NULL AUTO_INCREMENT,
+    `user_id`         BIGINT        NOT NULL DEFAULT 1,
+    `session_id`      VARCHAR(36)   NOT NULL,
+    `question_index`  INT           NULL,
+    `role`            VARCHAR(20)   NOT NULL,
+    `step_order`      INT           NOT NULL DEFAULT 0,
+    `action`          VARCHAR(64)   NOT NULL,
+    `action_input`    TEXT          NULL,
+    `observation`     TEXT          NULL,
+    `created_at`      DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_agent_run_steps_session` (`session_id`, `id`),
+    KEY `idx_agent_run_steps_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 跨会话候选人画像记忆（评估完成后 LLM 抽取的 strength/weakness 条目）
+CREATE TABLE IF NOT EXISTS `candidate_memory` (
+    `id`          BIGINT        NOT NULL AUTO_INCREMENT,
+    `user_id`     BIGINT        NOT NULL,
+    `skill_id`    VARCHAR(64)   NULL,
+    `topic`       VARCHAR(128)  NOT NULL,
+    `kind`        VARCHAR(16)   NOT NULL,
+    `evidence`    VARCHAR(500)  NULL,
+    `session_id`  VARCHAR(36)   NULL,
+    `created_at`  DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_candidate_memory_user_skill` (`user_id`, `skill_id`, `created_at` DESC),
+    KEY `idx_candidate_memory_user_topic` (`user_id`, `topic`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `interview_schedule` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`         BIGINT       NOT NULL DEFAULT 1,
@@ -315,6 +360,7 @@ CREATE TABLE IF NOT EXISTS `interview_schedule` (
     `updated_at`      DATETIME(6)  NULL,
     PRIMARY KEY (`id`),
     KEY `idx_interview_schedule_user_id` (`user_id`),
+    KEY `idx_interview_schedule_time_status` (`interview_time`, `status`),
     CONSTRAINT `fk_interview_schedule_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -406,31 +452,3 @@ CREATE TABLE IF NOT EXISTS `llm_global_setting` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==================== Agentic 评估（V1 baseline，无 Entity） ====================
-CREATE TABLE IF NOT EXISTS `agentic_interview_runs` (
-    `id`                          BIGINT       NOT NULL AUTO_INCREMENT,
-    `user_id`                     BIGINT       NOT NULL DEFAULT 1,
-    `run_id`                      VARCHAR(80)  NOT NULL,
-    `target_role`                 VARCHAR(100) NOT NULL,
-    `framework`                   VARCHAR(40)  NULL,
-    `framework_version`           VARCHAR(40)  NULL,
-    `pressure_level`              VARCHAR(30)  NULL,
-    `resume_id`                   BIGINT       NULL,
-    `knowledge_base_ids_json`     TEXT         NULL,
-    `question_count`              INT          NULL,
-    `agent_count`                 INT          NULL,
-    `tool_call_count`             INT          NULL,
-    `successful_tool_call_count`  INT          NULL,
-    `source_count`                INT          NULL,
-    `candidate_answer`            TEXT         NULL,
-    `review_summary`              TEXT         NULL,
-    `request_json`                TEXT         NULL,
-    `response_json`                 TEXT         NULL,
-    `total_duration_ms`           BIGINT       NULL,
-    `created_at`                  DATETIME(6)  NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_agentic_run_id` (`run_id`),
-    KEY `idx_agentic_run_created` (`created_at`),
-    KEY `idx_agentic_run_target_role_created` (`target_role`, `created_at`),
-    KEY `idx_agentic_interview_runs_user_id` (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

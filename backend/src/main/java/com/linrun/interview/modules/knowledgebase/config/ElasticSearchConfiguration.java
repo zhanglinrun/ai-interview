@@ -11,12 +11,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Elasticsearch 向量库配置（对齐 know-engine ElasticSearchConfiguration）。
+ * Elasticsearch 向量库配置（对齐业界实践 ElasticSearchConfiguration）。
  *
  * <p>提供 {@link RestClient} 和 {@link ElasticsearchEmbeddingStore} 两个 bean，
  * 替代 Spring AI 的 PgVectorStore。embedding model 不在此重复创建——本项目通过
  * {@link com.linrun.interview.common.ai.LlmProviderRegistry#getDefaultEmbeddingModel()}
- * 统一获取 LC4j {@code EmbeddingModel}，支持多 Provider 路由，比 know-engine
+ * 统一获取 LC4j {@code EmbeddingModel}，支持多 Provider 路由，比 业界实现
  * 单 Provider 直 new 的方式更灵活。
  */
 @Configuration

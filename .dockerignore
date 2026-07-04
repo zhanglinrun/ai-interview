@@ -3,12 +3,20 @@
 .gitignore
 .gitattributes
 
+# Local agent / IDE state
+.codegraph/
+.codex/
+.cursor/
+.playwright-mcp/
+.trellis/
+
 # Maven / Java
 **/target/
 .mvn/
 *.class
 
 # Node.js / frontend
+/frontend/
 **/node_modules/
 **/dist/
 **/.pnpm-store/
@@ -38,6 +46,13 @@ tmp/
 temp/
 test-output.txt
 
+# Evaluation and local generated artifacts are not needed for backend images
+/eval/
+/backend/src/test/
+/backend/cp.txt
+/compile-log.txt
+/rageval-run*.log
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -47,11 +62,12 @@ Thumbs.db
 **/.nyc_output/
 **/test-results/
 
-# Documentation is not needed in the backend image
-docs/
-study/
-*.md
-!README.md
+# Documentation is not needed in the backend image. Do not exclude backend
+# resource markdown files such as runtime skill definitions.
+/docs/
+/study/
+/*.md
+!/README.md
 
 # Docker compose files are not needed inside the image
 docker-compose*.yml

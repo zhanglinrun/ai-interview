@@ -5,8 +5,8 @@
 # 默认不随普通 mvn test 运行。
 #
 # 运行前提：
-#   1. docker compose -f docker-compose.dev.yml up -d 起好 ES / mysql / redis / minio
-#   2. 评测语料已入库（见 rag-eval/README.md），知识库 id 通过 ragdataset.kb-* 配置传入
+#   1. cd dev-ops && docker compose -f docker-compose-environment.yml up -d
+#   2. 评测语料已入库（见 eval/rag-retrieval/README.md），知识库 id 通过 ragdataset.kb-* 配置传入
 #   3. .env 里 AI_BAILIAN_API_KEY 就绪（embedding 与 rerank 都要用）
 
 spring:
@@ -17,9 +17,9 @@ spring:
 
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:interview_guide}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: ${MYSQL_USER:interview_guide}
-    password: ${MYSQL_PASSWORD:interview_guide}
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:ai_interview}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:ai_interview}
+    password: ${MYSQL_PASSWORD:ai_interview}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   redis:
@@ -35,7 +35,7 @@ mybatis-plus:
 
 elasticsearch:
   host: ${ES_HOST:http://localhost:9200}
-  index-name: interview-guide-vector
+  index-name: ai-interview-vector
   dimensions: 1536
 
 # 评测必须保证三档策略真正生效、互相可区分，所以这里显式打开混合检索与重排开关，
@@ -57,15 +57,17 @@ app:
         top-n: 20
 
 # 评测数据集配置：语料知识库 id + 评测集路径
-# kb-* 的值来自入库后生成的知识库 id（见 rag-eval/README.md）
+# kb-* 的值来自入库后生成的知识库 id（见 eval/rag-retrieval/README.md）
 ragdataset:
   dataset-path: classpath:rag-eval/eval-dataset.yaml
-  kb-redis: ${RAGEVAL_KB_REDIS:41}
-  kb-mysql: ${RAGEVAL_KB_MYSQL:42}
-  kb-distributed: ${RAGEVAL_KB_DISTRIBUTED:40}
+  kb-redis: ${RAGEVAL_KB_REDIS:0}
+  kb-mysql: ${RAGEVAL_KB_MYSQL:0}
+  kb-distributed: ${RAGEVAL_KB_DISTRIBUTED:0}
+  kb-jvm: ${RAGEVAL_KB_JVM:0}
+  kb-spring: ${RAGEVAL_KB_SPRING:0}
   # 评分用 topK（截断到前 evalTopK 个算 Hit/MRR/NDCG）
   top-k: ${RAGEVAL_TOPK:6}
   # 候选 topK（向量/混合先取这么多候选，rerank 从中精排）
   candidate-top-k: ${RAGEVAL_CANDIDATE_TOPK:20}
   # 输出报告路径
-  report-path: ${RAGEVAL_REPORT_PATH:target/rag-eval-report.md}
+  report-path: ${RAGEVAL_REPORT_PATH:eval/.work/rag-retrieval-report.md}

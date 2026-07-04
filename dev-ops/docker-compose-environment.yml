@@ -1,0 +1,158 @@
+# 本地开发依赖服务（对齐 agent-group docs/dev-ops 约定）
+# 用法：
+#   cd dev-ops
+#   docker compose -f docker-compose-environment.yml up -d
+# 或在项目根目录：
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# 宿主机端口刻意避开 agent-group（13306/16379/19200/9000/18081 等）及常见默认端口。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: interview-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview}
+      MYSQL_USER: ${MYSQL_USER:-ai_interview}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "${MYSQL_HOST_PORT:-33306}:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: interview-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j666}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    ports:
+      - "${NEO4J_HTTP_HOST_PORT:-27474}:7474"
+      - "${NEO4J_BOLT_HOST_PORT:-27687}:7687"
+    volumes:
+      - neo4j_data:/data
+      - ../backend/src/main/resources/neo4j:/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: interview-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "${ES_HOST_PORT:-29200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: interview-redis
+    ports:
+      - "${REDIS_HOST_PORT:-26379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: interview-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "${MINIO_API_HOST_PORT:-29000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-29001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ai-interview}
+    entrypoint: >
+      /bin/sh -c "
+      set -e
+      /usr/bin/mc alias set myminio http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY
+      /usr/bin/mc mb --ignore-existing myminio/$$MINIO_BUCKET
+      "
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.1
+    container_name: interview-rocketmq-namesrv
+    ports:
+      - "${ROCKETMQ_NAMESRV_HOST_PORT:-9876}:9876"
+    environment:
+      JAVA_OPT_EXT: "-server -Xms256m -Xmx256m -Xmn128m"
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.1
+    container_name: interview-rocketmq-broker
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    environment:
+      JAVA_OPT_EXT: "-server -Xms512m -Xmx512m -Xmn256m"
+    volumes:
+      - ./rocketmq/broker-dev.conf:/etc/rocketmq/broker.conf:ro
+      - rocketmq_broker_data:/home/rocketmq/store
+    command: sh mqbroker -n rocketmq-namesrv:9876 -c /etc/rocketmq/broker.conf
+
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: interview-rocketmq-dashboard
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "${ROCKETMQ_DASHBOARD_HOST_PORT:-29888}:8080"
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876"
+
+# 宿主机端口（与 .env.example 一致）：
+#   MySQL 33306 | Redis 26379 | ES 29200 | MinIO 29000/29001 | Neo4j 27474/27687
+#   RocketMQ namesrv 9876 | broker 10911/10909 | dashboard 29888
+
+volumes:
+  mysql_data:
+  neo4j_data:
+  elasticsearch_data:
+  redis_data:
+  minio_data:
+  rocketmq_broker_data:

@@ -9,7 +9,7 @@ import java.lang.annotation.Target;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 分布式锁注解（基于 Redisson RLock，对齐 know-engine @DistributeLock）。
+ * 分布式锁注解（基于 Redisson RLock，对齐业界实践 @DistributeLock）。
  *
  * <p>用于方法级别的分布式互斥控制，防止同一资源的并发写操作产生脏数据/重复向量化。
  * key 支持 SpEL 表达式读取方法参数（如 {@code key = "#docId"}），不填则按

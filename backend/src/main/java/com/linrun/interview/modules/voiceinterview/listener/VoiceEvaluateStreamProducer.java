@@ -1,9 +1,9 @@
 package com.linrun.interview.modules.voiceinterview.listener;
 
 import com.linrun.interview.common.async.AbstractStreamProducer;
+import com.linrun.interview.common.async.TaskQueueChannel;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
-import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.voiceinterview.service.VoiceInterviewService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -20,14 +20,14 @@ public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> 
 
     private final VoiceInterviewService voiceInterviewService;
 
-    public VoiceEvaluateStreamProducer(RedisService redisService,
+    public VoiceEvaluateStreamProducer(TaskQueueChannel taskQueueChannel,
                                        @Lazy VoiceInterviewService voiceInterviewService) {
-        super(redisService);
+        super(taskQueueChannel);
         this.voiceInterviewService = voiceInterviewService;
     }
 
     public void sendEvaluateTask(String sessionId) {
-        sendTask(sessionId);
+        sendTaskInTransaction(sessionId);
     }
 
     @Override
@@ -55,7 +55,9 @@ public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> 
 
     @Override
     protected void onSendFailed(String sessionId, String error) {
+        // 入队失败标记 PENDING（非 FAILED）：与文字面试侧一致，
+        // 由 cleanupStaleSessions 的补偿扫描（COMPLETED + PENDING 超时）重派
         voiceInterviewService.updateEvaluateStatus(
-                Long.parseLong(sessionId), AsyncTaskStatus.FAILED, truncateError(error));
+                Long.parseLong(sessionId), AsyncTaskStatus.PENDING, truncateError(error));
     }
 }

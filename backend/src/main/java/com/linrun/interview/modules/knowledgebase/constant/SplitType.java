@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 文档切块策略（对齐 know-engine {@code SplitType}，额外保留 BROTHER 作为本项目默认）。
+ * 文档切块策略（对齐业界实践 {@code SplitType}，额外保留 BROTHER 作为本项目默认）。
  */
 public enum SplitType {
 

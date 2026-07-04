@@ -6,6 +6,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.StreamMessageId;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -24,6 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public abstract class AbstractStreamConsumer<T> {
 
     private final RedisService redisService;
+    // 字段注入而非构造注入：避免改动全部子类构造签名（子类仅 super(redisService)）。
+    // 决定本消费者是否启动 Redis Stream 轮询——engine=rocketmq 时轮询交给 @RocketMQMessageListener。
+    @Autowired
+    private AsyncEngineProperties asyncEngineProperties;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ExecutorService executorService;
     private ExecutorService workerPool;
@@ -45,6 +50,13 @@ public abstract class AbstractStreamConsumer<T> {
 
     @PostConstruct
     public void init() {
+        // engine=rocketmq：本消费者不启动 Redis Stream 轮询，任务由对应的
+        // @RocketMQMessageListener 拉取后回调 consumeFromBroker(...) 复用同一套业务/幂等逻辑。
+        if (asyncEngineProperties != null && asyncEngineProperties.isRocketMq()) {
+            log.info("{} consumer: app.async.engine=rocketmq，跳过 Redis Stream 轮询（由 RocketMQ 监听器驱动）",
+                taskDisplayName());
+            return;
+        }
         this.consumerName = consumerPrefix() + UUID.randomUUID().toString().substring(0, 8);
         this.executorService = new ThreadPoolExecutor(
             1,
@@ -265,6 +277,55 @@ public abstract class AbstractStreamConsumer<T> {
                 sendToDlq(payload, taskId, error);
             }
             ackMessage(messageId);
+        }
+    }
+
+    /**
+     * RocketMQ 引擎消费入口：broker 负责投递、重试与死信路由（%DLQ%group），
+     * 这里只保留「幂等去重 + 业务处理」，与 Redis Stream 路径共用同一套
+     * {@code parsePayload / markProcessing / processBusiness / markCompleted / markFailed}。
+     *
+     * <p>处理失败时抛出异常触发 broker 重试；达到 {@code maxReconsumeTimes}（配置为
+     * {@link AsyncTaskStreamConstants#MAX_RETRY_COUNT}）后 broker 自动把消息路由到死信 topic。
+     *
+     * @param data           消息字段（与 Redis Stream 消息结构一致，含 taskId）
+     * @param reconsumeTimes broker 已重试次数（0 表示首次投递）
+     */
+    public void consumeFromBroker(Map<String, String> data, int reconsumeTimes) {
+        T payload = parsePayload(null, data);
+        if (payload == null) {
+            // 消息格式错误：视为消费成功丢弃，避免无限重试脏消息
+            return;
+        }
+        String taskId = data.get(AsyncTaskStreamConstants.FIELD_TASK_ID);
+        String dedupKey = dedupKey(taskId);
+        if (dedupKey != null
+            && AsyncTaskStreamConstants.DEDUP_STATE_DONE.equals(redisService.getIdempotencyState(dedupKey))) {
+            log.info("{} task 已完成，跳过重复执行(broker): {}, taskId={}",
+                taskDisplayName(), payloadIdentifier(payload), taskId);
+            return;
+        }
+        log.info("Processing {} task(broker): payload={}, reconsumeTimes={}, taskId={}",
+            taskDisplayName(), payloadIdentifier(payload), reconsumeTimes, taskId);
+        try {
+            markProcessing(payload);
+            processBusiness(payload);
+            markCompleted(payload);
+            if (dedupKey != null) {
+                redisService.markIdempotencyDone(
+                    dedupKey, Duration.ofMillis(AsyncTaskStreamConstants.DEDUP_DONE_TTL_MS));
+            }
+            log.info("{} task completed(broker): {}", taskDisplayName(), payloadIdentifier(payload));
+        } catch (Exception e) {
+            log.error("{} task failed(broker): {}, reconsumeTimes={}",
+                taskDisplayName(), payloadIdentifier(payload), reconsumeTimes, e);
+            // 达到 broker 重试上限：标记 FAILED（此后进入 %DLQ% 死信 topic，由告警消费者兜底）
+            if (reconsumeTimes >= AsyncTaskStreamConstants.MAX_RETRY_COUNT) {
+                markFailed(payload, truncateError(taskDisplayName()
+                    + " failed after broker retry " + reconsumeTimes + ": " + e.getMessage()));
+            }
+            // 抛出触发 broker 重试 / 死信路由
+            throw new IllegalStateException(taskDisplayName() + " 消费失败，触发 RocketMQ 重试", e);
         }
     }
 

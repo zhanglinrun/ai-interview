@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,7 +37,14 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
     if (segments == null || segments.isEmpty()) {
       return List.of();
     }
+    LocalDateTime now = LocalDateTime.now();
     for (KnowledgeBaseSegmentEntity segment : segments) {
+      if (segment.getCreatedAt() == null) {
+        segment.setCreatedAt(now);
+      }
+      if (segment.getUpdatedAt() == null) {
+        segment.setUpdatedAt(now);
+      }
       MapperUtils.save(segmentMapper, segment);
     }
     log.info("批量保存分段完成: count={}", segments.size());
@@ -93,6 +101,26 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
   @Transactional
   public void update(KnowledgeBaseSegmentEntity segment) {
     MapperUtils.save(segmentMapper, segment);
+  }
+
+  @Override
+  @Transactional
+  public int batchUpdateEmbedding(List<KnowledgeBaseSegmentEntity> segments) {
+    if (segments == null || segments.isEmpty()) {
+      return 0;
+    }
+    int affected = segmentMapper.batchUpdateEmbedding(segments, SegmentStatus.VECTOR_STORED.name());
+    log.info("批量回写分段 embeddingId 完成: count={}, affected={}", segments.size(), affected);
+    return affected;
+  }
+
+  @Override
+  public long countWithEmbedding(Long docId, Long versionId) {
+    return segmentMapper.selectCount(
+      Wrappers.<KnowledgeBaseSegmentEntity>lambdaQuery()
+        .eq(KnowledgeBaseSegmentEntity::getDocumentId, docId)
+        .eq(KnowledgeBaseSegmentEntity::getDocumentVersion, versionId)
+        .isNotNull(KnowledgeBaseSegmentEntity::getEmbeddingId));
   }
 
   @Override

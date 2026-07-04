@@ -11,6 +11,9 @@ public class RagQueryTrace {
     private String rewrittenQuestion;
     private String routeStrategy;
     private String routeReasoning;
+    private final List<String> decomposedQueries = new ArrayList<>();
+    private String cragGrade;
+    private String cragAction;
     private final List<TraceContent> retrieved = new ArrayList<>();
     private final List<TraceContent> reranked = new ArrayList<>();
 
@@ -20,6 +23,31 @@ public class RagQueryTrace {
 
     public void rewrittenQuestion(String rewrittenQuestion) {
         this.rewrittenQuestion = rewrittenQuestion;
+    }
+
+    public List<String> decomposedQueries() {
+        return List.copyOf(decomposedQueries);
+    }
+
+    public void decomposedQueries(List<String> queries) {
+        this.decomposedQueries.clear();
+        if (queries != null) {
+            this.decomposedQueries.addAll(queries);
+        }
+    }
+
+    public String cragGrade() {
+        return cragGrade;
+    }
+
+    public String cragAction() {
+        return cragAction;
+    }
+
+    /** 记录 CRAG 打分与纠正动作（none / rewrite_retry / fallback_no_evidence）。 */
+    public void crag(String grade, String action) {
+        this.cragGrade = grade;
+        this.cragAction = action;
     }
 
     public String routeStrategy() {

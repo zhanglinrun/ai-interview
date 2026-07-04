@@ -15,6 +15,7 @@ import {
   VoiceInterviewWebSocket,
 } from '../api/voiceInterview';
 import { getErrorMessage } from '../api/request';
+import { getAccessToken } from '../api/authStorage';
 
 type VoiceConfig = {
   skillId: string;
@@ -27,9 +28,18 @@ type VoiceConfig = {
   llmProvider?: string;
 };
 
+// 浏览器 WebSocket 无法自定义请求头，JWT 通过 ?token= 查询参数传给握手拦截器
+const appendAuthToken = (url: string) => {
+  const token = getAccessToken();
+  if (!token) {
+    return url;
+  }
+  return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+};
+
 const buildSameOriginWebSocketUrl = (sessionId: number) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws/voice-interview/${sessionId}`;
+  return appendAuthToken(`${protocol}//${window.location.host}/ws/voice-interview/${sessionId}`);
 };
 
 const normalizeVoiceWebSocketUrl = (url: string | undefined, sessionId: number) => {
@@ -37,11 +47,18 @@ const normalizeVoiceWebSocketUrl = (url: string | undefined, sessionId: number) 
     return buildSameOriginWebSocketUrl(sessionId);
   }
 
+  // 后端默认返回相对路径（/ws/voice-interview/{id}），按当前页面 origin 拼接
+  if (url.startsWith('/')) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return appendAuthToken(`${protocol}//${window.location.host}${url}`);
+  }
+
   try {
     const parsed = new URL(url);
-    parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    parsed.host = window.location.host;
-    return parsed.toString();
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    }
+    return appendAuthToken(parsed.toString());
   } catch {
     return buildSameOriginWebSocketUrl(sessionId);
   }

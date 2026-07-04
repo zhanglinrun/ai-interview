@@ -15,6 +15,7 @@ interface InterviewChatPanelProps {
   onSubmit: () => void;
   isSubmitting: boolean;
   onShowCompleteConfirm: (show: boolean) => void;
+  draftSaved?: boolean;
 }
 
 /**
@@ -28,7 +29,8 @@ export default function InterviewChatPanel({
   onAnswerChange,
   onSubmit,
   isSubmitting,
-  onShowCompleteConfirm
+  onShowCompleteConfirm,
+  draftSaved,
 }: InterviewChatPanelProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -88,6 +90,9 @@ export default function InterviewChatPanel({
 
         {/* 输入区域 */}
             <div className="border-t border-slate-200 dark:border-slate-600 p-4 bg-slate-50 dark:bg-slate-700/50">
+          {draftSaved && (
+            <p className="text-xs text-slate-400 mb-2">答案已暂存</p>
+          )}
           <div className="flex gap-3">
             <textarea
               value={answer}

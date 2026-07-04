@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.Version;
 
 /**
- * 知识库等实体的审计与并发控制基类（对齐 know-engine BaseEntity）。
+ * 知识库等实体的审计与并发控制基类（对齐业界实践 BaseEntity）。
  */
 public abstract class BaseEntity {
 

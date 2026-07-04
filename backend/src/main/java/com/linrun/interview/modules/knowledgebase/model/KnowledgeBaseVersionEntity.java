@@ -11,7 +11,7 @@ import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import java.time.LocalDateTime;
 
 /**
- * 知识库文档版本实体（对齐 know-engine KnowledgeDocumentVersion）。
+ * 知识库文档版本实体（对齐业界实践 KnowledgeDocumentVersion）。
  *
  * <p>与 {@link KnowledgeBaseEntity} 一对多：一个知识库可有多个版本，每个版本独立存储原始文件 URL、
  * 转换后 Markdown 文本内容、内容哈希与状态。{@link KnowledgeBaseEntity#getCurrentVersionId()} 指向当前激活版本。

@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {motion} from 'framer-motion';
 import {interviewApi} from '../api/interview';
 import {getErrorMessage} from '../api/request';
+import AgentInsightPanel from '../components/AgentInsightPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InterviewChatPanel from '../components/InterviewChatPanel';
 import InterviewPageHeader from '../components/InterviewPageHeader';
@@ -45,7 +46,10 @@ export default function Interview({
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [insightRefresh, setInsightRefresh] = useState(0);
+  const [draftSaved, setDraftSaved] = useState(false);
   const startedRef = useRef(false);
+  const saveTimerRef = useRef<number>();
 
   const questionCount = initialConfig?.questionCount ?? 8;
   const llmProvider = initialConfig?.llmProvider ?? '';
@@ -155,6 +159,27 @@ export default function Interview({
     }
   }, [resumeExistingSession, sessionIdToResume, startInterview]);
 
+  // 答案暂存（debounce）
+  useEffect(() => {
+    if (!session || !currentQuestion || !answer.trim()) {
+      return;
+    }
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(async () => {
+      try {
+        await interviewApi.saveAnswer({
+          sessionId: session.sessionId,
+          questionIndex: currentQuestion.questionIndex,
+          answer: answer.trim(),
+        });
+        setDraftSaved(true);
+      } catch {
+        // 暂存失败静默，不打扰答题
+      }
+    }, 1500);
+    return () => window.clearTimeout(saveTimerRef.current);
+  }, [answer, currentQuestion, session]);
+
   const handleSubmitAnswer = async () => {
     if (!answer.trim() || !session || !currentQuestion) return;
 
@@ -174,6 +199,7 @@ export default function Interview({
       });
 
       setAnswer('');
+      setInsightRefresh(n => n + 1);
 
       const nextQuestion = response.nextQuestion;
       if (response.hasNextQuestion && nextQuestion) {
@@ -266,16 +292,26 @@ export default function Interview({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3 }}
+        className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"
       >
         <InterviewChatPanel
           session={session}
           currentQuestion={currentQuestion}
           messages={messages}
           answer={answer}
-          onAnswerChange={setAnswer}
+          onAnswerChange={(value) => {
+            setAnswer(value);
+            setDraftSaved(false);
+          }}
           onSubmit={handleSubmitAnswer}
           isSubmitting={isSubmitting}
           onShowCompleteConfirm={setShowCompleteConfirm}
+          draftSaved={draftSaved}
+        />
+        <AgentInsightPanel
+          sessionId={session.sessionId}
+          refreshKey={insightRefresh}
+          className="max-h-[calc(100vh-180px)] xl:sticky xl:top-24"
         />
       </motion.div>
 

@@ -9,6 +9,7 @@ import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
 import com.linrun.interview.modules.llmprovider.model.LlmGlobalSettingEntity;
 import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
 import jakarta.annotation.PostConstruct;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,7 @@ public class LlmProviderBootstrapService {
       boolean supportsEmbedding = Boolean.TRUE.equals(config.getSupportsEmbedding())
           || !isBlank(config.getEmbeddingModel());
 
+      LocalDateTime now = LocalDateTime.now();
       LlmProviderEntity entity = LlmProviderEntity.builder()
           .id(id)
           .baseUrl(config.getBaseUrl())
@@ -64,6 +66,8 @@ public class LlmProviderBootstrapService {
           .temperature(config.getTemperature())
           .enabled(true)
           .builtin(true)
+          .createdAt(now)
+          .updatedAt(now)
           .build();
       providerMapper.insert(entity);
     });
@@ -83,10 +87,13 @@ public class LlmProviderBootstrapService {
         : defaultChatProvider;
     String defaultEmbeddingProvider = resolveExistingEmbeddingProvider(configuredEmbeddingProvider, defaultChatProvider);
 
+    LocalDateTime now = LocalDateTime.now();
     MapperUtils.save(globalSettingMapper, LlmGlobalSettingEntity.builder()
         .id(LlmGlobalSettingEntity.SINGLETON_ID)
         .defaultChatProviderId(defaultChatProvider)
         .defaultEmbeddingProviderId(defaultEmbeddingProvider)
+        .createdAt(now)
+        .updatedAt(now)
         .build());
     log.info("Initialized LLM global setting: chatProvider={}, embeddingProvider={}",
         defaultChatProvider, defaultEmbeddingProvider);

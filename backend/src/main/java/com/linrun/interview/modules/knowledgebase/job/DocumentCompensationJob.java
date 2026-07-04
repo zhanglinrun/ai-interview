@@ -1,6 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.job;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
@@ -9,20 +10,19 @@ import com.linrun.interview.modules.knowledgebase.service.DocumentCleanupService
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentVersionService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
+import com.linrun.interview.modules.knowledgebase.service.VectorStoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.xxl.job.core.handler.annotation.XxlJob;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import com.xxl.job.core.executor.impl.XxlJobSpringExecutor;
 
 import java.util.List;
 
 /**
- * 文档处理补偿任务（对齐 know-engine DocumentCompensationJob）。
+ * 文档处理补偿任务（对齐业界实践 DocumentCompensationJob）。
  *
- * <p>XX,配置 XXL-Job Admin 时用 {@link Scheduled} 兜底；配置后由 XXL 调度，避免重复执行。
+ * <p>{@link Scheduled} 调度 + {@link DistributeLock}（waitTime=0）防多实例重复执行：
+ * 同一时刻只有一个实例真正跑补偿，其余实例拿不到锁直接跳过本轮。
  */
 @Slf4j
 @Component
@@ -34,24 +34,17 @@ public class DocumentCompensationJob {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
     private final DocumentCleanupService documentCleanupService;
+    private final VectorStoreService vectorStoreService;
 
     /**
      * 向量化补偿任务：扫描 CHUNKED 状态的当前版本，重新触发向量化。
      * 每 5 分钟执行一次。事件监听器失败时，版本会停在 CHUNKED，由本任务兜底重试。
      */
-    @XxlJob("documentEmbeddingCompensation")
-    public void documentEmbeddingCompensationJob() {
-        runEmbeddingCompensation();
-    }
-
     @Scheduled(fixedDelayString = "${app.knowledgebase.compensation.embedding-delay-ms:300000}",
         initialDelayString = "${app.knowledgebase.compensation.embedding-initial-delay-ms:60000}")
-    @ConditionalOnMissingBean(XxlJobSpringExecutor.class)
-    public void documentEmbeddingCompensationScheduled() {
-        runEmbeddingCompensation();
-    }
-
-    private void runEmbeddingCompensation() {
+    @DistributeLock(key = "'kb:compensation:embedding'", waitTime = 0, leaseTime = 600,
+        message = "向量化补偿任务已在其他实例执行")
+    public void runEmbeddingCompensation() {
         log.info("========== 开始执行向量化补偿任务 ==========");
         int successCount = 0;
         int failCount = 0;
@@ -73,6 +66,11 @@ public class DocumentCompensationJob {
                     continue;
                 }
                 try {
+                    // N1 对账：分段全部没有 embeddingId 却可能有 ES 残留向量（批次回写失败 +
+                    // 反向清理也失败的场景）→ 先按 docId+versionId 清一遍 ES（幂等），再重新向量化
+                    if (segmentService.countWithEmbedding(docId, versionId) == 0) {
+                        vectorStoreService.removeByDocIdAndVersion(docId, versionId);
+                    }
                     knowledgeDocumentService.activateVersion(version);
                     log.info("向量化补偿成功: docId={}, versionId={}", docId, versionId);
                     successCount++;
@@ -91,19 +89,11 @@ public class DocumentCompensationJob {
      * 旧版本清理补偿任务：扫描 VECTOR_STORED + 有残留旧版本 segment 的文档，清理旧版本数据。
      * 每 30 分钟执行一次。版本切换/上传新版本后旧版本残留数据由本任务清理。
      */
-    @XxlJob("retryFailedCleanups")
-    public void retryFailedCleanupsJob() {
-        runFailedCleanups();
-    }
-
     @Scheduled(fixedDelayString = "${app.knowledgebase.compensation.cleanup-delay-ms:1800000}",
         initialDelayString = "${app.knowledgebase.compensation.cleanup-initial-delay-ms:120000}")
-    @ConditionalOnMissingBean(XxlJobSpringExecutor.class)
-    public void retryFailedCleanupsScheduled() {
-        runFailedCleanups();
-    }
-
-    private void runFailedCleanups() {
+    @DistributeLock(key = "'kb:compensation:cleanup'", waitTime = 0, leaseTime = 600,
+        message = "旧版本清理补偿任务已在其他实例执行")
+    public void runFailedCleanups() {
         log.info("========== 开始执行旧版本清理补偿任务 ==========");
         try {
             List<KnowledgeBaseEntity> docs = knowledgeBaseEntityMapper.selectList(

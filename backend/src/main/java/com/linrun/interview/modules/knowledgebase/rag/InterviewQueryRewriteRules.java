@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * 查询改写轻量规则层（LLM 改写前的确定性预处理，对齐 know-engine 多策略中的术语/错别字维度）。
+ * 查询改写轻量规则层（LLM 改写前的确定性预处理，对齐业界实践 多策略中的术语/错别字维度）。
  */
 public final class InterviewQueryRewriteRules {
 

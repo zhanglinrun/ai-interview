@@ -22,7 +22,7 @@ import java.util.Map;
 /**
  * 表格文件解析器：CSV/TSV/Excel 保留行列结构，输出 Markdown 表格和行记录。
  *
- * <p>Excel 解析对齐 know-engine {@code ExcelProcessServiceImpl#parseExcel}：
+ * <p>Excel 解析对齐业界实践 {@code ExcelProcessServiceImpl#parseExcel}：
  * 使用 EasyExcel + {@code headRowNumber(0)}，从第一行开始读取数据（含表头行）。
  */
 @Slf4j
@@ -93,7 +93,7 @@ public class SpreadsheetProcessService implements FileProcessService {
     }
 
     /**
-     * 对齐 know-engine：headRowNumber(0) 从第一行开始读，表头也作为数据行返回。
+     * 对齐业界实践：headRowNumber(0) 从第一行开始读，表头也作为数据行返回。
      */
     private List<List<String>> parseExcelSheet(byte[] fileBytes, int sheetNo) {
         List<List<String>> result = new ArrayList<>();

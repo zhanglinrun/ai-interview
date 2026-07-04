@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.util;
 
 /**
- * 语义化版本号工具（移植自 know-engine VersionUtil）。
+ * 语义化版本号工具（参考业界实现 VersionUtil）。
  */
 public final class VersionUtil {
 

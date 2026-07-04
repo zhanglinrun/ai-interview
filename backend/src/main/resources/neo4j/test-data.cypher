@@ -1,5 +1,5 @@
 // ============================================================
-// AI Interview 面试知识图谱测试数据（对齐 know-engine neo4j/test-data.cypher）
+// AI Interview 面试知识图谱测试数据（对齐业界实践 neo4j/test-data.cypher）
 // 适用于 Neo4j 5.x + APOC，可在 Neo4j Browser / cypher-shell 中执行
 //
 // 导入方式（docker compose 已挂载到容器 /import）：

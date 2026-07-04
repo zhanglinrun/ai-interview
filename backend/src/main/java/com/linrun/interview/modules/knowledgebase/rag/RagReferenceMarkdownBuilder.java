@@ -6,7 +6,7 @@ import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
 import java.util.List;
 
 /**
- * RAG 引用与卡片 → Markdown 渲染（供 Web SSE 与钉钉回复复用，对齐 know-engine ChatBotCallbackListener）。
+ * RAG 引用与卡片 → Markdown 渲染（供 Web SSE 复用）。
  */
 public final class RagReferenceMarkdownBuilder {
 

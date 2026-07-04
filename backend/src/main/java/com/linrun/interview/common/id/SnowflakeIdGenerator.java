@@ -1,7 +1,7 @@
 package com.linrun.interview.common.id;
 
 /**
- * 雪花算法 ID 生成器（copy 自 know-engine，用于知识库切片的 chunkId/parentChunkId/brotherChunkId）。
+ * 雪花算法 ID 生成器（用于知识库切片的 chunkId/parentChunkId/brotherChunkId）。
  *
  * <p>生成的 ID 是 64 位长整型：
  * <ul>
@@ -10,6 +10,10 @@ package com.linrun.interview.common.id;
  *   <li>10 位工作机器 ID（0-1023）</li>
  *   <li>12 位序列号（毫秒内自增，每毫秒可生成 4096 个 ID）</li>
  * </ul>
+ *
+ * <p>workerId 取值顺序：环境变量/系统属性 {@code WORKER_ID} &gt; 本机 IP 低 10 位 &gt; PID 兜底。
+ * 容器化多实例部署时 PID 极易相同（常见 PID=1），IP 低 10 位在同一子网内基本唯一；
+ * 需要强保证时显式配置 WORKER_ID。
  */
 public class SnowflakeIdGenerator {
 
@@ -47,16 +51,45 @@ public class SnowflakeIdGenerator {
     }
 
     private static long getWorkerId() {
+        // 1. 显式配置优先：环境变量或系统属性 WORKER_ID
+        String configured = System.getProperty("WORKER_ID", System.getenv("WORKER_ID"));
+        if (configured != null && !configured.isBlank()) {
+            try {
+                return Long.parseLong(configured.trim()) & MAX_WORKER_ID;
+            } catch (NumberFormatException ignored) {
+                // 配置非法则继续走自动推导
+            }
+        }
+
+        // 2. 本机非回环 IPv4 低 10 位（同一子网内不同实例基本唯一）
         try {
-            String processName = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-            if (processName != null && processName.contains("@")) {
-                String pid = processName.split("@")[0];
-                return Long.parseLong(pid) & MAX_WORKER_ID;
+            java.util.Enumeration<java.net.NetworkInterface> interfaces =
+                java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface nic = interfaces.nextElement();
+                if (!nic.isUp() || nic.isLoopback() || nic.isVirtual()) {
+                    continue;
+                }
+                java.util.Enumeration<java.net.InetAddress> addresses = nic.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    java.net.InetAddress address = addresses.nextElement();
+                    if (address instanceof java.net.Inet4Address && !address.isLoopbackAddress()) {
+                        byte[] ip = address.getAddress();
+                        // 低 10 位 = 最后一段 8 位 + 倒数第二段低 2 位
+                        return (((ip[2] & 0b11L) << 8) | (ip[3] & 0xFFL)) & MAX_WORKER_ID;
+                    }
+                }
             }
         } catch (Exception ignored) {
-            // 忽略异常，使用默认值
+            // 网络接口不可用时降级 PID
         }
-        return 1L;
+
+        // 3. PID 兜底（单机多进程场景可区分，容器内可能恒为 1）
+        try {
+            return ProcessHandle.current().pid() & MAX_WORKER_ID;
+        } catch (Exception ignored) {
+            return 1L;
+        }
     }
 
     /**

@@ -9,7 +9,7 @@ import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
- * 分段文本 Redis 短缓存（对齐 know-engine {@code KnowledgeSegmentServiceImpl#getTextByChunkId}）。
+ * 分段文本 Redis 短缓存（对齐业界实践 {@code KnowledgeSegmentServiceImpl#getTextByChunkId}）。
  * 用于父子扩展批量查 parent/brother 时减轻 segment 表压力。
  */
 @Service

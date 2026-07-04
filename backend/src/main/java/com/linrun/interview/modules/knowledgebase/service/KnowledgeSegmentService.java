@@ -6,7 +6,7 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEnti
 import java.util.List;
 
 /**
- * 知识库分段 Service（对齐 know-engine KnowledgeSegmentService）。
+ * 知识库分段 Service（对齐业界实践 KnowledgeSegmentService）。
  */
 public interface KnowledgeSegmentService {
 
@@ -39,6 +39,16 @@ public interface KnowledgeSegmentService {
      * 更新分段（回写 embeddingId + 状态）。
      */
     void update(KnowledgeBaseSegmentEntity segment);
+
+    /**
+     * 向量化每批完成后批量回写 embeddingId + 升 VECTOR_STORED（一条 UPDATE，独立小事务）。
+     */
+    int batchUpdateEmbedding(List<KnowledgeBaseSegmentEntity> segments);
+
+    /**
+     * 统计某版本已回写 embeddingId 的分段数（向量对账用）。
+     */
+    long countWithEmbedding(Long docId, Long versionId);
 
     /**
      * 按 versionId 统计分段数。

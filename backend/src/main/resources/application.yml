@@ -62,12 +62,12 @@ spring:
     virtual:
       enabled: true
 
-  # MySQL + Druid（对齐 know-engine）
+  # MySQL + Druid（对齐业界实践）
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:interview_guide}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: ${MYSQL_USER:interview_guide}
-    password: ${MYSQL_PASSWORD:interview_guide}
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:ai_interview}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:ai_interview}
+    password: ${MYSQL_PASSWORD:ai_interview}
     driver-class-name: com.mysql.cj.jdbc.Driver
     druid:
       initial-size: 5
@@ -99,7 +99,7 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 50MB  # 支持知识库上传（简历限制在业务层检查）
+      max-file-size: ${APP_MULTIPART_MAX_FILE_SIZE:100MB}  # 支持知识库上传大 PDF（简历限制在业务层检查）
       # 批量上传一次携带多个文档，请求体上限放宽到容纳整批；单文件仍受 max-file-size 约束
       max-request-size: ${APP_MULTIPART_MAX_REQUEST_SIZE:300MB}
   
@@ -118,7 +118,7 @@ spring:
   
   # LangChain4j 配置（chat + embedding 由 app.ai.providers 驱动 LlmProviderRegistry 手动构造）
 
-# MyBatis-Plus 配置（对齐 know-engine）
+# MyBatis-Plus 配置（对齐业界实践）
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -130,19 +130,19 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# Elasticsearch 向量存储（对齐 know-engine：text-embedding-v4 / 1536 维）
+# Elasticsearch 向量存储（对齐业界实践：text-embedding-v4 / 1536 维）
 elasticsearch:
   host: ${ES_HOST:http://localhost:9200}
-  index-name: ${ES_INDEX_NAME:interview-guide-vector}
+  index-name: ${ES_INDEX_NAME:ai-interview-vector}
   dimensions: ${ES_DIMENSIONS:1536}
   num-candidates: ${ES_NUM_CANDIDATES:100}
 
-# MinIO 对象存储（对齐 know-engine）
+# MinIO 对象存储（对齐业界实践）
 minio:
   url: ${MINIO_URL:http://localhost:9000}
   accessKey: ${MINIO_ACCESS_KEY:minioadmin}
   secretKey: ${MINIO_SECRET_KEY:minioadmin}
-  bucketName: ${MINIO_BUCKET:interview-guide}
+  bucketName: ${MINIO_BUCKET:ai-interview}
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
 
 # Neo4j 图数据库（Text2Cypher）
@@ -154,24 +154,50 @@ neo4j:
 langchain4j:
   community:
     neo4j:
+      dimension: ${APP_AI_EMBEDDING_DIMENSIONS:1536}
       await-index-timeout: 300
       auth:
         uri: ${NEO4J_URI:bolt://localhost:7687}
         user: ${NEO4J_USER:neo4j}
         password: ${NEO4J_PASSWORD:neo4j666}
 
-# XXL-Job 配置（对齐 know-engine 2.4）
-xxl:
-  job:
-    admin:
-      addresses: ${XXL_JOB_ADMIN:http://127.0.0.1:8080/xxl-job-admin}
-    accessToken: ${XXL_JOB_ACCESS_TOKEN:default_token}
-    executor:
-      appname: ${XXL_JOB_EXECUTOR:ai-interview-executor}
-      port: ${XXL_JOB_EXECUTOR_PORT:9999}
+# RocketMQ（默认异步任务引擎，app.async.engine=rocketmq 时生效）。
+# RocketMQAutoConfiguration 已由 common/async/RocketMqEngineConfig 用 @ConditionalOnProperty 门控：
+# 仅默认/rocketmq 引擎才装配、才会读取下面的 name-server 连 broker；显式切 redis-stream 时整段不加载，
+# 故此处给 name-server 设默认值是安全的。本机 broker 走 127.0.0.1:9876，容器编排用
+# ROCKETMQ_NAME_SERVER=rocketmq-namesrv:9876 覆盖（Spring relaxed-binding 映射到 rocketmq.name-server）。
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: ${ROCKETMQ_PRODUCER_GROUP:ai-interview-producer}
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
 
 # Application custom configuration
 app:
+  # 异步任务引擎：rocketmq（默认，可靠性方案：事务消息 + broker 重试 + 死信队列）| redis-stream（轻量回退，无需 broker）。
+  # 默认连 rocketmq.name-server（见上，本机默认 127.0.0.1:9876）；生产/消费/事务消息/DLQ 见 common/async 包。
+  # broker 不可用又想临时回退：设 APP_ASYNC_ENGINE=redis-stream，此时不加载任何 RocketMQ 装配。
+  async:
+    engine: ${APP_ASYNC_ENGINE:rocketmq}
+    rocketmq:
+      # 死信告警消费者默认关闭：RocketMQ 死信 topic 默认仅写权限，需手动开读后再启用（见该消费者类注释）
+      dlq-monitor:
+        enabled: ${APP_ASYNC_ROCKETMQ_DLQ_MONITOR_ENABLED:false}
+
+  # LLM 全链路可观测（P5）：自研 LangfuseTracer 直连 Langfuse REST ingestion（异步 batch + 失败降级）。
+  # 默认关闭；起 dev-ops/docker-compose-monitor.yml 的 langfuse profile 后开启（初始化已内置固定 key）。
+  observability:
+    langfuse:
+      enabled: ${APP_OBSERVABILITY_LANGFUSE_ENABLED:false}
+      base-url: ${APP_OBSERVABILITY_LANGFUSE_BASE_URL:http://localhost:3001}
+      public-key: ${APP_OBSERVABILITY_LANGFUSE_PUBLIC_KEY:}
+      secret-key: ${APP_OBSERVABILITY_LANGFUSE_SECRET_KEY:}
+      environment: ${APP_OBSERVABILITY_LANGFUSE_ENV:dev}
+      flush-interval-ms: ${APP_OBSERVABILITY_LANGFUSE_FLUSH_MS:2000}
+      batch-size: ${APP_OBSERVABILITY_LANGFUSE_BATCH_SIZE:20}
+      trace-url-template: ${APP_OBSERVABILITY_LANGFUSE_TRACE_URL:{baseUrl}/trace/{traceId}}
+
   security:
     jwt:
       # JWT 密钥（至少 32 字节，生产环境必须改为强随机密钥）
@@ -193,10 +219,34 @@ app:
       enabled: ${APP_AI_THINKING_ENABLED:false}
     # 运行时可写的 Provider 配置落点（与 classpath 主 application.yml 隔离）。
     # 开发环境默认写到用户主目录下，避免污染源码目录或 jar 内 classpath 资源。
-    config-yaml-path: ${APP_AI_CONFIG_YAML_PATH:${user.home}/.interview-guide/llm-providers.yml}
-    config-env-path: ${APP_AI_CONFIG_ENV_PATH:${user.home}/.interview-guide/llm-providers.env}
+    config-yaml-path: ${APP_AI_CONFIG_YAML_PATH:${user.home}/.ai-interview/llm-providers.yml}
+    config-env-path: ${APP_AI_CONFIG_ENV_PATH:${user.home}/.ai-interview/llm-providers.env}
     agent-utils:
       skills-root: ${APP_AI_AGENT_UTILS_SKILLS_ROOT:classpath:skills}
+    # Multi-Agent 面试编排（Planner 出大纲 → Interviewer 出题 → Critic 审题 → Reflexion 反思环）
+    # + 两层记忆（会话内 ChatMemory 窗口 + 跨会话候选人画像）。关闭 enabled 回退批量出题。
+    agent:
+      enabled: ${APP_AI_AGENT_ENABLED:true}
+      # Critic 审题开关：关闭=Interviewer 直出（A/B 对比「直出 vs Reflexion」用）
+      critic-enabled: ${APP_AI_AGENT_CRITIC_ENABLED:true}
+      # Reflexion 反思重生成上限（Critic 连续打回的最大重出次数）
+      max-reflexion: ${APP_AI_AGENT_MAX_REFLEXION:2}
+      # 会话内 ChatMemory 窗口大小（消息条数，Redis 持久化）
+      memory-window: ${APP_AI_AGENT_MEMORY_WINDOW:20}
+      # 编排指标上报（agent.critic.verdicts / reflexion.rounds / question.latency）
+      metrics-enabled: ${APP_AI_AGENT_METRICS_ENABLED:true}
+      # 跨会话候选人画像记忆：评估后 LLM 抽取薄弱点/掌握点，Planner 下次面试注入
+      candidate-memory:
+        enabled: ${APP_AI_AGENT_CANDIDATE_MEMORY_ENABLED:true}
+        max-entries: ${APP_AI_AGENT_CANDIDATE_MEMORY_MAX_ENTRIES:8}
+      # GitHub 候选人画像工具（P3.2 MCP Client demo）：面试官读简历发现 GitHub 用户名后拉公开画像
+      # token 仅用于提升匿名 60 次/时的限流额度，读公开数据可留空
+      github:
+        enabled: ${APP_AI_AGENT_GITHUB_ENABLED:true}
+        base-url: ${APP_AI_AGENT_GITHUB_BASE_URL:https://api.github.com}
+        token: ${APP_AI_AGENT_GITHUB_TOKEN:}
+        timeout-seconds: ${APP_AI_AGENT_GITHUB_TIMEOUT_SECONDS:6}
+        max-repos: ${APP_AI_AGENT_GITHUB_MAX_REPOS:5}
     providers:
       dashscope:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -255,9 +305,9 @@ app:
     rag:
       rewrite:
         enabled: ${APP_AI_RAG_REWRITE_ENABLED:true}
-        model: ${APP_AI_RAG_REWRITE_MODEL:qwen-max-latest}
+        model: ${APP_AI_RAG_REWRITE_MODEL:}
       routing:
-        model: ${APP_AI_RAG_ROUTING_MODEL:qwen-max-latest}
+        model: ${APP_AI_RAG_ROUTING_MODEL:}
       search:
         short-query-length: ${APP_AI_RAG_SHORT_QUERY_LENGTH:4}
         topk-short: ${APP_AI_RAG_TOPK_SHORT:20}
@@ -265,7 +315,7 @@ app:
         topk-long: ${APP_AI_RAG_TOPK_LONG:8}
         min-score-short: ${APP_AI_RAG_MIN_SCORE_SHORT:0.18}
         min-score-default: ${APP_AI_RAG_MIN_SCORE_DEFAULT:0.28}
-      # 混合检索（对齐 know-engine 默认 hybrid：ES 向量 + BM25/RRF）
+      # 混合检索（对齐业界实践 默认 hybrid：ES 向量 + BM25/RRF）
       hybrid:
         enabled: ${APP_AI_RAG_HYBRID_ENABLED:true}
         dual-channel: ${APP_AI_RAG_HYBRID_DUAL_CHANNEL:true}
@@ -274,12 +324,13 @@ app:
         keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
         rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
         fusion-top-k: ${APP_AI_RAG_HYBRID_FUSION_TOPK:12}
+      # Text2SQL 默认关闭（面试备考知识库无结构化数据问答场景，保留代码可开关启用）
       sql:
-        enabled: ${APP_AI_RAG_SQL_ENABLED:true}
-        router-enabled: ${APP_AI_RAG_SQL_ROUTER_ENABLED:true}
+        enabled: ${APP_AI_RAG_SQL_ENABLED:false}
+        router-enabled: ${APP_AI_RAG_SQL_ROUTER_ENABLED:false}
         query-timeout-seconds: ${APP_AI_RAG_SQL_QUERY_TIMEOUT_SECONDS:8}
         max-rows: ${APP_AI_RAG_SQL_MAX_ROWS:100}
-      # 重排：默认本地 ONNX BGE-RERANKER（对齐 know-engine）
+      # 重排：默认本地 ONNX BGE-RERANKER（对齐业界实践）
       rerank:
         enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
         provider: ${APP_AI_RAG_RERANK_PROVIDER:local}
@@ -294,7 +345,7 @@ app:
           tokenizer-path: ${APP_AI_RAG_RERANK_LOCAL_TOKENIZER_PATH:classpath:model/bge-reranker-model/tokenizer.json}
           max-sequence-length: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:8192}
       # 父子/兄弟分段扩展（small-to-big）：检索命中 chunk 后，按 parentChunkId 取父块章节、
-      # 按 brotherChunkId 取同组兄弟按序拼接，给 LLM 更完整上下文（对齐 know-engine）。
+      # 按 brotherChunkId 取同组兄弟按序拼接，给 LLM 更完整上下文（对齐业界实践）。
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
@@ -302,13 +353,37 @@ app:
         max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
         cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}
-      # Neo4j Text2Cypher 图检索（对齐 know-engine graph_db 路由）
+      # Neo4j Text2Cypher 图检索（对齐业界实践 graph_db 路由）
       graph:
         enabled: ${APP_AI_RAG_GRAPH_ENABLED:true}
         auto-sync-on-vectorize: ${APP_AI_RAG_GRAPH_AUTO_SYNC:true}
         skill-bootstrap-enabled: ${APP_AI_RAG_GRAPH_SKILL_BOOTSTRAP:true}
         cypher-prompt-path: classpath:prompts/text-to-cypher-prompt.txt
-      # RAG 流式生成专用模型（对齐 know-engine qwen3.6-plus）
+        # 实体级图谱（P2）：LLM 实体抽取同步 + 问题实体锚点 2 跳遍历检索
+        entity:
+          extraction-enabled: ${APP_AI_RAG_GRAPH_ENTITY_EXTRACTION_ENABLED:true}
+          model: ${APP_AI_RAG_GRAPH_ENTITY_MODEL:}
+          batch-size: ${APP_AI_RAG_GRAPH_ENTITY_BATCH_SIZE:8}
+          max-concurrency: ${APP_AI_RAG_GRAPH_ENTITY_MAX_CONCURRENCY:4}
+          max-anchors: ${APP_AI_RAG_GRAPH_ENTITY_MAX_ANCHORS:5}
+          max-paths: ${APP_AI_RAG_GRAPH_ENTITY_MAX_PATHS:20}
+          max-chunks: ${APP_AI_RAG_GRAPH_ENTITY_MAX_CHUNKS:6}
+      # Query Decomposition（P2）：复杂问题拆子查询并行检索，简单问题规则预筛跳过
+      decompose:
+        enabled: ${APP_AI_RAG_DECOMPOSE_ENABLED:true}
+        max-sub-queries: ${APP_AI_RAG_DECOMPOSE_MAX_SUB_QUERIES:4}
+        model: ${APP_AI_RAG_DECOMPOSE_MODEL:}
+      # CRAG 纠正式检索（P2）：rerank 后小模型打分 correct/ambiguous/incorrect，
+      # ambiguous 重写重检索一次，incorrect 走通用对话兜底（默认关闭，评测/演示按需开启）
+      crag:
+        enabled: ${APP_AI_RAG_CRAG_ENABLED:false}
+        grade-top-n: ${APP_AI_RAG_CRAG_GRADE_TOPN:3}
+        snippet-max-chars: ${APP_AI_RAG_CRAG_SNIPPET_MAX_CHARS:400}
+        model: ${APP_AI_RAG_CRAG_MODEL:}
+      # 自适应检索路由（P2）：意图识别 needRetrieval=false 时跳过检索直接生成
+      adaptive:
+        enabled: ${APP_AI_RAG_ADAPTIVE_ENABLED:true}
+      # RAG 流式生成专用模型（对齐业界实践 qwen3.6-plus）
       generation:
         streaming-model: ${APP_AI_RAG_GENERATION_MODEL:qwen3.6-plus}
         temperature: 0.2
@@ -317,7 +392,7 @@ app:
         enabled: ${APP_AI_RAG_INTENT_RECOGNITION_ENABLED:true}
         # 是否在意图识别前推"正在理解您的问题..."进度（关闭可省前端空进度）
         progress-enabled: ${APP_AI_RAG_INTENT_RECOGNITION_PROGRESS_ENABLED:true}
-        model: ${APP_AI_RAG_INTENT_MODEL:qwen-max-latest}
+        model: ${APP_AI_RAG_INTENT_MODEL:}
       title-summary:
         enabled: ${APP_AI_RAG_TITLE_SUMMARY_ENABLED:true}
         model: ${APP_AI_RAG_TITLE_MODEL:qwen3.5-flash}
@@ -333,23 +408,12 @@ app:
       - application/vnd.openxmlformats-officedocument.wordprocessingml.document
       - text/plain
 
-  # 钉钉机器人（P2 可选，默认关闭）
-  dingtalk:
-    enabled: ${APP_DINGTALK_ENABLED:false}
-    app-key: ${APP_DINGTALK_APP_KEY:}
-    app-secret: ${APP_DINGTALK_APP_SECRET:}
-    robot-code: ${APP_DINGTALK_ROBOT_CODE:}
-    webhook-token: ${APP_DINGTALK_WEBHOOK_TOKEN:}
-    stream-enabled: ${APP_DINGTALK_STREAM_ENABLED:false}
-    system-user-id: ${APP_DINGTALK_SYSTEM_USER_ID:}
-    default-knowledge-base-ids: ${APP_DINGTALK_DEFAULT_KB_IDS:}
-
   # RustFS (S3兼容) 存储配置
   storage:
     endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
     access-key: ${APP_STORAGE_ACCESS_KEY:minioadmin}
     secret-key: ${APP_STORAGE_SECRET_KEY:minioadmin}
-    bucket: ${APP_STORAGE_BUCKET:interview-guide}
+    bucket: ${APP_STORAGE_BUCKET:ai-interview}
     region: ${APP_STORAGE_REGION:us-east-1}
   
   # CORS配置 - React前端

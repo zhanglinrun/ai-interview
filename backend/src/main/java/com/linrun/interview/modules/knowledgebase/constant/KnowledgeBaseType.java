@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 知识库类型（对齐 know-engine {@code KnowledgeBaseType}）。
+ * 知识库类型（对齐业界实践 {@code KnowledgeBaseType}）。
  */
 public enum KnowledgeBaseType {
 

@@ -54,7 +54,9 @@ public class InterviewPersistenceService {
                                             List<InterviewQuestionDTO> questions,
                                             String llmProvider,
                                             String skillId,
-                                            String difficulty) {
+                                            String difficulty,
+                                            List<Long> knowledgeBaseIds,
+                                            String interviewPlanJson) {
     Long userId = UserContext.requireUserId();
     try {
       InterviewSessionEntity session = new InterviewSessionEntity();
@@ -67,6 +69,10 @@ public class InterviewPersistenceService {
       session.setLlmProvider(llmProvider != null ? llmProvider : "default");
       session.setSkillId(skillId != null ? skillId : InterviewDefaults.SKILL_ID);
       session.setDifficulty(difficulty != null ? difficulty : InterviewDefaults.DIFFICULTY);
+      if (knowledgeBaseIds != null && !knowledgeBaseIds.isEmpty()) {
+        session.setKnowledgeBaseIdsJson(objectMapper.writeValueAsString(knowledgeBaseIds));
+      }
+      session.setInterviewPlanJson(interviewPlanJson);
       session.setCreatedAt(LocalDateTime.now());
 
       if (resumeId != null) {
@@ -108,6 +114,21 @@ public class InterviewPersistenceService {
       }
       MapperUtils.save(interviewSessionMapper, session);
       log.debug("评估状态已更新: sessionId={}, status={}", sessionId, status);
+    });
+  }
+
+  /**
+   * 更新会话题目列表（Agent 编排模式动态出题后追加新题）。
+   */
+  @Transactional(rollbackFor = Exception.class)
+  public void updateQuestions(String sessionId, List<InterviewQuestionDTO> questions) {
+    findSessionEntityBySessionId(sessionId).ifPresent(session -> {
+      try {
+        session.setQuestionsJson(objectMapper.writeValueAsString(questions));
+      } catch (JsonProcessingException e) {
+        throw new BusinessException(ErrorCode.INTERNAL_ERROR, "序列化问题列表失败", e);
+      }
+      MapperUtils.save(interviewSessionMapper, session);
     });
   }
 

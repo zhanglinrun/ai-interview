@@ -18,9 +18,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
-
-import jakarta.annotation.PreDestroy;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,8 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
@@ -78,7 +75,9 @@ public class InterviewQuestionService {
     private final InterviewSkillService skillService;
     private final LlmProviderRegistry llmProviderRegistry;
     private final PromptSanitizer promptSanitizer;
-    private final ExecutorService questionExecutor;
+    private final InterviewKnowledgeRetrievalService knowledgeRetrievalService;
+    /** 由 {@code AsyncConfig#questionExecutor} 提供（虚拟线程 + 并发上限，Spring 管理生命周期） */
+    private final AsyncTaskExecutor questionExecutor;
     private final int followUpCount;
 
     private record QuestionListDTO(List<QuestionDTO> questions) {}
@@ -92,12 +91,15 @@ public class InterviewQuestionService {
             InterviewQuestionProperties properties,
             ResourceLoader resourceLoader,
             LlmProviderRegistry llmProviderRegistry,
-            PromptSanitizer promptSanitizer) throws IOException {
+            PromptSanitizer promptSanitizer,
+            InterviewKnowledgeRetrievalService knowledgeRetrievalService,
+            AsyncTaskExecutor questionExecutor) throws IOException {
         this.structuredOutputInvoker = structuredOutputInvoker;
         this.skillService = skillService;
         this.llmProviderRegistry = llmProviderRegistry;
         this.promptSanitizer = promptSanitizer;
-        this.questionExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        this.knowledgeRetrievalService = knowledgeRetrievalService;
+        this.questionExecutor = questionExecutor;
         this.skillSystemPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionSystemPromptPath());
         this.skillUserPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionUserPromptPath());
         this.resumeSystemPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionSystemPromptPath());
@@ -109,11 +111,6 @@ public class InterviewQuestionService {
         return new PromptTemplate(loader.getResource(location).getContentAsString(StandardCharsets.UTF_8));
     }
 
-    @PreDestroy
-    void destroy() {
-        questionExecutor.shutdownNow();
-    }
-
     public List<InterviewQuestionDTO> generateQuestionsBySkill(
             String llmProvider,
             String skillId,
@@ -122,7 +119,8 @@ public class InterviewQuestionService {
             int questionCount,
             List<HistoricalQuestion> historicalQuestions,
             List<CategoryDTO> customCategories,
-            String jdText) {
+            String jdText,
+            List<Long> knowledgeBaseIds) {
 
         SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
@@ -131,9 +129,12 @@ public class InterviewQuestionService {
 
         boolean hasResume = resumeText != null && !resumeText.isBlank();
         String historicalSection = buildHistoricalSection(historicalQuestions);
+        // 知识库检索必须在请求线程完成（UserContext 是 ThreadLocal，进不了虚拟线程池）
+        String kbReferenceSection =
+            knowledgeRetrievalService.buildKbReferenceSection(knowledgeBaseIds, skill);
         if (!hasResume) {
             return generateDirectionOnly(questionChatClient, skill, difficultyDesc, questionCount,
-                historicalSection);
+                historicalSection, kbReferenceSection);
         }
 
         int resumeCount = Math.max(1, (int) Math.round(questionCount * RESUME_QUESTION_RATIO));
@@ -149,7 +150,7 @@ public class InterviewQuestionService {
 
         CompletableFuture<List<InterviewQuestionDTO>> directionFuture = CompletableFuture.supplyAsync(
             () -> generateDirectionOnly(questionChatClient, skill, difficultyDesc, directionCount,
-                historicalSection),
+                historicalSection, kbReferenceSection),
             questionExecutor);
 
         List<InterviewQuestionDTO> resumeQuestions;
@@ -160,7 +161,7 @@ public class InterviewQuestionService {
             log.error("简历题生成失败，降级为全方向题", e.getCause());
             directionFuture.cancel(true);
             return generateDirectionOnly(questionChatClient, skill, difficultyDesc, questionCount,
-                historicalSection);
+                historicalSection, kbReferenceSection);
         }
 
         try {
@@ -221,7 +222,7 @@ public class InterviewQuestionService {
 
     private List<InterviewQuestionDTO> generateDirectionOnly(
             ChatModel questionClient, SkillDTO skill, String difficultyDesc,
-            int questionCount, String historicalSection) {
+            int questionCount, String historicalSection, String kbReferenceSection) {
         Map<String, Integer> allocation = skillService.calculateAllocation(skill.categories(), questionCount);
         String allocationTable = skillService.buildAllocationDescription(allocation, skill.categories());
 
@@ -238,6 +239,9 @@ public class InterviewQuestionService {
             variables.put("allocationTable", allocationTable);
             variables.put("historicalSection", historicalSection);
             variables.put("referenceSection", skillService.buildReferenceSection(skill, allocation));
+            variables.put("kbReferenceSection",
+                kbReferenceSection == null || kbReferenceSection.isBlank()
+                    ? "本次面试未关联知识库。" : kbReferenceSection);
             variables.put("jdSection", buildJdSection(skill.sourceJd()));
 
             String systemPrompt = skillSystemPromptTemplate.render()

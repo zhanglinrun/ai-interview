@@ -7,9 +7,11 @@ import {
   knowledgeBaseApi,
   type KnowledgeBaseItem,
   type RagEvalResponse,
+  type RagQaExportResponse,
   type SortOption
 } from '../api/knowledgebase';
 import {ragChatApi, type RagCardChoice, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
+import {ragModuleApi} from '../api/ragModule';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
 import {formatFileSize} from '../utils/format';
@@ -17,7 +19,7 @@ import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import CodeBlock from '../components/CodeBlock';
 import {EmptyState, LoadingState} from '../components/PageState';
-import {BarChart3, ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2, X,} from 'lucide-react';
+import {BarChart3, Bug, ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2, X,} from 'lucide-react';
 
 interface KnowledgeBaseQueryPageProps {
   onBack: () => void;
@@ -77,6 +79,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [evalResult, setEvalResult] = useState<RagEvalResponse | null>(null);
   const [evalLoading, setEvalLoading] = useState(false);
   const [evalError, setEvalError] = useState('');
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportResult, setExportResult] = useState<RagQaExportResponse | null>(null);
+  const [datasetQuestion, setDatasetQuestion] = useState('');
+  const [datasetResult, setDatasetResult] = useState<{ question: string; answer: string; sources: unknown[] } | null>(null);
+  const [datasetLoading, setDatasetLoading] = useState(false);
+  const [sessionBoundKbIds, setSessionBoundKbIds] = useState<Set<number>>(new Set());
+  const [syncingKb, setSyncingKb] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugQuestion, setDebugQuestion] = useState('');
+  const [debugOutput, setDebugOutput] = useState('');
+  const [debugLoading, setDebugLoading] = useState(false);
 
   // refs
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -184,19 +197,34 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       } else {
         newSet.add(kbId);
       }
-      if (newSet.size !== prev.size && currentSessionId) {
-        setCurrentSessionId(null);
-        setCurrentSessionTitle('');
-        setMessages([]);
-      }
       return newSet;
     });
+  };
+
+  const kbNeedsSync = useMemo(() => {
+    if (!currentSessionId) return false;
+    if (selectedKbIds.size !== sessionBoundKbIds.size) return true;
+    return Array.from(selectedKbIds).some((id) => !sessionBoundKbIds.has(id));
+  }, [currentSessionId, selectedKbIds, sessionBoundKbIds]);
+
+  const handleSyncKnowledgeBases = async () => {
+    if (!currentSessionId || selectedKbIds.size === 0) return;
+    setSyncingKb(true);
+    try {
+      await ragChatApi.updateKnowledgeBases(currentSessionId, Array.from(selectedKbIds));
+      setSessionBoundKbIds(new Set(selectedKbIds));
+    } catch (err) {
+      console.error('同步知识库失败', err);
+    } finally {
+      setSyncingKb(false);
+    }
   };
 
   const handleNewSession = () => {
     setCurrentSessionId(null);
     setCurrentSessionTitle('');
     setMessages([]);
+    setSessionBoundKbIds(new Set());
   };
 
   const handleLoadSession = async (sessionId: number) => {
@@ -204,7 +232,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       const detail = await ragChatApi.getSessionDetail(sessionId);
       setCurrentSessionId(detail.id);
       setCurrentSessionTitle(detail.title);
-      setSelectedKbIds(new Set(detail.knowledgeBases.map(kb => kb.id)));
+      const kbIds = new Set(detail.knowledgeBases.map(kb => kb.id));
+      setSelectedKbIds(kbIds);
+      setSessionBoundKbIds(kbIds);
       setMessages(detail.messages.map(m => ({
         id: m.id,
         type: m.type,
@@ -293,8 +323,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       try {
         const session = await ragChatApi.createSession(Array.from(selectedKbIds));
         sessionId = session.id;
-        setCurrentSessionId(sessionId);
+        setCurrentSessionId(session.id);
         setCurrentSessionTitle(session.title);
+        setSessionBoundKbIds(new Set(selectedKbIds));
       } catch (err) {
         console.error('创建会话失败', err);
         setLoading(false);
@@ -416,6 +447,68 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     }
   };
 
+  const handleExportQa = async () => {
+    if (selectedKbIds.size === 0 || !evalInput.trim()) return;
+    setExportLoading(true);
+    setEvalError('');
+    try {
+      const parsed = JSON.parse(evalInput);
+      const items = Array.isArray(parsed) ? parsed : parsed.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('请输入至少一条评测用例');
+      }
+      const exportItems = items.map((item: { question?: string; groundTruth?: string; expectedKeywords?: string[] }) => ({
+        question: item.question || '',
+        groundTruth: item.groundTruth || (item.expectedKeywords || []).join(', '),
+      }));
+      setExportResult(await knowledgeBaseApi.exportQa(Array.from(selectedKbIds), exportItems));
+    } catch (err) {
+      console.error('RAGAS 导出失败:', err);
+      setEvalError(getErrorMessage(err, '导出失败，请检查 JSON 格式'));
+      setExportResult(null);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleGenerateDataset = async () => {
+    if (selectedKbIds.size === 0 || !datasetQuestion.trim()) return;
+    setDatasetLoading(true);
+    try {
+      setDatasetResult(await knowledgeBaseApi.generateDataset(datasetQuestion.trim(), Array.from(selectedKbIds)));
+    } catch (err) {
+      console.error('生成样本失败:', err);
+      setDatasetResult(null);
+    } finally {
+      setDatasetLoading(false);
+    }
+  };
+
+  const handleRunDebug = async (mode: 'intent' | 'prompt' | 'rewrite' | 'rerank' | 'router') => {
+    if (!debugQuestion.trim()) return;
+    setDebugLoading(true);
+    setDebugOutput('');
+    try {
+      if (mode === 'intent') {
+        const result = await ragModuleApi.testIntent(debugQuestion.trim());
+        setDebugOutput(JSON.stringify(result, null, 2));
+      } else if (mode === 'prompt') {
+        setDebugOutput(await ragModuleApi.testPrompt(debugQuestion.trim()));
+      } else if (mode === 'rewrite') {
+        const result = await ragModuleApi.testRewrite(debugQuestion.trim());
+        setDebugOutput(result.join('\n---\n'));
+      } else if (mode === 'rerank') {
+        setDebugOutput(await ragModuleApi.testRerank(debugQuestion.trim()));
+      } else {
+        setDebugOutput(await ragModuleApi.testRouterStrategy(debugQuestion.trim()));
+      }
+    } catch (err) {
+      setDebugOutput(getErrorMessage(err, '调试请求失败'));
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto pt-8 pb-10 px-4">
       {/* 头部 */}
@@ -432,6 +525,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
             whileTap={{ scale: 0.98 }}
           >
             上传知识库
+          </motion.button>
+          <motion.button
+            onClick={() => setDebugOpen((v) => !v)}
+            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Bug className="w-4 h-4" />
+              RAG 调试
+            </span>
           </motion.button>
           <motion.button
             onClick={() => setEvalOpen(true)}
@@ -569,6 +673,19 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                       ) : null;
                     })}
                   </div>
+                  {kbNeedsSync && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+                      <p className="text-xs text-amber-800 dark:text-amber-200">知识库选择已变更</p>
+                      <button
+                        type="button"
+                        disabled={syncingKb}
+                        onClick={() => void handleSyncKnowledgeBases()}
+                        className="text-xs px-2.5 py-1 rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        {syncingKb ? '同步中...' : '同步到当前会话'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* 消息列表 */}
@@ -1049,6 +1166,13 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   关闭
                 </button>
                 <button
+                  onClick={handleExportQa}
+                  disabled={exportLoading || !evalInput.trim()}
+                  className="px-4 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {exportLoading ? '导出中...' : 'RAGAS 导出'}
+                </button>
+                <button
                   onClick={handleRunEval}
                   disabled={evalLoading || !evalInput.trim()}
                   className="px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
@@ -1056,6 +1180,98 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   {evalLoading ? '评测中...' : '开始评测'}
                 </button>
               </div>
+              {exportResult && (
+                <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-400">
+                  已导出 {exportResult.total} 条 QA 样本，可用于 eval/ragas。
+                </p>
+              )}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">单题样本生成</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={datasetQuestion}
+                    onChange={(e) => setDatasetQuestion(e.target.value)}
+                    placeholder="输入一个问题，走完整 RAG 生成链路"
+                    className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700"
+                  />
+                  <button
+                    type="button"
+                    disabled={datasetLoading || !datasetQuestion.trim()}
+                    onClick={() => void handleGenerateDataset()}
+                    className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg disabled:opacity-50"
+                  >
+                    {datasetLoading ? '生成中...' : '生成'}
+                  </button>
+                </div>
+                {datasetResult && (
+                  <div className="mt-2 rounded-lg bg-slate-50 dark:bg-slate-700/60 p-3 text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                    {datasetResult.answer}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {debugOpen && (
+          <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setDebugOpen(false)}
+          >
+            <motion.div
+              initial={{opacity: 0, scale: 0.95, y: 20}}
+              animate={{opacity: 1, scale: 1, y: 0}}
+              exit={{opacity: 0, scale: 0.95, y: 20}}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Bug className="w-5 h-5 text-primary-500" />
+                  RAG 模块调试
+                </h3>
+                <button
+                  onClick={() => setDebugOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <input
+                type="text"
+                value={debugQuestion}
+                onChange={(e) => setDebugQuestion(e.target.value)}
+                placeholder="输入测试问题"
+                className="w-full px-4 py-3 text-sm border border-slate-200 dark:border-slate-600 rounded-xl mb-3 bg-white dark:bg-slate-700"
+              />
+              <div className="flex flex-wrap gap-2 mb-4">
+                {([
+                  ['intent', '意图识别'],
+                  ['prompt', 'Prompt'],
+                  ['rewrite', 'Query 改写'],
+                  ['rerank', 'Rerank'],
+                  ['router', '路由探测'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    disabled={debugLoading || !debugQuestion.trim()}
+                    onClick={() => void handleRunDebug(mode)}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <pre className="max-h-64 overflow-y-auto rounded-lg bg-slate-50 dark:bg-slate-900/40 p-3 text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+                {debugLoading ? '请求中...' : (debugOutput || '选择上方模块运行调试')}
+              </pre>
             </motion.div>
           </motion.div>
         )}

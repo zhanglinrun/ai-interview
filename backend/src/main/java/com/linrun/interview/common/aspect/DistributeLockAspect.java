@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
 import java.lang.reflect.Method;
 
 /**
- * 分布式锁 AOP 切面（基于 Redisson RLock，对齐 know-engine DistributeLockAspect）。
+ * 分布式锁 AOP 切面（基于 Redisson RLock，对齐业界实践 DistributeLockAspect）。
  *
  * <p>解析 {@link DistributeLock#key()} 的 SpEL 表达式生成最终 lockKey，
  * 获取锁失败抛 {@link BusinessException}(BAD_REQUEST) 由全局异常处理统一返回。

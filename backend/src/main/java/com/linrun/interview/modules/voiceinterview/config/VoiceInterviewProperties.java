@@ -24,6 +24,12 @@ public class VoiceInterviewProperties {
     private OpeningConfig opening = new OpeningConfig();
 
     /**
+     * WebSocket 对外基地址（如 wss://api.example.com）。留空时返回相对路径
+     * {@code /ws/voice-interview/{id}}，由前端按当前页面 origin 自行拼接，天然适配任意部署环境。
+     */
+    private String wsBaseUrl = "";
+
+    /**
      * 语音面试单轮面试官回复最大字符数（超出会截断到句子边界）。
      */
     private int aiQuestionMaxChars = 120;

@@ -9,7 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.LocalDate;
 
 /**
- * 知识库文档处理编排接口（对齐 know-engine DocumentProcessService）。
+ * 知识库文档处理编排接口（对齐业界实践 DocumentProcessService）。
  *
  * <p>编排上传→解析→切块→向量化的完整链路：
  * <ul>

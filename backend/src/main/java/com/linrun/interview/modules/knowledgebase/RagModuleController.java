@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * RAG 模块调试端点（对齐 know-engine RagModuleController，面试域简化版）。
+ * RAG 模块调试端点（对齐业界实践 RagModuleController，面试域简化版）。
  */
 @RestController
 @RequestMapping("/api/rag/module")

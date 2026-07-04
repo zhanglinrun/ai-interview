@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 按意图加载 RAG 系统 Prompt（对齐 know-engine {@code PromptService}）。
+ * 按意图加载 RAG 系统 Prompt（对齐业界实践 {@code PromptService}）。
  */
 @Slf4j
 @Service

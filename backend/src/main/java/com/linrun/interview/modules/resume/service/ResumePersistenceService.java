@@ -11,6 +11,7 @@ import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.infrastructure.file.FileHashService;
 import com.linrun.interview.infrastructure.mapper.ResumeMapper;
+import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.interview.model.ResumeAnalysisResponse;
 import com.linrun.interview.modules.resume.mapper.ResumeAnalysisMapper;
 import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -35,11 +37,15 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class ResumePersistenceService {
 
+  private static final Duration NULL_ID_TTL = Duration.ofMinutes(2);
+  private static final String NULL_ID_PREFIX = "resume:null:";
+
   private final ResumeEntityMapper resumeEntityMapper;
   private final ResumeAnalysisMapper resumeAnalysisMapper;
   private final ObjectMapper objectMapper;
   private final ResumeMapper resumeMapper;
   private final FileHashService fileHashService;
+  private final RedisService redisService;
 
   public Optional<ResumeEntity> findExistingResume(MultipartFile file) {
     Long userId = UserContext.requireUserId();
@@ -179,9 +185,20 @@ public class ResumePersistenceService {
   }
 
   public Optional<ResumeEntity> findById(Long id) {
-    return EntityQueries.byUserAndId(
-      resumeEntityMapper, UserContext.requireUserId(), id,
-      ResumeEntity::getUserId, ResumeEntity::getId);
+    if (id == null) {
+      return Optional.empty();
+    }
+    Long userId = UserContext.requireUserId();
+    String nullKey = NULL_ID_PREFIX + userId + ":" + id;
+    if (Boolean.TRUE.equals(redisService.get(nullKey))) {
+      return Optional.empty();
+    }
+    Optional<ResumeEntity> result = EntityQueries.byUserAndId(
+      resumeEntityMapper, userId, id, ResumeEntity::getUserId, ResumeEntity::getId);
+    if (result.isEmpty()) {
+      redisService.set(nullKey, true, NULL_ID_TTL);
+    }
+    return result;
   }
 
   @Transactional(rollbackFor = Exception.class)

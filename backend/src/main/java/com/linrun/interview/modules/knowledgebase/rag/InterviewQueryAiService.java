@@ -5,7 +5,7 @@ import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
 
 /**
- * 知识库 RAG 问答 AiServices 接口（移植自 know-engine 的 KnowEngineChatAiService）。
+ * 知识库 RAG 问答 AiServices 接口（参考业界实现的 ChatAiService）。
  *
  * <p>由 {@code AiServices.builder} 构建，挂载 {@code retrievalAugmentor}（改写→路由→检索→融合→rerank→注入）
  * 与 {@code chatMemoryProvider}（多轮上下文），由 LC4j 自动编排 RAG 管线后调 LLM 生成。

@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.Map;
 
 /**
- * 文档访问权限工具（对齐 know-engine DocumentPermissionUtils）。
+ * 文档访问权限工具（对齐业界实践 DocumentPermissionUtils）。
  */
 public final class DocumentPermissionUtils {
 

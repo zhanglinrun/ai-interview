@@ -20,17 +20,17 @@ import java.util.function.Consumer;
 import static java.util.Collections.singletonList;
 
 /**
- * 知识库查询改写器（移植自 know-engine 的 KnowEngineQueryTransformer）。
+ * 知识库查询改写器（参考业界实现的 QueryTransformer）。
  *
  * <p>实现 LC4j {@link QueryTransformer}，供 {@code DefaultRetrievalAugmentor} 在检索前改写 query：
  * 用 LLM 结合对话历史把用户原始问题改写成更适合知识库检索的单句查询，缩小问题表述与答案表述的语义鸿沟。
  *
- * <p>与 know-engine 的差异（取精华弃糟粕）：
+ * <p>与早期实现的差异（取精华弃糟粕）：
  * <ul>
  *   <li>改写策略沿用本项目现有的 {@code knowledgebase-query-rewrite.st} 模板（面试领域），不照搬汽车领域 5 策略</li>
  *   <li><b>亮点2</b>：接 {@code progressCallback}，改写前推 {@code 正在优化您的问题...} 进度（null 安全）</li>
  *   <li><b>亮点5</b>：改写完成用虚拟线程异步回写 {@code rag_chat_messages.transform_content}，
- *       repository 由调用方 Spring 注入传入（弃 know-engine 静态 ApplicationContext 反模式）</li>
+ *       repository 由调用方 Spring 注入传入（弃用早期 静态 ApplicationContext 反模式）</li>
  *   <li>历史从 {@link Query#metadata()} 的 chatMemory 取，由 RetrievalAugmentor 在组装时注入</li>
  *   <li>关闭/失败/空 query 时返回原 query，保证检索不中断</li>
  * </ul>

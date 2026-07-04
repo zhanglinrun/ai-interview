@@ -4,7 +4,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * MinerU 文件解析配置（对齐 know-engine file.parse 配置）。
+ * MinerU 文件解析配置（对齐业界实践 file.parse 配置）。
  *
  * <p>MinerU 是外部 HTTP 解析服务，把 PDF/DOC/HTML 等结构化文档转换为 Markdown（保留标题层级、
  * 表格、公式）。{@link #enabled} 关闭或服务不可达时，解析链路降级到 Tika（纯文本）。

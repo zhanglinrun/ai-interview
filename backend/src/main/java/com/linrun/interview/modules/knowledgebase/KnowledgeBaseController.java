@@ -20,6 +20,8 @@ import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalRequest;
 import com.linrun.interview.modules.knowledgebase.model.RagEvalResponse;
+import com.linrun.interview.modules.knowledgebase.model.RagQaExportRequest;
+import com.linrun.interview.modules.knowledgebase.model.RagQaExportResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagQueryTraceDTO;
 import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
@@ -198,7 +200,7 @@ public class KnowledgeBaseController {
 
     /**
      * 上传知识库文件
-     * <p>对齐 know-engine：upload 同步完成解析（UPLOADED→CONVERTING→CONVERTED），
+     * <p>对齐业界实践：upload 同步完成解析（UPLOADED→CONVERTING→CONVERTED），
      * split 由调用方单独触发（切块后发 DocumentChunkedEvent 异步向量化）。
      */
     @PostMapping(value = "/api/knowledgebase/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -227,10 +229,12 @@ public class KnowledgeBaseController {
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
     public Result<Map<String, Object>> uploadKnowledgeBaseBatch(
             @RequestParam("files") List<MultipartFile> files,
-            @RequestParam(value = "category", required = false) String category) {
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy) {
         if (files == null || files.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
         }
+        DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
         log.info("收到批量知识库上传请求: 文件数={}, category={}", files.size(), category);
         long startTime = System.currentTimeMillis();
 
@@ -241,7 +245,7 @@ public class KnowledgeBaseController {
         for (MultipartFile file : files) {
             String fileName = file != null ? file.getOriginalFilename() : null;
             try {
-                Map<String, Object> result = uploadSingle(file, null, category, KnowledgeBaseType.DOCUMENT_SEARCH);
+                Map<String, Object> result = uploadSingle(file, null, category, KnowledgeBaseType.DOCUMENT_SEARCH, scope, null);
                 Object kbObj = result.get("knowledgeBase");
                 if (kbObj instanceof Map<?, ?> kbMap) {
                     Object idObj = kbMap.get("id");
@@ -293,6 +297,17 @@ public class KnowledgeBaseController {
             @RequestParam("question") String question,
             @RequestParam("knowledgeBaseIds") List<Long> knowledgeBaseIds) {
         return Result.success(ragDatasetService.generate(knowledgeBaseIds, question));
+    }
+
+    /**
+     * RAGAS 生成质量评测导出（P4.3）：批量跑评测集问题走完整 RAG 生成，
+     * 返回 {@code {question, answer, contexts, ground_truth}} 供 eval/ragas 计算生成质量指标。
+     */
+    @PostMapping("/api/knowledgebase/eval/export-qa")
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    public Result<RagQaExportResponse> exportQa(@Valid @RequestBody RagQaExportRequest request) {
+        return Result.success(ragDatasetService.exportQa(request.knowledgeBaseIds(), request.items()));
     }
 
     /**

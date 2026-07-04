@@ -1,5 +1,11 @@
-﻿import axios, { AxiosRequestConfig } from 'axios';
-import { clearAuthSession, getAccessToken } from './authStorage';
+﻿import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import {
+  AuthSession,
+  clearAuthSession,
+  getAccessToken,
+  getRefreshToken,
+  setAuthSession,
+} from './authStorage';
 
 /**
  * 后端统一响应结构
@@ -45,6 +51,52 @@ function handleUnauthorized(code?: number, message?: string) {
   }
 }
 
+interface RetriableConfig extends InternalAxiosRequestConfig {
+  /** 标记该请求已用刷新后的 token 重放过，避免无限循环 */
+  _authRetried?: boolean;
+}
+
+let refreshPromise: Promise<AuthSession> | null = null;
+
+/** 用 refresh token 换新 access token；并发 401 共享同一次刷新请求 */
+function refreshAuthSession(): Promise<AuthSession> {
+  if (!refreshPromise) {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) {
+      return Promise.reject(new Error('无 refresh token'));
+    }
+    // 用裸 axios 避开实例拦截器（防递归刷新）
+    refreshPromise = axios
+      .post<Result<AuthSession>>(`${API_BASE_URL}/api/auth/refresh`, null, {
+        headers: { 'Refresh-Token': refreshToken },
+        timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      })
+      .then((res) => {
+        const result = res.data;
+        if (!isResult(result) || result.code !== 200) {
+          throw new Error(isResult(result) ? result.message : '刷新登录态失败');
+        }
+        const session = result.data as AuthSession;
+        setAuthSession(session);
+        return session;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+function canSilentRefresh(result: Result, config?: RetriableConfig): boolean {
+  return Boolean(
+    config
+    && !config._authRetried
+    && !config.url?.includes('/api/auth/')
+    && (result.code === 401 || result.message?.includes('token'))
+    && getRefreshToken(),
+  );
+}
+
 function isResult(value: unknown): value is Result {
   if (!value || typeof value !== 'object') {
     return false;
@@ -85,7 +137,7 @@ async function parseBlobResult(blob: Blob): Promise<Blob> {
  * - code !== 200 → 失败，直接显示 message
  */
 instance.interceptors.response.use(
-  (response) => {
+  async (response) => {
     // 检查是否是 Result 格式
     if (isResult(response.data)) {
       const result = response.data;
@@ -93,6 +145,19 @@ instance.interceptors.response.use(
         // 成功：返回 data
         response.data = result.data;
         return response;
+      }
+      // 401：先尝试静默刷新 token 并重放一次，失败才跳登录页
+      const config = response.config as RetriableConfig;
+      if (canSilentRefresh(result, config)) {
+        let session: AuthSession;
+        try {
+          session = await refreshAuthSession();
+        } catch {
+          return rejectResult(result);
+        }
+        config._authRetried = true;
+        config.headers.Authorization = `Bearer ${session.accessToken}`;
+        return instance.request(config);
       }
       // 失败：直接抛出 message
       return rejectResult(result);

@@ -180,4 +180,21 @@ public final class AsyncTaskStreamConstants {
      * 语音面试会话ID字段
      */
     public static final String FIELD_VOICE_SESSION_ID = "voiceSessionId";
+
+    // ========== RocketMQ Topic 映射（app.async.engine=rocketmq 时启用） ==========
+    // Redis Stream key 含冒号，不符合 RocketMQ topic 命名（%|a-zA-Z0-9_-），
+    // 故各管道单独定义 topic；消费者组沿用上面的 *_GROUP_NAME。
+    // 死信 topic 由 broker 按 %DLQ%<consumerGroup> 自动生成（重试耗尽后路由）。
+
+    /** 简历分析 RocketMQ topic */
+    public static final String RESUME_ANALYZE_TOPIC = "resume-analyze-topic";
+
+    /** 面试评估 RocketMQ topic（事务消息管道） */
+    public static final String INTERVIEW_EVALUATE_TOPIC = "interview-evaluate-topic";
+
+    /** 语音面试评估 RocketMQ topic */
+    public static final String VOICE_EVALUATE_TOPIC = "voice-evaluate-topic";
+
+    /** RocketMQ 死信 topic 前缀（broker 约定：%DLQ% + 消费者组名） */
+    public static final String ROCKETMQ_DLQ_TOPIC_PREFIX = "%DLQ%";
 }

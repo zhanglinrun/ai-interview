@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.constant;
 
 /**
- * 知识库文档状态机（对齐 know-engine DocumentStatus）。
+ * 知识库文档状态机（对齐业界实践 DocumentStatus）。
  *
  * <p>流转：{@link #INIT} → {@link #UPLOADED} → {@link #CONVERTING} → {@link #CONVERTED}
  * → {@link #CHUNKED} → {@link #VECTOR_STORED}。无需向量存储的走 {@link #STORED}。

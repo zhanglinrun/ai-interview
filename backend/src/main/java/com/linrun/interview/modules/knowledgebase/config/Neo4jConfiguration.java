@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Neo4j Driver 配置（对齐 know-engine {@code Neo4jConfiguration}）。
+ * Neo4j Driver 配置（对齐业界实践 {@code Neo4jConfiguration}）。
  */
 @Configuration
 @EnableConfigurationProperties(Neo4jProperties.class)

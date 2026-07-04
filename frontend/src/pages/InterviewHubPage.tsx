@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FileText,
   Mic,
-  Sparkles,
 } from 'lucide-react';
 import { type SkillDTO } from '../api/skill';
 import { interviewApi, type TextSessionMeta } from '../api/interview';
@@ -16,12 +15,14 @@ import { getScoreTextColor } from '../utils/score';
 import { compareDateDesc, formatDateTime } from '../utils/date';
 import { isEvaluationCompleted, isEvaluationProcessing } from '../utils/interviewStatus';
 import CustomJdPanel from '../components/CustomJdPanel';
+import CandidateMemoryPanel from '../components/CandidateMemoryPanel';
 import InterviewAdvancedOptions from '../components/InterviewAdvancedOptions';
 import InterviewDifficultySelector from '../components/InterviewDifficultySelector';
 import InterviewModeSelector from '../components/InterviewModeSelector';
 import InterviewSkillSelector from '../components/InterviewSkillSelector';
 import InterviewStatusBadge from '../components/InterviewStatusBadge';
 import { EmptyState, LoadingState } from '../components/PageState';
+import PageHeader from '../components/ui/PageHeader';
 import { useInterviewConfig } from '../hooks/useInterviewConfig';
 
 // 统一的面试记录项
@@ -138,17 +139,14 @@ export default function InterviewHubPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* 页面标题 */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-3">
-          <Sparkles className="w-7 h-7 text-primary-500" />
-          模拟面试
-        </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">选择面试模式和方向，快速开始练习</p>
-      </div>
+      <PageHeader
+        eyebrow="面试准备"
+        title="模拟面试"
+        description="选择文字或语音模式，配置方向与难度后开始练习。"
+      />
 
       {/* 配置区域 */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 p-6 mb-8">
+      <div className="surface-card p-6 md:p-8 mb-6">
         <div className="space-y-6">
           {/* 面试模式 */}
           <InterviewModeSelector value={config.mode} onChange={config.setMode} />
@@ -196,28 +194,28 @@ export default function InterviewHubPage() {
         </div>
 
         {/* 开始面试按钮 */}
-        <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700">
+        <div className="mt-6 pt-6 border-t border-stone-200/80 dark:border-stone-800">
           <motion.button
             onClick={handleStart}
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
+            whileHover={{ scale: 1.005 }}
+            whileTap={{ scale: 0.995 }}
             disabled={config.isCustomStartDisabled}
-            className="w-full px-6 py-3 rounded-xl font-semibold text-sm transition-all
-              bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700
-              text-white shadow-lg shadow-primary-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-6 py-3 rounded-xl font-medium text-sm btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
           >
             开始{config.mode === 'text' ? '文字' : '语音'}面试
           </motion.button>
         </div>
       </div>
 
+      <CandidateMemoryPanel skillId={config.skillId} className="mb-6" />
+
       {/* 最近面试记录 */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 p-6">
+      <div className="surface-card p-6 md:p-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-slate-800 dark:text-white">最近面试记录</h2>
+          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-50">最近面试记录</h2>
           <Link
             to="/interviews"
-            className="text-sm text-primary-500 hover:text-primary-600 font-medium transition-colors"
+            className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 font-medium transition-colors"
           >
             查看全部
           </Link>
@@ -252,7 +250,7 @@ export default function InterviewHubPage() {
                       navigate(`/voice-interview/${item.voiceSessionId}/evaluation`);
                     }
                   }}
-                  className="flex items-center gap-4 p-4 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer group"
+                  className="flex items-center gap-4 p-3.5 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer group border border-transparent hover:border-stone-200/80 dark:hover:border-stone-800"
                 >
                   {/* 类型图标 */}
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${

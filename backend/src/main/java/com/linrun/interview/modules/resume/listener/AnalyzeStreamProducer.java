@@ -1,10 +1,10 @@
 package com.linrun.interview.modules.resume.listener;
 
 import com.linrun.interview.common.async.AbstractStreamProducer;
+import com.linrun.interview.common.async.TaskQueueChannel;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.common.mybatis.MapperUtils;
-import com.linrun.interview.infrastructure.redis.RedisService;
 import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * 简历分析任务生产者
- * 负责发送分析任务到 Redis Stream
+ * 负责发送分析任务到异步任务管道
  */
 @Slf4j
 @Component
@@ -24,8 +24,8 @@ public class AnalyzeStreamProducer extends AbstractStreamProducer<AnalyzeStreamP
 
   record AnalyzeTaskPayload(Long resumeId, String content) {}
 
-  public AnalyzeStreamProducer(RedisService redisService, ResumeEntityMapper resumeEntityMapper) {
-    super(redisService);
+  public AnalyzeStreamProducer(TaskQueueChannel taskQueueChannel, ResumeEntityMapper resumeEntityMapper) {
+    super(taskQueueChannel);
     this.resumeEntityMapper = resumeEntityMapper;
   }
 

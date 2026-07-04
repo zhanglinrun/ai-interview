@@ -9,7 +9,7 @@ import dev.langchain4j.data.document.splitter.DocumentByRegexSplitter;
 import dev.langchain4j.data.document.splitter.DocumentByWordSplitter;
 
 /**
- * 文档切块工厂（对齐 know-engine {@code DocumentSplitterFactory}，默认 BROTHER）。
+ * 文档切块工厂（对齐业界实践 {@code DocumentSplitterFactory}，默认 BROTHER）。
  */
 public final class DocumentSplitterFactory {
 

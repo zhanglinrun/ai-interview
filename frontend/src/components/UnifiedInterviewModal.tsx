@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  X, Sparkles,
+  X,
 } from 'lucide-react';
 import { useInterviewConfig, DIFFICULTY_OPTIONS, type InterviewMode, type Difficulty } from '../hooks/useInterviewConfig';
 import CustomJdPanel from './CustomJdPanel';
@@ -132,23 +132,18 @@ export default function UnifiedInterviewModal({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               onClick={e => e.stopPropagation()}
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              className="surface-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
             >
               {/* Header */}
-              <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700/50">
+              <div className="px-6 py-5 border-b border-stone-200/80 dark:border-stone-800">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/25">
-                      <Sparkles className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                        {title}
-                      </h2>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {subtitle}
-                      </p>
-                    </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-50">
+                      {title}
+                    </h2>
+                    <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+                      {subtitle}
+                    </p>
                   </div>
                   <button
                     onClick={onClose}
@@ -214,26 +209,22 @@ export default function UnifiedInterviewModal({
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 bg-slate-50/80 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-700/50 rounded-b-2xl">
+              <div className="px-6 py-4 bg-stone-50/80 dark:bg-stone-900/40 border-t border-stone-200/80 dark:border-stone-800 rounded-b-2xl">
                 <div className="flex gap-3">
                   <motion.button
                     onClick={onClose}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 px-5 py-3 border border-slate-200 dark:border-slate-700
-                      text-slate-700 dark:text-slate-300 rounded-xl font-medium text-sm
-                      hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="flex-1 px-5 py-3 btn-secondary rounded-xl font-medium text-sm"
                   >
                     取消
                   </motion.button>
                   <motion.button
                     onClick={handleStart}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
                     disabled={config.isCustomStartDisabled}
-                    className="flex-1 px-5 py-3 rounded-xl font-semibold text-sm transition-all
-                      bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700
-                      text-white shadow-lg shadow-primary-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 px-5 py-3 rounded-xl font-medium text-sm btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {startButtonText}
                   </motion.button>

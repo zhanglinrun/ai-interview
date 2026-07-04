@@ -20,13 +20,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * MinerU 文件解析器（对齐 know-engine MinerUProcessBaseServiceImpl / PdfProcessServiceImpl）。
+ * MinerU 文件解析器（对齐业界实践 MinerUProcessBaseServiceImpl / PdfProcessServiceImpl）。
  *
  * <p>处理 PDF/DOC/HTML 等结构化文档：调外部 MinerU HTTP 服务 {@code /file_parse}，把文档转换为
  * Markdown（保留标题层级、表格、公式）。{@link MineruProperties#isEnabled()} 关闭或调用失败时，
  * 降级到 {@link DocumentParseService}（Tika 纯文本），保证解析链路始终可用。
  *
- * <p>与 know-engine 实现的差异（遵守 ai-interview AGENTS.md）：
+ * <p>与业界实现 实现的差异（遵守 ai-interview AGENTS.md）：
  * <ul>
  *   <li>用 Spring {@link RestClient}（已可用）替代 Apache HttpClient 5，不引入新依赖。</li>
  *   <li>配置集中到 {@link MineruProperties}（{@code @ConfigurationProperties}），不散落 {@code @Value}。</li>

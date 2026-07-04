@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * 带进度通知的检索器装饰器（对齐 know-engine ProgressAwareContentRetriever）。
+ * 带进度通知的检索器装饰器（对齐业界实践 ProgressAwareContentRetriever）。
  */
 public class ProgressAwareContentRetriever implements ContentRetriever {
 

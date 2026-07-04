@@ -92,3 +92,48 @@ export interface ReferenceAnswer {
   referenceAnswer: string;
   keyPoints: string[];
 }
+
+// ============ Multi-Agent 编排（大纲 / 决策轨迹 / 候选人画像） ============
+
+export interface AgentPlanTopic {
+  name: string;
+  focus: string;
+  questionCount: number;
+}
+
+export interface AgentInterviewPlan {
+  topics: AgentPlanTopic[];
+  difficultyCurve: string;
+  focusFromResume: string[];
+  focusFromJd: string[];
+}
+
+export interface AgentPlanProgress {
+  agentMode: boolean;
+  currentIndex: number;
+  plannedTotal: number;
+  plan: AgentInterviewPlan | null;
+}
+
+export interface AgentTraceStep {
+  step: number;
+  role: string;
+  action: string;
+  actionInput: string;
+  observation: string;
+}
+
+export interface AgentTraceGroup {
+  questionIndex: number | null;
+  steps: AgentTraceStep[];
+}
+
+export interface CandidateMemoryProfile {
+  topic: string;
+  weaknessCount: number;
+  strengthCount: number;
+  latestKind: string;
+  latestEvidence: string;
+  lastSessionId: string;
+  lastAt: string;
+}

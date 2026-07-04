@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useState} from 'react';
-import {useLocation} from 'react-router-dom';
+import {useLocation, useNavigate} from 'react-router-dom';
 import {AnimatePresence, motion} from 'framer-motion';
 import {historyApi, InterviewDetail, ResumeDetail} from '../api/history';
+import {interviewApi} from '../api/interview';
 import {getErrorMessage} from '../api/request';
 import AnalysisPanel from '../components/AnalysisPanel';
 import InterviewPanel from '../components/InterviewPanel';
@@ -12,7 +13,7 @@ import {formatDateOnly} from '../utils/date';
 import {downloadBlob} from '../utils/download';
 import {shouldPollAnalyzeResult} from '../utils/analyzeStatus';
 import {NORMAL_POLLING_INTERVAL_MS, useConditionalPolling} from '../hooks/useConditionalPolling';
-import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'lucide-react';
+import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic, PlayCircle} from 'lucide-react';
 
 interface ResumeDetailPageProps {
   resumeId: number;
@@ -34,8 +35,10 @@ function getTabs(interviewCount: number) {
 
 export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }: ResumeDetailPageProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [resume, setResume] = useState<ResumeDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [unfinishedSessionId, setUnfinishedSessionId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('analysis');
   const [exporting, setExporting] = useState<string | null>(null);
   const [[page, direction], setPage] = useState([0, 0]);
@@ -69,6 +72,18 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   useEffect(() => {
     loadResumeDetail();
   }, [loadResumeDetail]);
+
+  useEffect(() => {
+    interviewApi.findUnfinishedSession(resumeId)
+      .then((session) => {
+        if (session?.sessionId && session.status !== 'COMPLETED' && session.status !== 'EVALUATED') {
+          setUnfinishedSessionId(session.sessionId);
+        } else {
+          setUnfinishedSessionId(null);
+        }
+      })
+      .catch(() => setUnfinishedSessionId(null));
+  }, [resumeId]);
 
   // 轮询：当分析状态为待处理时，每5秒刷新一次
   // 待处理判断：显式的 PENDING/PROCESSING 状态，或状态未定义且无分析结果
@@ -281,6 +296,25 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
           )}
         </div>
       </div>
+
+      {detailView !== 'interviewDetail' && unfinishedSessionId && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3"
+        >
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            检测到该简历有未完成的文字面试，可继续答题。
+          </p>
+          <button
+            onClick={() => navigate('/interview', { state: { sessionIdToResume: unfinishedSessionId, resumeId } })}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+          >
+            <PlayCircle className="w-4 h-4" />
+            继续面试
+          </button>
+        </motion.div>
+      )}
 
       {/* 标签页切换 - 仅在非面试详情时显示 */}
       {detailView !== 'interviewDetail' && (

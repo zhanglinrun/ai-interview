@@ -123,7 +123,7 @@ public class VoiceInterviewService {
             return;
         }
         log.info("Auto-ending IN_PROGRESS session {} after WebSocket disconnect", sessionId);
-        endSession(session);
+        endSessionAndEnqueueEvaluation(session);
     }
 
     /**
@@ -142,15 +142,32 @@ public class VoiceInterviewService {
             return;
         }
 
-        endSession(session);
-        voiceEvaluateStreamProducer.sendEvaluateTask(sessionId);
+        endSessionAndEnqueueEvaluation(session);
     }
 
     @Transactional
     public void endSessionForCurrentUser(Long sessionId) {
         VoiceInterviewSessionEntity session = getSessionForCurrentUserOrThrow(sessionId);
+        endSessionAndEnqueueEvaluation(session);
+    }
+
+    /**
+     * 统一的「结束会话 + 评估任务入队」（N2）：所有结束路径（正常结束 / WebSocket 断开 /
+     * stale 清理）都必须经此方法，保证 evaluateStatus 置 PENDING 的同时评估任务真正入队；
+     * 入队失败不影响结束，由补偿扫描（{@link #cleanupStaleSessions}）按 PENDING 重派。
+     */
+    private void endSessionAndEnqueueEvaluation(VoiceInterviewSessionEntity session) {
         endSession(session);
-        voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
+        enqueueEvaluation(session.getId());
+    }
+
+    private void enqueueEvaluation(Long sessionId) {
+        try {
+            voiceEvaluateStreamProducer.sendEvaluateTask(String.valueOf(sessionId));
+        } catch (Exception e) {
+            log.error("语音评估任务入队失败，evaluateStatus=PENDING 留待补偿扫描重派: sessionId={}",
+                sessionId, e);
+        }
     }
 
     private void endSession(VoiceInterviewSessionEntity session) {
@@ -598,8 +615,21 @@ public class VoiceInterviewService {
                 .status(session.getStatus().name())
                 .startTime(session.getStartTime())
                 .plannedDuration(session.getPlannedDuration())
-                .webSocketUrl(String.format("ws://localhost:8080/ws/voice-interview/%d", session.getId()))
+                .webSocketUrl(buildWebSocketUrl(session.getId()))
                 .build();
+    }
+
+    /**
+     * 默认返回相对路径，前端按页面 origin 拼接协议与主机；
+     * 配置 app.voice-interview.ws-base-url 时返回绝对地址（跨域独立部署场景）。
+     */
+    private String buildWebSocketUrl(Long sessionId) {
+        String base = properties.getWsBaseUrl();
+        String path = "/ws/voice-interview/" + sessionId;
+        if (base == null || base.isBlank()) {
+            return path;
+        }
+        return base.endsWith("/") ? base.substring(0, base.length() - 1) + path : base + path;
     }
 
     /**
@@ -726,7 +756,7 @@ public class VoiceInterviewService {
         for (VoiceInterviewSessionEntity session : staleSessions) {
             log.info("Cleaning up stale IN_PROGRESS session {}, started at {}",
                 session.getId(), session.getStartTime());
-            endSession(session);
+            endSessionAndEnqueueEvaluation(session);
             cleaned++;
         }
 
@@ -740,6 +770,23 @@ public class VoiceInterviewService {
             log.info("Resetting stuck PROCESSING evaluation for session {}", session.getId());
             session.setEvaluateStatus(AsyncTaskStatus.FAILED);
             session.setEvaluateError("评估超时，请重新触发");
+            MapperUtils.save(sessionRepository, session);
+            cleaned++;
+        }
+
+        // N2 补偿：COMPLETED 但评估任务疑似丢失（PENDING 超过 10 分钟未被消费）→ 重新入队。
+        // 消费者按会话粒度重派，评估结果表以 sessionId 幂等覆盖，重复消费无副作用。
+        LocalDateTime pendingStaleThreshold = LocalDateTime.now().minusMinutes(10);
+        List<VoiceInterviewSessionEntity> lostPendings = sessionRepository.selectList(
+            Wrappers.<VoiceInterviewSessionEntity>lambdaQuery()
+                .eq(VoiceInterviewSessionEntity::getStatus, VoiceInterviewSessionStatus.COMPLETED)
+                .eq(VoiceInterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.PENDING)
+                .lt(VoiceInterviewSessionEntity::getUpdatedAt, pendingStaleThreshold));
+
+        for (VoiceInterviewSessionEntity session : lostPendings) {
+            log.info("Re-enqueueing lost PENDING evaluation for session {}", session.getId());
+            enqueueEvaluation(session.getId());
+            // 触发 updatedAt 刷新，避免下个扫描周期重复入队
             MapperUtils.save(sessionRepository, session);
             cleaned++;
         }

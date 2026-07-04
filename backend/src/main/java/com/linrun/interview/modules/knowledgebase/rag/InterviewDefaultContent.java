@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 知识库 Content 子类（移植自 know-engine 的 KnowEngineDefaultContent）。
+ * 知识库 Content 子类（参考业界实现的 DefaultContent）。
  *
  * <p>覆写 {@code equals/hashCode} 按 {@code EMBEDDING_ID} 元数据去重，使
  * {@link InterviewReciprocalRankFuser} 在跨路融合时能正确合并同一 chunk 的多路命中，

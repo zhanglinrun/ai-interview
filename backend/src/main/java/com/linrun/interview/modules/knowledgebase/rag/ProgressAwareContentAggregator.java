@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * 带进度通知的内容聚合器装饰器（对齐 know-engine ProgressAwareContentAggregator）。
+ * 带进度通知的内容聚合器装饰器（对齐业界实践 ProgressAwareContentAggregator）。
  */
 public class ProgressAwareContentAggregator implements ContentAggregator {
 
