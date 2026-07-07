@@ -232,6 +232,42 @@ CREATE TABLE IF NOT EXISTS `rag_evaluation_runs` (
     KEY `idx_rag_evaluation_runs_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `eval_runs` (
+    `id`                      BIGINT        NOT NULL AUTO_INCREMENT,
+    `user_id`                 BIGINT        NOT NULL DEFAULT 1,
+    `run_id`                  VARCHAR(80)   NOT NULL,
+    `title`                   VARCHAR(120)  NOT NULL,
+    `baseline_key`            VARCHAR(80)   NOT NULL DEFAULT 'default',
+    `baseline`                TINYINT(1)    NOT NULL DEFAULT 0,
+    `request_json`            LONGTEXT      NULL,
+    `response_json`           LONGTEXT      NULL,
+    `intent_total`            INT           NULL,
+    `intent_correct`          INT           NULL,
+    `intent_accuracy`         DOUBLE        NULL,
+    `intent_macro_f1`         DOUBLE        NULL,
+    `rag_run_id`              VARCHAR(80)   NULL,
+    `rag_hit_rate`            DOUBLE        NULL,
+    `rag_mrr`                 DOUBLE        NULL,
+    `rag_ndcg`                DOUBLE        NULL,
+    `judge_total`             INT           NULL,
+    `judge_passed`            INT           NULL,
+    `judge_pass_rate`         DOUBLE        NULL,
+    `judge_average_overall`   DOUBLE        NULL,
+    `judge_average_relevance` DOUBLE        NULL,
+    `judge_average_accuracy`  DOUBLE        NULL,
+    `judge_average_completeness` DOUBLE      NULL,
+    `judge_average_helpfulness` DOUBLE       NULL,
+    `overall_score`           DOUBLE        NULL,
+    `regression`              TINYINT(1)    NOT NULL DEFAULT 0,
+    `regression_threshold`    DOUBLE        NULL,
+    `created_at`              DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_eval_runs_run_id` (`run_id`),
+    KEY `idx_eval_runs_user_created` (`user_id`, `created_at` DESC),
+    KEY `idx_eval_runs_baseline` (`user_id`, `baseline_key`, `baseline`, `created_at` DESC),
+    KEY `idx_eval_runs_regression` (`regression`, `created_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     `id`                      BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`                 BIGINT       NOT NULL,
@@ -451,4 +487,3 @@ CREATE TABLE IF NOT EXISTS `llm_global_setting` (
     `updated_at`                   DATETIME(6) NOT NULL,
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

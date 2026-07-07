@@ -193,6 +193,20 @@ public class KnowledgeBaseQueryProperties {
         private boolean progressEnabled = true;
         /** 意图识别专用模型；空则复用默认 ChatModel */
         private String model = "";
+        /** LLM 语义识别在三路融合中的权重 */
+        private double llmWeight = 0.6;
+        /** 面试意图样例相似度在三路融合中的权重 */
+        private double vectorWeight = 0.25;
+        /** 关键词规则兜底在三路融合中的权重 */
+        private double ruleWeight = 0.15;
+        /** 最低综合置信度；低于该值时按 OFF_TOPIC 处理 */
+        private double minConfidence = 0.3;
+        /** 本地识别缓存上限；达到上限后清空，避免无界增长 */
+        private int cacheMaxSize = 1000;
+        /** 意图识别缓存 key 纳入的最近历史消息数 */
+        private int maxHistoryMessages = 6;
+        /** 单条历史消息进入意图识别 prompt/cache key 的最大字符数 */
+        private int historyMessageMaxChars = 160;
     }
 
     /**

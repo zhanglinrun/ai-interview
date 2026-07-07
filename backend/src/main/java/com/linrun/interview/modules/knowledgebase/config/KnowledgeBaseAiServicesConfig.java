@@ -1,7 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.config;
 
 import com.linrun.interview.common.ai.LlmProviderRegistry;
-import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
+import com.linrun.interview.modules.knowledgebase.rag.LlmIntentRecognitionAiService;
 import com.linrun.interview.modules.knowledgebase.rag.TitleSummaryService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
 import dev.langchain4j.service.AiServices;
@@ -19,13 +19,13 @@ import org.springframework.context.annotation.DependsOn;
 public class KnowledgeBaseAiServicesConfig {
 
     @Bean
-    public IntentRecognitionService intentRecognitionService(
+    public LlmIntentRecognitionAiService llmIntentRecognitionAiService(
         LlmProviderRegistry llmProviderRegistry,
         KnowledgeBaseQueryProperties queryProperties) {
         String intentModel = queryProperties.getIntentRecognition().getModel();
-        log.info("[KnowledgeBaseAiServices] 构造 IntentRecognitionService, model={}",
+        log.info("[KnowledgeBaseAiServices] 构造 LlmIntentRecognitionAiService, model={}",
             intentModel == null || intentModel.isBlank() ? "default" : intentModel);
-        return AiServices.builder(IntentRecognitionService.class)
+        return AiServices.builder(LlmIntentRecognitionAiService.class)
             .chatModel(llmProviderRegistry.getChatModelWithModel(null, intentModel))
             .build();
     }

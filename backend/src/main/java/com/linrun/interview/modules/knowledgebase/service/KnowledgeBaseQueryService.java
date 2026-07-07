@@ -402,7 +402,7 @@ public class KnowledgeBaseQueryService {
                     if (intentRecognition.isProgressEnabled() && !sink.isCancelled()) {
                         sink.next(PROGRESS_PREFIX + "正在理解您的问题...");
                     }
-                    IntentRecognitionResult intent = recognizeIntent(question);
+                    IntentRecognitionResult intent = recognizeIntent(question, history);
                     if (intent != null && !intent.related()) {
                         log.info("意图识别判定不相关，走通用对话兜底: question='{}', reason={}",
                             question, intent.reason());
@@ -508,15 +508,15 @@ public class KnowledgeBaseQueryService {
      *
      * <p>任何异常都返回 null，由调用方按「相关」兜底走 RAG，不阻断主流程。
      */
-    private IntentRecognitionResult recognizeIntent(String question) {
+    private IntentRecognitionResult recognizeIntent(String question, List<ChatMessage> history) {
         try {
-            IntentRecognitionResult result = intentRecognitionService.recognize(question);
+            IntentRecognitionResult result = intentRecognitionService.recognize(question, history);
             if (result == null) {
                 log.warn("意图识别返回空，按相关兜底走 RAG");
                 return null;
             }
-            log.debug("意图识别结果: related={}, intent={}, reason={}",
-                result.related(), result.intent(), result.reason());
+            log.debug("意图识别结果: related={}, intent={}, confidence={}, cached={}, reason={}",
+                result.related(), result.intent(), result.confidence(), result.cached(), result.reason());
             return result;
         } catch (Exception e) {
             log.warn("意图识别失败，按相关兜底走 RAG: error={}", e.getMessage(), e);

@@ -393,6 +393,13 @@ app:
         # 是否在意图识别前推"正在理解您的问题..."进度（关闭可省前端空进度）
         progress-enabled: ${APP_AI_RAG_INTENT_RECOGNITION_PROGRESS_ENABLED:true}
         model: ${APP_AI_RAG_INTENT_MODEL:}
+        llm-weight: ${APP_AI_RAG_INTENT_LLM_WEIGHT:0.6}
+        vector-weight: ${APP_AI_RAG_INTENT_VECTOR_WEIGHT:0.25}
+        rule-weight: ${APP_AI_RAG_INTENT_RULE_WEIGHT:0.15}
+        min-confidence: ${APP_AI_RAG_INTENT_MIN_CONFIDENCE:0.3}
+        cache-max-size: ${APP_AI_RAG_INTENT_CACHE_MAX_SIZE:1000}
+        max-history-messages: ${APP_AI_RAG_INTENT_MAX_HISTORY_MESSAGES:6}
+        history-message-max-chars: ${APP_AI_RAG_INTENT_HISTORY_MESSAGE_MAX_CHARS:160}
       title-summary:
         enabled: ${APP_AI_RAG_TITLE_SUMMARY_ENABLED:true}
         model: ${APP_AI_RAG_TITLE_MODEL:qwen3.5-flash}
