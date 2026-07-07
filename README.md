@@ -14,6 +14,8 @@
 - 使用 Markdown 标题层级进行语义切块，并维护父子、兄弟 chunk 关系。
 - 基于 Elasticsearch 做原生 KNN 向量检索和带过滤全文检索，支持多知识库 metadata 过滤。
 - 内置 RAG 检索评测接口，计算 Hit@K、MRR、NDCG 并保存评测 run。
+- 补充面试场景三路融合意图识别：LLM 语义判断、本地样例相似度和关键词规则共同投票，输出综合置信度和证据。
+- 提供统一评测运行接口 `/api/eval/run`，把意图识别评测、RAG 检索评测、LLM-as-Judge 回答质量评测和基线回归串成闭环。
 - 通过 Query Rewrite、RetrievalAugmentor 编排、Rerank 和上下文扩展提升回答质量。
 - 支持 Text2SQL 查询白名单业务表，把简历、面试记录、日程和评分统计纳入多源 RAG。
 - 在流式问答中返回检索进度、引用来源和置信度信息。
@@ -45,8 +47,9 @@
 - 引用溯源：回答末尾返回来源片段，非流式接口会返回 sources、confidence 和无效引用编号。
 - 检索 Trace：保存原问题、改写问题、路由策略、命中 chunk、rerank 后顺序、最终引用和答案。
 - 多源路由：QueryRouter 可将问题路由到知识库 ES、Text2SQL 或二者混合，结构化 SQL 结果跳过 Rerank 并置顶。
-- RAG 评测：`/api/knowledgebase/evaluate-retrieval` 复用知识库检索链路，计算 Hit@K、MRR、NDCG，结果保存到 `rag_evaluation_runs`。
-- 意图识别：非面试、非技术、非求职类问题可走通用对话兜底，避免强行检索造成幻觉。
+- 三路融合意图识别：流式问答前用 LLM 语义识别、面试意图样例相似度、关键词规则兜底共同判断用户问题；结果包含 `intent`、`related`、`confidence`、`strategies` 和 `cached`，用于 RAG 路由、Prompt 选择和离题兜底。
+- 检索评测：`/api/knowledgebase/evaluate-retrieval` 复用知识库检索链路，计算 Hit@K、MRR、NDCG，结果保存到 `rag_evaluation_runs`。
+- 统一评测闭环：`/api/eval/run` 可同时跑意图识别用例、RAG 检索用例和 LLM-as-Judge 回答质量用例，保存到 `eval_runs`，并按 `baselineKey` 与最近基线比较，标记 `overallScore`、`intentAccuracy`、`intentMacroF1`、`ragHitRate`、`judgeAverageOverall` 等指标是否退化。
 - 会话管理：支持创建 RAG 会话、历史消息、置顶、重命名和关联知识库调整。
 
 ### 表格与结构化数据
@@ -94,8 +97,9 @@ flowchart LR
   G --> H["Embedding"]
   H --> I["Elasticsearch 向量索引"]
 
-  Q["用户问题"] --> R["意图识别"]
-  R --> S["查询改写"]
+  Q["用户问题"] --> R["三路融合意图识别"]
+  R -->|"相关 / 置信度达标"| S["查询改写"]
+  R -->|"离题 / 低置信"| FB["通用对话兜底"]
   S --> T["QueryRouter"]
   T --> U1["ES KNN / 全文检索"]
   T --> U2["Text2SQL 白名单表"]
@@ -105,6 +109,57 @@ flowchart LR
   V --> W["Rerank 精排"]
   W --> Y["LLM 生成"]
   Y --> Z["答案 + 引用来源"]
+```
+
+## 统一评测闭环
+
+本项目新增统一评测运行接口，用来把“功能可用”进一步落到“指标可追踪、版本可回归”。
+
+- 接口：`POST /api/eval/run`
+- 覆盖范围：面试场景意图识别用例、RAG 检索评测用例、LLM-as-Judge 回答质量用例。
+- 持久化：每次运行保存到 `eval_runs`，RAG 检索明细仍复用 `rag_evaluation_runs`。
+- 基线对比：请求中可传 `baselineKey` 和 `updateBaseline`；普通运行会与同一 `baselineKey` 下最近一次基线比较。
+- 退化判断：按 `regressionThreshold` 判断 `overallScore`、意图识别准确率、Macro-F1、RAG Hit@K / MRR / NDCG、裁判平均分和裁判通过率是否明显下降。
+
+最小请求示例：
+
+```json
+{
+  "title": "面试路由基础回归",
+  "baselineKey": "interview-routing-basic",
+  "updateBaseline": false,
+  "regressionThreshold": 0.03,
+  "intentCases": [
+    {
+      "question": "讲讲 JVM 垃圾回收原理",
+      "expectedIntent": "TECH_KB"
+    },
+    {
+      "question": "今天天气怎么样",
+      "expectedIntent": "OFF_TOPIC"
+    }
+  ],
+  "rag": {
+    "knowledgeBaseIds": [1],
+    "k": 5,
+    "items": [
+      {
+        "question": "Redis 缓存穿透怎么解决？",
+        "expectedKeywords": ["布隆过滤器", "空值缓存"],
+        "expectedChunkIds": []
+      }
+    ]
+  },
+  "judgeCases": [
+    {
+      "question": "Redis 缓存穿透怎么解决？",
+      "answer": "可以用布隆过滤器拦截不存在的 key，并对不存在的数据做短 TTL 空值缓存。",
+      "referenceAnswer": "布隆过滤器、参数校验、空值缓存、热点保护。",
+      "context": "缓存穿透指查询不存在的数据导致请求打到数据库。",
+      "minOverallScore": 0.75
+    }
+  ]
+}
 ```
 
 ## RAG 检索评测结果
@@ -369,6 +424,7 @@ APP_AI_RAG_RERANK_ENABLED=false
 | 批量上传 | `POST /api/knowledgebase/upload/batch` |
 | RAG 问答 | `POST /api/knowledgebase/query`、`POST /api/knowledgebase/query/stream` |
 | RAG 检索评测 | `POST /api/knowledgebase/evaluate-retrieval` |
+| 统一评测闭环 | `POST /api/eval/run` |
 | RAG Trace | `GET /api/knowledgebase/traces`、`GET /api/knowledgebase/traces/{traceId}` |
 | 表格数据预览 | `GET /api/knowledgebase/{id}/data/preview` |
 | RAG 会话 | `POST /api/rag-chat/sessions`、`POST /api/rag-chat/sessions/{id}/messages/stream` |
