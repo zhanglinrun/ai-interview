@@ -177,7 +177,7 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen">
       {/* 左侧边栏 */}
-      <aside className="w-64 bg-white/95 dark:bg-stone-950 border-r border-stone-200/80 dark:border-stone-800 fixed h-screen left-0 top-0 z-50 flex flex-col">
+      <aside className="w-64 bg-white/60 dark:bg-stone-950/60 backdrop-blur-2xl border-r border-white/40 dark:border-white/10 fixed h-screen left-0 top-0 z-50 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-colors duration-300">
         {/* Logo */}
         <div className="p-5 border-b border-stone-200/80 dark:border-stone-800">
           <Link to="/history" className="flex items-center gap-3 group">
@@ -228,10 +228,10 @@ export default function Layout() {
                       <Link
                         key={item.id}
                         to={item.path}
-                        className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-150
+                        className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-300
                           ${active
-                            ? 'bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300'
-                            : 'text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-900 hover:text-stone-900 dark:hover:text-stone-100'
+                            ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300 shadow-sm border border-primary-500/20'
+                            : 'text-stone-600 dark:text-stone-400 hover:bg-white/60 dark:hover:bg-stone-900/50 hover:text-stone-900 dark:hover:text-stone-100 hover:shadow-sm'
                           }`}
                       >
                         <item.icon className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} />

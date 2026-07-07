@@ -58,67 +58,74 @@
 
 /* 深色模式通用样式 - 自动应用于所有卡片和容器 */
 @layer components {
-    /* 标准卡片（dark-card 为旧类名别名） */
+    /* 高级毛玻璃卡片质感 */
     .surface-card,
     .dark-card {
-        @apply bg-white/90 dark:bg-stone-900/70 backdrop-blur-sm rounded-2xl;
-        @apply border border-stone-200/80 dark:border-stone-800/80;
-        @apply shadow-[0_1px_2px_rgba(28,25,23,0.04),0_8px_24px_rgba(28,25,23,0.04)];
+        @apply bg-white/70 dark:bg-stone-900/60 backdrop-blur-xl rounded-2xl;
+        @apply border border-white/60 dark:border-white/10;
+        @apply shadow-[0_4px_24px_-4px_rgba(0,0,0,0.05),0_1px_4px_-1px_rgba(0,0,0,0.02)];
+        @apply transition-all duration-300;
     }
 
     .dark .surface-card,
     .dark .dark-card {
-        @apply shadow-[0_1px_2px_rgba(0,0,0,0.2),0_8px_24px_rgba(0,0,0,0.15)];
+        @apply shadow-[0_8px_32px_-4px_rgba(0,0,0,0.3),0_2px_8px_-1px_rgba(0,0,0,0.2)];
+    }
+
+    /* 悬浮态高级卡片 (可选添加此类名以获得交互) */
+    .hover-card {
+        @apply hover:-translate-y-1 hover:shadow-xl dark:hover:shadow-[0_8px_40px_-4px_rgba(0,0,0,0.4)] hover:border-primary-500/20 dark:hover:border-primary-500/30;
     }
 
     /* 通用输入框 */
     .dark-input {
-        @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100;
-        @apply focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 dark:focus:ring-primary-400/20 dark:focus:border-primary-400;
-        @apply transition-all duration-200;
+        @apply bg-white/80 dark:bg-stone-900/80 backdrop-blur-md border border-stone-200/80 dark:border-stone-800/80 text-stone-900 dark:text-stone-100;
+        @apply focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 dark:focus:ring-primary-400/20 dark:focus:border-primary-400;
+        @apply transition-all duration-300 shadow-inner rounded-xl;
     }
 
     /* 通用文字颜色 */
     .dark-text {
-        @apply text-slate-900 dark:text-slate-50;
+        @apply text-stone-900 dark:text-stone-50;
     }
 
     .dark-text-muted {
-        @apply text-slate-600 dark:text-slate-400;
+        @apply text-stone-500 dark:text-stone-400;
     }
 
-    /* 按钮基础样式 */
+    /* 按钮基础样式 - 更动感和呼吸感 */
     .btn-primary {
-        @apply bg-primary-600 hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600;
-        @apply text-white font-medium;
-        @apply active:scale-[0.98];
-        @apply shadow-sm;
-        @apply transition-all duration-200;
+        @apply bg-primary-600 hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-500;
+        @apply text-white font-medium rounded-xl;
+        @apply active:scale-95 hover:scale-[1.02];
+        @apply shadow-[0_4px_16px_rgba(13,148,136,0.3)] hover:shadow-[0_8px_24px_rgba(13,148,136,0.4)];
+        @apply transition-all duration-300;
     }
 
     .btn-secondary {
-        @apply bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-200;
-        @apply hover:bg-stone-50 dark:hover:bg-stone-800;
-        @apply active:scale-[0.98];
-        @apply border border-stone-200 dark:border-stone-700;
-        @apply transition-all duration-200;
+        @apply bg-white/80 dark:bg-stone-900/80 text-stone-700 dark:text-stone-200 backdrop-blur-md;
+        @apply hover:bg-white dark:hover:bg-stone-800 rounded-xl;
+        @apply active:scale-95 hover:scale-[1.02];
+        @apply border border-stone-200 dark:border-stone-700/80;
+        @apply shadow-sm hover:shadow-md;
+        @apply transition-all duration-300;
     }
 
     /* 虚线拖放区 */
     .dropzone {
-        @apply rounded-2xl border-2 border-dashed border-stone-200 dark:border-stone-700;
+        @apply rounded-2xl border-2 border-dashed border-stone-300 dark:border-stone-700;
         @apply bg-stone-50/50 dark:bg-stone-900/30;
-        @apply transition-colors duration-200;
+        @apply transition-all duration-300 hover:bg-stone-100/50 dark:hover:bg-stone-800/30;
     }
 
     .dropzone-active {
-        @apply border-primary-400 bg-primary-50/30 dark:border-primary-600 dark:bg-primary-950/20;
+        @apply border-primary-500 bg-primary-50/50 dark:border-primary-500 dark:bg-primary-900/20 scale-[1.02] shadow-lg shadow-primary-500/10;
     }
 
     /* 状态徽章 */
     .status-badge {
-        @apply px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide uppercase;
-        @apply border backdrop-blur-sm;
+        @apply px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase;
+        @apply border border-white/20 shadow-sm backdrop-blur-md;
     }
 }
 
