@@ -311,6 +311,13 @@
           <include>eval-dataset.yaml</include>
         </includes>
       </testResource>
+      <testResource>
+        <directory>${project.basedir}/../eval/interview-agent</directory>
+        <targetPath>agent-eval</targetPath>
+        <includes>
+          <include>critic-badcase-dataset.yaml</include>
+        </includes>
+      </testResource>
     </testResources>
     <plugins>
       <plugin>

@@ -36,7 +36,7 @@
          钉成旧版（如 5.12.0 / platform 1.12.0）会与 Spring Boot / Spring Framework 的
          SpringExtension 不兼容（NoSuchMethodError: ExtensionContext$Store.computeIfAbsent），
          导致所有 @SpringBootTest 集成测试无法启动。 -->
-    <redisson.version>3.24.3</redisson.version>
+    <redisson.version>3.52.0</redisson.version>
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
     <druid.version>1.2.23</druid.version>
     <easyexcel.version>3.3.4</easyexcel.version>
@@ -60,9 +60,10 @@
     <!-- RocketMQ Spring Boot Starter（异步任务引擎可选实现，app.async.engine=rocketmq 启用）。
          2.3.x 仍走 spring.factories，Spring Boot 3 下需手动补 AutoConfiguration.imports（见 backend resources）。 -->
     <rocketmq-spring.version>2.3.5</rocketmq-spring.version>
-    <!-- surefire 默认排除 rag-eval 组（评测集见 eval/rag-retrieval/，连真实 ES + DashScope）。
+    <!-- surefire 默认排除评测组：rag-eval（RAG 检索，连真实 ES + DashScope）、
+         agent-eval（面试 Agent Critic 质量门，连真实 DashScope）。评测集见 eval/。
          触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
-    <test.excludedGroups>rag-eval</test.excludedGroups>
+    <test.excludedGroups>rag-eval,agent-eval</test.excludedGroups>
   </properties>
 
   <dependencyManagement>

@@ -31,6 +31,7 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
@@ -69,7 +70,7 @@ class VoiceInterviewIntegrationTest {
         phaseConfig.setProject(new VoiceInterviewProperties.DurationConfig(8, 10, 15, 2, 5));
         phaseConfig.setHr(new VoiceInterviewProperties.DurationConfig(3, 5, 8, 2, 5));
         lenient().when(properties.getPhase()).thenReturn(phaseConfig);
-        lenient().when(redissonClient.<VoiceInterviewSessionEntity>getBucket(any())).thenReturn(bucket);
+        lenient().when(redissonClient.<VoiceInterviewSessionEntity>getBucket(anyString())).thenReturn(bucket);
         lenient().when(bucket.get()).thenReturn(null);
         when(sessionMapper.insert(any(VoiceInterviewSessionEntity.class))).thenAnswer(invocation -> {
             VoiceInterviewSessionEntity entity = invocation.getArgument(0);
