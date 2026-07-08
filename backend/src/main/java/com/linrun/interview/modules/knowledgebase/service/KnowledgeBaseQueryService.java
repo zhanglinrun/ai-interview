@@ -15,6 +15,8 @@ import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
 import com.linrun.interview.modules.knowledgebase.rag.CompositeContentRetriever;
+import com.linrun.interview.modules.knowledgebase.rag.CorrectiveRetrievalGrader;
+import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryDecomposer;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewCompositeQueryTransformer;
@@ -48,6 +50,7 @@ import dev.langchain4j.rag.content.ContentMetadata;
 import dev.langchain4j.rag.content.injector.ContentInjector;
 import dev.langchain4j.rag.content.injector.DefaultContentInjector;
 import dev.langchain4j.rag.query.Metadata;
+import dev.langchain4j.rag.query.transformer.QueryTransformer;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -175,6 +178,10 @@ public class KnowledgeBaseQueryService {
     private final PromptTemplate hydePromptTemplate;
     private final boolean hydeEnabled;
     private final int hydeMaxChars;
+    private final KnowledgeBaseQueryProperties.Decompose decompose;
+    private final KnowledgeBaseQueryProperties.Crag crag;
+    private final PromptTemplate decomposePromptTemplate;
+    private final PromptTemplate cragPromptTemplate;
     private final AtomicInteger activeStreams = new AtomicInteger(0);
 
     public KnowledgeBaseQueryService(
@@ -257,6 +264,14 @@ public class KnowledgeBaseQueryService {
                 .getContentAsString(StandardCharsets.UTF_8));
         this.neo4jDriver = neo4jDriver;
         this.intentRecognition = queryProperties.getIntentRecognition();
+        this.decompose = queryProperties.getDecompose();
+        this.crag = queryProperties.getCrag();
+        this.decomposePromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(decompose.getPromptPath())
+                .getContentAsString(StandardCharsets.UTF_8));
+        this.cragPromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(crag.getPromptPath())
+                .getContentAsString(StandardCharsets.UTF_8));
     }
 
     private ChatModel getChatModel() {
@@ -269,6 +284,14 @@ public class KnowledgeBaseQueryService {
 
     private ChatModel getRewriteChatModel() {
         return llmProviderRegistry.getChatModelWithModel(null, rewriteModel);
+    }
+
+    private ChatModel getDecomposeChatModel() {
+        return llmProviderRegistry.getChatModelWithModel(null, decompose.getModel());
+    }
+
+    private ChatModel getCragChatModel() {
+        return llmProviderRegistry.getChatModelWithModel(null, crag.getModel());
     }
 
     private StreamingChatModel getStreamingChatModel() {
@@ -554,11 +577,111 @@ public class KnowledgeBaseQueryService {
         dev.langchain4j.rag.AugmentationResult result =
             augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata));
         recordRetrievalMetrics(startNanos, result.contents());
+        AugmentationOutcome outcome = new AugmentationOutcome(result.contents(), result.chatMessage());
+        // Agentic RAG：CRAG 纠正式检索（rerank 后对 top-N 打分，ambiguous 重检索一次，incorrect 判「知识库无据」防幻觉）
+        if (crag.isEnabled() && !knowledgeBaseOnly && !outcome.contents().isEmpty()) {
+            outcome = applyCorrectiveRag(knowledgeBaseIds, question, history,
+                progressCallback, assistantMessageId, trace, outcome);
+        }
         // 生成前发一次"正在生成回答"进度
         if (progressCallback != null) {
             progressCallback.accept("正在生成回答...");
         }
-        return new AugmentationOutcome(result.contents(), result.chatMessage());
+        return outcome;
+    }
+
+    /**
+     * CRAG 纠正式检索（Agentic RAG）：让小模型对首轮检索片段相对用户问题打分。
+     * <ul>
+     *   <li>CORRECT：片段可支撑回答 → 原样返回；</li>
+     *   <li>AMBIGUOUS：部分相关 → 用 correctedQuery 重检索一次（硬上限 1，防循环），
+     *       与首轮片段合并去重后重新注入到「原始问题」的消息里（生成仍回答用户真实问题）；</li>
+     *   <li>INCORRECT：全部无关 → 返回空片段，主链路走「未检索到相关信息」，避免用无关上下文强答产生幻觉。</li>
+     * </ul>
+     * 打分/重检索失败一律按 CORRECT 兜底，不阻断主链路。
+     */
+    private AugmentationOutcome applyCorrectiveRag(List<Long> knowledgeBaseIds, String question,
+                                                   List<ChatMessage> history, Consumer<String> progressCallback,
+                                                   Long assistantMessageId, RagQueryTrace trace,
+                                                   AugmentationOutcome outcome) {
+        try {
+            if (progressCallback != null) {
+                progressCallback.accept("正在校验检索结果...");
+            }
+            CorrectiveRetrievalGrader grader = new CorrectiveRetrievalGrader(
+                getCragChatModel(), cragPromptTemplate, crag.getGradeTopN(), crag.getSnippetMaxChars());
+            CorrectiveRetrievalGrader.GradeResult gr = grader.grade(question, outcome.contents());
+            switch (gr.grade()) {
+                case CORRECT -> {
+                    if (trace != null) {
+                        trace.crag(gr.grade().name(), "keep");
+                    }
+                    return outcome;
+                }
+                case INCORRECT -> {
+                    if (trace != null) {
+                        trace.crag(gr.grade().name(), "drop");
+                    }
+                    log.info("[CRAG] 片段全部无关，判定知识库无据，返回空片段防幻觉: question='{}'", question);
+                    return new AugmentationOutcome(List.of(), outcome.chatMessage());
+                }
+                case AMBIGUOUS -> {
+                    String corrected = gr.correctedQuery();
+                    if (corrected == null || corrected.isBlank() || corrected.equals(question)) {
+                        if (trace != null) {
+                            trace.crag(gr.grade().name(), "keep");
+                        }
+                        return outcome;
+                    }
+                    log.info("[CRAG] 片段部分相关，用纠正查询重检索一次: origin='{}', corrected='{}'",
+                        question, corrected);
+                    List<Content> corrctedContents = retrieveContentsOnly(
+                        knowledgeBaseIds, corrected, history, progressCallback, assistantMessageId, trace);
+                    List<Content> merged = mergeDedupContents(outcome.contents(), corrctedContents);
+                    if (trace != null) {
+                        trace.crag(gr.grade().name(), "re-retrieve:" + corrected);
+                    }
+                    ChatMessage injected = new DefaultContentInjector()
+                        .inject(merged, UserMessage.from(question));
+                    return new AugmentationOutcome(merged, injected);
+                }
+                default -> {
+                    return outcome;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CRAG] 纠正式检索失败，按原检索结果兜底: {}", e.getMessage(), e);
+            return outcome;
+        }
+    }
+
+    /**
+     * 仅检索不注入：构建一次性 augmentor 取指定 query 的检索片段（CRAG 重检索复用，
+     * 不再走 CRAG 自身，天然防递归）。
+     */
+    private List<Content> retrieveContentsOnly(List<Long> knowledgeBaseIds, String query,
+                                               List<ChatMessage> history, Consumer<String> progressCallback,
+                                               Long assistantMessageId, RagQueryTrace trace) {
+        RetrievalAugmentor augmentor = buildAugmentor(
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, false);
+        UserMessage userMessage = UserMessage.from(query);
+        Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
+        return augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata)).contents();
+    }
+
+    /** 合并两轮检索片段并按 chunk 文本去重（保序，首轮优先）。 */
+    private List<Content> mergeDedupContents(List<Content> first, List<Content> second) {
+        List<Content> merged = new ArrayList<>(first);
+        Set<String> seen = new java.util.HashSet<>();
+        for (Content c : first) {
+            seen.add(c.textSegment().text());
+        }
+        for (Content c : second) {
+            if (seen.add(c.textSegment().text())) {
+                merged.add(c);
+            }
+        }
+        return merged;
     }
 
     /** Grafana 看板依赖：app.ai.rag.retrieval.latency（P99/P95/P50）+ requests（按 hit 分组）。 */
@@ -611,6 +734,13 @@ public class KnowledgeBaseQueryService {
             assistantMessageId, ragChatMessageMapper, trace);
         InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
             rewriteTransformer, getRewriteChatModel(), hydePromptTemplate, hydeEnabled, hydeMaxChars);
+        // Agentic RAG：复杂问题（多跳/对比/综合）先分解成子查询，与原 query 并行检索后 RRF 融合去重。
+        // 规则预筛 + LLM 二次判定，简单问题零额外调用；失败降级原改写链，不阻断检索。
+        // 评测检索路径（knowledgeBaseOnly）不分解，保证 Hit/MRR/NDCG 口径稳定可复现。
+        QueryTransformer queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
+            ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(), decomposePromptTemplate,
+                decompose.getMaxSubQueries(), progressCallback, trace)
+            : transformer;
         InterviewReRankingContentAggregator rerankAggregator = rerankEnabled && rerankService.isEnabled()
             ? InterviewReRankingContentAggregator.builder()
                 .scoringModel(rerankService)
@@ -646,7 +776,7 @@ public class KnowledgeBaseQueryService {
                 .build();
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
             .queryRouter(queryRouter)
-            .queryTransformer(transformer)
+            .queryTransformer(queryTransformer)
             .contentInjector(contentInjector);
         if (finalAggregator != null) {
             builder.contentAggregator(finalAggregator);

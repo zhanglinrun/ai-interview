@@ -294,6 +294,8 @@ public class KnowledgeBaseQueryProperties {
         private int maxSubQueries = 4;
         /** 分解专用模型；空则复用路由模型 */
         private String model = "";
+        /** 查询分解 Prompt 模板 */
+        private String promptPath = "classpath:prompts/rag/decompose.st";
     }
 
     /**
@@ -311,6 +313,8 @@ public class KnowledgeBaseQueryProperties {
         private int snippetMaxChars = 400;
         /** 打分专用模型（建议小模型）；空则复用路由模型 */
         private String model = "";
+        /** CRAG 打分 Prompt 模板 */
+        private String promptPath = "classpath:prompts/rag/crag-grade.st";
     }
 
     /**
