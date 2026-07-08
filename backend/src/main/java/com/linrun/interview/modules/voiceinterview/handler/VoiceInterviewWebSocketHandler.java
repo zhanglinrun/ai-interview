@@ -1196,8 +1196,8 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 )));
             }
 
-            // 2. Save session state to database
-            interviewService.pauseSession(sessionId, "timeout");
+            // 2. Save session state to database（定时线程无 UserContext，走免鉴权兜底方法）
+            interviewService.pauseSessionByTimeout(sessionId);
 
             // 3. Close WebSocket connection
             if (session != null && session.isOpen()) {

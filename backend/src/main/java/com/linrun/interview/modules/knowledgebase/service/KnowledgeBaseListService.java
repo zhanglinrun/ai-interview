@@ -204,8 +204,13 @@ public class KnowledgeBaseListService {
       return Optional.empty();
     }
     Long userId = UserContext.requireUserId();
+    String nullKey = NULL_ID_PREFIX + userId + ":" + id;
+    if (Boolean.TRUE.equals(redisService.get(nullKey))) {
+      return Optional.empty();
+    }
     KnowledgeBaseEntity entity = knowledgeBaseEntityMapper.selectById(id);
     if (entity == null) {
+      redisService.set(nullKey, true, NULL_ID_TTL);
       return Optional.empty();
     }
     if (userId.equals(entity.getUserId())) {
@@ -214,6 +219,8 @@ public class KnowledgeBaseListService {
     if (DocumentAccessScope.PUBLIC.name().equalsIgnoreCase(entity.getAccessibleBy())) {
       return Optional.of(entity);
     }
+    // 他人私有文档对当前用户不可读，缓存空值防穿透（含私有→公开的 2 分钟陈旧窗口，可接受）
+    redisService.set(nullKey, true, NULL_ID_TTL);
     return Optional.empty();
   }
 

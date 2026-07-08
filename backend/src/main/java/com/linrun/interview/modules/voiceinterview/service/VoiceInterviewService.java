@@ -99,6 +99,8 @@ public class VoiceInterviewService {
                 .llmProvider(effectiveLlmProvider)
                 .plannedDuration(request.getPlannedDuration())
                 .currentPhase(determineFirstPhase(request))
+                .startTime(LocalDateTime.now())
+                .status(VoiceInterviewSessionStatus.IN_PROGRESS)
                 .build();
 
         VoiceInterviewSessionEntity saved = MapperUtils.save(sessionRepository, session);
@@ -171,10 +173,12 @@ public class VoiceInterviewService {
     }
 
     private void endSession(VoiceInterviewSessionEntity session) {
-        session.setEndTime(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        session.setEndTime(now);
         session.setCurrentPhase(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED);
         session.setStatus(VoiceInterviewSessionStatus.COMPLETED);
-        session.setActualDuration((int) Duration.between(session.getStartTime(), LocalDateTime.now()).toSeconds());
+        LocalDateTime startTime = session.getStartTime() != null ? session.getStartTime() : now;
+        session.setActualDuration((int) Duration.between(startTime, now).toSeconds());
         session.setEvaluateStatus(AsyncTaskStatus.PENDING);
 
         MapperUtils.save(sessionRepository, session);
@@ -402,13 +406,38 @@ public class VoiceInterviewService {
             );
         }
 
+        applyPause(session, reason);
+    }
+
+    /**
+     * 暂停超时兜底路径：由 {@code @Scheduled} 定时线程调用，该线程没有 JWT 写入的
+     * {@link UserContext} ThreadLocal，因此按 sessionId 直接查库（不做用户维度过滤），
+     * 避免调用 {@code UserContext.requireUserId()} 抛 UNAUTHORIZED 导致后续 WS/ASR/内存清理全被跳过。
+     * 会话不存在或非 IN_PROGRESS 时安静跳过，不抛异常。
+     */
+    @Transactional
+    public void pauseSessionByTimeout(String sessionId) {
+        Long sessionIdLong = parseSessionId(sessionId);
+        VoiceInterviewSessionEntity session = sessionRepository.selectById(sessionIdLong);
+        if (session == null) {
+            log.warn("暂停超时：会话不存在，跳过: {}", sessionId);
+            return;
+        }
+        if (session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
+            log.info("暂停超时：会话状态为 {}，无需暂停: {}", session.getStatus(), sessionId);
+            return;
+        }
+        applyPause(session, "timeout");
+    }
+
+    private void applyPause(VoiceInterviewSessionEntity session, String reason) {
         session.setStatus(VoiceInterviewSessionStatus.PAUSED);
         session.setPausedAt(LocalDateTime.now());
 
         MapperUtils.save(sessionRepository, session);
-        invalidateSessionCache(sessionIdLong);
+        invalidateSessionCache(session.getId());
 
-        log.info("Session {} paused, reason: {}", sessionId, reason);
+        log.info("Session {} paused, reason: {}", session.getId(), reason);
     }
 
     /**

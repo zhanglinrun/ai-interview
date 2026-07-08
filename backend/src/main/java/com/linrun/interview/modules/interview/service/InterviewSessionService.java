@@ -411,6 +411,12 @@ public class InterviewSessionService {
      */
     public SubmitAnswerResponse submitAnswer(SubmitAnswerRequest request) {
         CachedSession session = getOrRestoreSession(request.sessionId());
+        // 状态守卫：已完成/已评估会话不接受再次提交，避免把 COMPLETED 会话打回 IN_PROGRESS
+        // （前端自动暂存的在途 PUT / 重复 POST 竞态会真实触发）
+        if (session.getStatus() == SessionStatus.COMPLETED
+                || session.getStatus() == SessionStatus.EVALUATED) {
+            throw new BusinessException(ErrorCode.INTERVIEW_ALREADY_COMPLETED);
+        }
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
 
         int index = request.questionIndex();
@@ -579,6 +585,11 @@ public class InterviewSessionService {
      */
     public void saveAnswer(SubmitAnswerRequest request) {
         CachedSession session = getOrRestoreSession(request.sessionId());
+        // 状态守卫：已完成/已评估会话不接受暂存（防止在途暂存 PUT 把会话状态回退到 IN_PROGRESS）
+        if (session.getStatus() == SessionStatus.COMPLETED
+                || session.getStatus() == SessionStatus.EVALUATED) {
+            throw new BusinessException(ErrorCode.INTERVIEW_ALREADY_COMPLETED);
+        }
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
 
         int index = request.questionIndex();

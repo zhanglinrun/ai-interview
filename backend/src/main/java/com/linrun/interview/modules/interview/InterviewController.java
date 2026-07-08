@@ -8,6 +8,7 @@ import com.linrun.interview.common.web.AttachmentResponseBuilder;
 import com.linrun.interview.modules.interview.memory.CandidateMemoryService.CandidateMemoryProfileDTO;
 import com.linrun.interview.modules.interview.model.AgentPlanProgressDTO;
 import com.linrun.interview.modules.interview.model.AgentTraceGroupDTO;
+import com.linrun.interview.modules.interview.model.AnswerBody;
 import com.linrun.interview.modules.interview.model.CreateInterviewRequest;
 import com.linrun.interview.modules.interview.model.InterviewDetailDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
@@ -19,6 +20,7 @@ import com.linrun.interview.modules.interview.service.InterviewHistoryService;
 import com.linrun.interview.modules.interview.service.InterviewPersistenceService;
 import com.linrun.interview.modules.interview.service.InterviewSessionService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -65,7 +67,7 @@ public class InterviewController {
     @PostMapping("/api/interview/sessions")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
-    public Result<InterviewSessionDTO> createSession(@RequestBody CreateInterviewRequest request) {
+    public Result<InterviewSessionDTO> createSession(@Valid @RequestBody CreateInterviewRequest request) {
         log.info("创建面试会话，题目数量: {}", request.questionCount());
         InterviewSessionDTO session = sessionService.createSession(request);
         return Result.success(session);
@@ -95,11 +97,9 @@ public class InterviewController {
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
     public Result<SubmitAnswerResponse> submitAnswer(
             @PathVariable String sessionId,
-            @RequestBody Map<String, Object> body) {
-        Integer questionIndex = (Integer) body.get("questionIndex");
-        String answer = (String) body.get("answer");
-        log.info("提交答案: 会话{}, 问题{}", sessionId, questionIndex);
-        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
+            @Valid @RequestBody AnswerBody body) {
+        log.info("提交答案: 会话{}, 问题{}", sessionId, body.questionIndex());
+        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, body.questionIndex(), body.answer());
         SubmitAnswerResponse response = sessionService.submitAnswer(request);
         return Result.success(response);
     }
@@ -129,11 +129,9 @@ public class InterviewController {
     @PutMapping("/api/interview/sessions/{sessionId}/answers")
     public Result<Void> saveAnswer(
             @PathVariable String sessionId,
-            @RequestBody Map<String, Object> body) {
-        Integer questionIndex = (Integer) body.get("questionIndex");
-        String answer = (String) body.get("answer");
-        log.info("暂存答案: 会话{}, 问题{}", sessionId, questionIndex);
-        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
+            @Valid @RequestBody AnswerBody body) {
+        log.info("暂存答案: 会话{}, 问题{}", sessionId, body.questionIndex());
+        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, body.questionIndex(), body.answer());
         sessionService.saveAnswer(request);
         return Result.success(null);
     }

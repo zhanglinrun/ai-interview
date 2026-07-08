@@ -46,7 +46,7 @@ class KnowledgeBaseListServiceTest {
     assertThat(service.getKnowledgeBaseEntity(99L)).isEmpty();
     assertThat(service.getKnowledgeBaseEntity(99L)).isEmpty();
 
-    verify(entityMapper, times(1)).selectOne(any());
+    verify(entityMapper, times(1)).selectById(99L);
     verify(redisService).set(eq("kb:null:7:99"), eq(true), any(Duration.class));
   }
 }
