@@ -78,7 +78,8 @@
 
 ### 系统能力
 
-- 用户认证：注册、登录、刷新 token，使用 JWT 做接口鉴权。
+- 用户认证：注册、登录、刷新 token，使用 JWT 做接口鉴权；access token 携带 role claim，
+  Provider/语音配置等全局管理接口仅管理员可写；认证接口按 IP + 全局维度限流防暴力破解。
 - 多模型配置：支持 DashScope、Kimi、DeepSeek、GLM、LM Studio 等 OpenAI 兼容 Provider。
 - 默认模型切换：可配置默认 ChatModel 和 EmbeddingModel。
 - 接口限流：基于 `@RateLimit` 和 Redis Lua 脚本实现多维度限流。
@@ -293,9 +294,12 @@ cp .env.example .env
 ```properties
 AI_BAILIAN_API_KEY=your_dashscope_api_key_here
 AI_MODEL=qwen3.5-flash
+# JWT 签名密钥（至少 32 字节强随机）：为空或使用内置默认值时后端会 fail-fast 拒绝启动
+APP_JWT_SECRET=change-me-to-a-strong-random-secret-at-least-32-bytes
 ```
 
-如果只跑 RAG 主链路，语音相关配置可以先不管。
+如果只跑 RAG 主链路，语音相关配置可以先不管。生产/全栈容器化部署还需设置
+`APP_AI_CONFIG_ENCRYPTION_KEY`（Provider API Key 加密密钥），详见 `.env.example`。
 
 ### 2. 启动本地依赖
 
