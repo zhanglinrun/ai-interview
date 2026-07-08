@@ -2,6 +2,7 @@ package com.linrun.interview.modules.llmprovider.controller;
 
 import com.linrun.interview.common.annotation.RateLimit;
 import com.linrun.interview.common.result.Result;
+import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.llmprovider.dto.AsrConfigDTO;
 import com.linrun.interview.modules.llmprovider.dto.AsrConfigRequest;
 import com.linrun.interview.modules.llmprovider.dto.CreateProviderRequest;
@@ -49,6 +50,7 @@ public class LlmProviderController {
   @PostMapping
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> createProvider(@RequestBody @Valid CreateProviderRequest request) {
+    UserContext.requireAdmin();
     configService.createProvider(request);
     return Result.success();
   }
@@ -57,6 +59,7 @@ public class LlmProviderController {
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> updateProvider(@PathVariable String id,
       @RequestBody UpdateProviderRequest request) {
+    UserContext.requireAdmin();
     configService.updateProvider(id, request);
     return Result.success();
   }
@@ -64,6 +67,7 @@ public class LlmProviderController {
   @DeleteMapping("/{id}")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> deleteProvider(@PathVariable String id) {
+    UserContext.requireAdmin();
     configService.deleteProvider(id);
     return Result.success();
   }
@@ -71,12 +75,14 @@ public class LlmProviderController {
   @PostMapping("/{id}/test")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
   public Result<ProviderTestResult> testProvider(@PathVariable String id) {
+    UserContext.requireAdmin();
     return Result.success(configService.testProvider(id));
   }
 
   @PostMapping("/reload")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> reloadProviders() {
+    UserContext.requireAdmin();
     configService.reloadProviders();
     return Result.success();
   }
@@ -90,6 +96,7 @@ public class LlmProviderController {
   @PutMapping("/default-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> updateDefaultProvider(@RequestBody DefaultProviderDTO request) {
+    UserContext.requireAdmin();
     configService.updateDefaultProvider(request);
     return Result.success();
   }
@@ -97,6 +104,7 @@ public class LlmProviderController {
   @PutMapping("/default-embedding-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> updateDefaultEmbeddingProvider(@RequestBody DefaultProviderDTO request) {
+    UserContext.requireAdmin();
     configService.updateDefaultEmbeddingProvider(request);
     return Result.success();
   }
@@ -112,6 +120,7 @@ public class LlmProviderController {
   @PutMapping("/voice/asr")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> updateAsrConfig(@RequestBody AsrConfigRequest request) {
+    UserContext.requireAdmin();
     configService.updateAsrConfig(request);
     return Result.success();
   }
@@ -125,6 +134,7 @@ public class LlmProviderController {
   @PutMapping("/voice/tts")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
   public Result<Void> updateTtsConfig(@RequestBody TtsConfigRequest request) {
+    UserContext.requireAdmin();
     configService.updateTtsConfig(request);
     return Result.success();
   }
@@ -132,6 +142,7 @@ public class LlmProviderController {
   @PostMapping("/voice/asr/test")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
   public Result<ProviderTestResult> testAsrConfig() {
+    UserContext.requireAdmin();
     return Result.success(configService.testAsrConfig());
   }
 }

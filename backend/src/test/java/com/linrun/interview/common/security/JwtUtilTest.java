@@ -14,7 +14,7 @@ class JwtUtilTest {
   void tokenTypeCannotBeMixed() {
     JwtUtil jwtUtil = new JwtUtil(buildSecurityProperties());
 
-    String accessToken = jwtUtil.generateAccessToken(42L, "alice");
+    String accessToken = jwtUtil.generateAccessToken(42L, "alice", "ADMIN");
     String refreshToken = jwtUtil.generateRefreshToken(42L);
 
     assertThat(jwtUtil.extractAccessUserId(accessToken)).isEqualTo(42L);
@@ -23,6 +23,8 @@ class JwtUtilTest {
     assertThat(jwtUtil.extractRefreshUserId(accessToken)).isNull();
     assertThat(jwtUtil.validateToken(accessToken)).isTrue();
     assertThat(jwtUtil.validateToken(refreshToken)).isFalse();
+    assertThat(jwtUtil.extractAccessRole(accessToken)).isEqualTo("ADMIN");
+    assertThat(jwtUtil.extractAccessRole(refreshToken)).isNull();
   }
 
   private SecurityProperties buildSecurityProperties() {

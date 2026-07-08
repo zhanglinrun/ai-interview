@@ -16,6 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -165,10 +166,11 @@ public class InterviewSqlContentRetriever implements ContentRetriever {
     private String buildScopedQuestion(String question) {
         return """
             当前用户 user_id = %d。今天日期是 %s。
-            只能查询上述白名单表，只能生成 SELECT 语句，并且必须在 SQL 中加入 user_id = %d 的过滤条件。
+            只能查询上述白名单表，只能生成 SELECT 语句，禁止 UNION/INTERSECT/EXCEPT。
+            每一张被查询的表都必须带上 user_id = %d 的过滤条件（多表 JOIN 时每张表都要用别名限定，如 a.user_id = %d AND b.user_id = %d）。
             返回明细数据时最多返回 %d 行；需要限制明细行数时使用 LIMIT %d。
             用户问题：%s
-            """.formatted(userId, LocalDate.now(), userId, maxRows, maxRows, question);
+            """.formatted(userId, LocalDate.now(), userId, userId, userId, maxRows, maxRows, question);
     }
 
     private boolean isSqlResultEmpty(List<Content> results) {
@@ -261,10 +263,19 @@ final class SafeReadOnlyDataSource extends DelegatingDataSource {
 final class SqlSafety {
 
     private static final Pattern DANGEROUS = Pattern.compile(
-        "\\b(insert|update|delete|merge|create|alter|drop|truncate|grant|revoke|copy|call|execute|vacuum|analyze)\\b",
+        "\\b(insert|update|delete|merge|create|alter|drop|truncate|grant|revoke|copy|call|execute|vacuum|analyze|union|intersect|except)\\b",
         Pattern.CASE_INSENSITIVE);
     private static final Pattern TABLE_REF = Pattern.compile(
         "\\b(?:from|join)\\s+\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?", Pattern.CASE_INSENSITIVE);
+    /** 捕获 from/join 的表名与可选别名，用于「多表时逐表校验 user_id」。 */
+    private static final Pattern TABLE_REF_ALIAS = Pattern.compile(
+        "\\b(?:from|join)\\s+\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?"
+            + "(?:\\s+(?:as\\s+)?\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?)?",
+        Pattern.CASE_INSENSITIVE);
+    /** 别名位置若匹配到这些 SQL 关键字，说明该表无别名（避免把 where/on 等误当别名）。 */
+    private static final Set<String> ALIAS_STOP_WORDS = Set.of(
+        "on", "where", "group", "order", "limit", "offset", "having", "join", "inner",
+        "left", "right", "full", "cross", "outer", "using", "union", "intersect", "except");
     private static final Pattern CTE_NAME = Pattern.compile(
         "(?:\\bwith\\s+(?:recursive\\s+)?|,\\s*)\"?([a-zA-Z_][a-zA-Z0-9_]*)\"?\\s+as\\s*\\(",
         Pattern.CASE_INSENSITIVE);
@@ -356,41 +367,61 @@ final class SqlSafety {
             throw new SQLException("Text2SQL 不允许逗号连接表，请使用显式 JOIN");
         }
         Set<String> cteNames = cteNames(normalized);
-        boolean sawBaseTable = false;
-        Matcher matcher = TABLE_REF.matcher(normalized);
+        List<String> baseTableScopes = new ArrayList<>();
+        Matcher matcher = TABLE_REF_ALIAS.matcher(normalized);
         while (matcher.find()) {
             String table = matcher.group(1);
-            if (allowedTables.contains(table)) {
-                sawBaseTable = true;
-            } else if (!cteNames.contains(table)) {
+            if (cteNames.contains(table)) {
+                continue;
+            }
+            if (!allowedTables.contains(table)) {
                 throw new SQLException("Text2SQL 表不在白名单: " + table);
             }
+            String alias = matcher.group(2);
+            if (alias != null && ALIAS_STOP_WORDS.contains(alias)) {
+                alias = null;
+            }
+            baseTableScopes.add(alias != null ? alias : table);
         }
-        if (!sawBaseTable) {
+        if (baseTableScopes.isEmpty()) {
             throw new SQLException("Text2SQL 查询必须访问白名单表");
         }
         if (userId != null) {
-            validateUserScope(normalized, userId);
+            validateUserScope(normalized, userId, baseTableScopes);
         }
     }
 
-    private static void validateUserScope(String normalizedSql, Long userId) throws SQLException {
+    private static void validateUserScope(String normalizedSql, Long userId, List<String> baseTableScopes)
+            throws SQLException {
         if (!normalizedSql.contains(" where ")) {
             throw new SQLException("Text2SQL 查询必须包含 user_id 过滤条件");
         }
         if (Pattern.compile("\\bor\\b").matcher(normalizedSql).find()) {
             throw new SQLException("Text2SQL 查询不允许 OR，避免绕过 user_id 过滤");
         }
+        String me = String.valueOf(userId);
+        // 任意出现的 user_id 常量都必须等于当前用户，杜绝 user_id = <他人> 直读
         Matcher matcher = USER_FILTER.matcher(normalizedSql);
         boolean found = false;
         while (matcher.find()) {
             found = true;
-            if (!String.valueOf(userId).equals(matcher.group(1))) {
+            if (!me.equals(matcher.group(1))) {
                 throw new SQLException("Text2SQL user_id 与当前用户不一致");
             }
         }
         if (!found) {
             throw new SQLException("Text2SQL 查询必须包含当前用户 user_id 过滤条件");
+        }
+        // 多表 JOIN：要求每张表都带自己的 user_id = <me>，防止只约束一张表、JOIN 出他人数据
+        if (baseTableScopes.size() > 1) {
+            for (String scope : baseTableScopes) {
+                Pattern perTable = Pattern.compile(
+                    "\\b" + Pattern.quote(scope) + "\\.user_id\\s*=\\s*" + me + "\\b");
+                if (!perTable.matcher(normalizedSql).find()) {
+                    throw new SQLException(
+                        "Text2SQL 多表查询要求每张表都带 user_id 过滤，缺失: " + scope);
+                }
+            }
         }
     }
 

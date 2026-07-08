@@ -79,12 +79,13 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    # 仅创建桶，不设匿名公开读：桶内含简历/音频等 PII，前端一律通过后端签发的
+    # 预签名 URL / 鉴权接口访问，禁止对象直链公开下载。
     entrypoint: |
       /bin/sh -c "
       set -e
       /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin
       /usr/bin/mc mb --ignore-existing myminio/ai-interview
-      /usr/bin/mc anonymous set public myminio/ai-interview
       "
 
   app:
@@ -109,6 +110,10 @@ services:
         condition: service_started
     environment:
       SERVER_PORT: 8080
+      # 安全必填项：未设置直接拒绝启动，杜绝使用源码内公开默认值
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET 必填：请设置至少 32 字节的强随机密钥}
+      APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:?APP_AI_CONFIG_ENCRYPTION_KEY 必填：用于加密 Provider API Key}
+      APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DB: ${MYSQL_DB:-ai_interview}

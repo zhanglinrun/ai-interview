@@ -185,7 +185,19 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         KnowledgeBaseVersionEntity version = versionService.getById(versionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "版本记录不存在: versionId=" + versionId));
+        requireCurrentUserOwnsDoc(version.getDocId());
         activateVersion(version);
+    }
+
+    /**
+     * 校验当前登录用户拥有该知识库（防止传他人 versionId 越权 activate/deactivate/list）。
+     * 仅供从 HTTP 线程发起的 (Long) 重载调用；异步/定时线程走 entity 重载，无 UserContext。
+     */
+    private void requireCurrentUserOwnsDoc(Long docId) {
+        Long userId = UserContext.requireUserId();
+        EntityQueries.byUserAndId(knowledgeBaseEntityMapper, userId, docId,
+                KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
     }
 
     /**
@@ -303,6 +315,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         KnowledgeBaseVersionEntity version = versionService.getById(versionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "版本记录不存在: versionId=" + versionId));
+        requireCurrentUserOwnsDoc(version.getDocId());
         if (version.getStatus() == DocumentStatus.CHUNKED) {
             log.info("版本已失效（CHUNKED），跳过: versionId={}", versionId);
             return;

@@ -419,6 +419,10 @@ public class KnowledgeBaseController {
      */
     @GetMapping("/api/knowledgebase/{id}/versions")
     public Result<List<KnowledgeBaseVersionDTO>> listVersions(@PathVariable Long id) {
+        // 版本历史（含 changelog）仅文档所有者可见：防止传他人 docId 枚举版本
+        EntityQueries.byUserAndId(knowledgeBaseEntityMapper, UserContext.requireUserId(), id,
+                KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
         return Result.success(versionService.listByDocId(id).stream()
             .map(KnowledgeBaseVersionDTO::from)
             .toList());

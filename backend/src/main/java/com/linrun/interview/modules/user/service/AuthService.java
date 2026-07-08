@@ -91,7 +91,8 @@ public class AuthService {
     }
 
     private AuthResponse buildAuthResponse(UserEntity user) {
-        String accessToken = jwtUtil.generateAccessToken(user.getId(), user.getUsername());
+        String role = user.getRole() != null ? user.getRole().name() : UserEntity.UserRole.USER.name();
+        String accessToken = jwtUtil.generateAccessToken(user.getId(), user.getUsername(), role);
         String refreshToken = jwtUtil.generateRefreshToken(user.getId());
         return new AuthResponse(accessToken, refreshToken, user.getId(), user.getUsername(), user.getDisplayName());
     }

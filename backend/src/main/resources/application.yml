@@ -85,10 +85,12 @@ spring:
       filters: stat,wall
       connection-properties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
       stat-view-servlet:
-        enabled: true
+        # 默认关闭 Druid 监控台（/druid/* 不在 JWT 拦截范围内，公网暴露 + 弱口令有泄漏 SQL 风险）。
+        # 需要时用环境变量显式开启，并务必设置强口令，不再使用 admin/admin。
+        enabled: ${DRUID_STAT_VIEW_ENABLED:false}
         url-pattern: /druid/*
-        login-username: admin
-        login-password: admin
+        login-username: ${DRUID_ADMIN_USER:admin}
+        login-password: ${DRUID_ADMIN_PASSWORD:}
 
   data:
     redis:

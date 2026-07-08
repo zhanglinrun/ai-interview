@@ -1,9 +1,12 @@
 package com.linrun.interview.modules.llmprovider.controller;
 
 import com.linrun.interview.common.result.Result;
+import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.llmprovider.dto.DefaultProviderDTO;
 import com.linrun.interview.modules.llmprovider.dto.ProviderDTO;
 import com.linrun.interview.modules.llmprovider.service.LlmProviderConfigService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,6 +27,18 @@ class LlmProviderControllerTest {
 
     @Mock private LlmProviderConfigService configService;
     @InjectMocks private LlmProviderController controller;
+
+    @BeforeEach
+    void setUp() {
+        // 写操作接口需要管理员身份，单测显式注入 ADMIN 上下文
+        UserContext.setUserId(1L);
+        UserContext.setRole("ADMIN");
+    }
+
+    @AfterEach
+    void tearDown() {
+        UserContext.clear();
+    }
 
     @Test
     @DisplayName("listProviders 返回 provider 列表")
@@ -64,5 +80,14 @@ class LlmProviderControllerTest {
 
         assertEquals(200, result.getCode());
         verify(configService).deleteProvider("lmstudio");
+    }
+
+    @Test
+    @DisplayName("非管理员调用写操作被拒（403）")
+    void nonAdminCannotMutate() {
+        UserContext.setRole("USER");
+
+        assertThrows(com.linrun.interview.common.exception.BusinessException.class,
+            () -> controller.deleteProvider("lmstudio"));
     }
 }

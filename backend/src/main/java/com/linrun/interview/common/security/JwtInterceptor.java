@@ -39,6 +39,7 @@ public class JwtInterceptor implements HandlerInterceptor {
         }
 
         UserContext.setUserId(userId);
+        UserContext.setRole(jwtUtil.extractAccessRole(token));
         return true;
     }
 
