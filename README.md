@@ -47,6 +47,7 @@
 - 引用溯源：回答末尾返回来源片段，非流式接口会返回 sources、confidence 和无效引用编号。
 - 检索 Trace：保存原问题、改写问题、路由策略、命中 chunk、rerank 后顺序、最终引用和答案。
 - 多源路由：QueryRouter 可将问题路由到知识库 ES、Text2SQL 或二者混合，结构化 SQL 结果跳过 Rerank 并置顶。
+- Agentic RAG：查询分解（复杂/多跳/对比问题拆成子查询并行检索后 RRF 融合，规则预筛 + LLM 二次判定，默认开）+ CRAG 纠正式检索（rerank 后小模型打分 correct/ambiguous/incorrect，ambiguous 用纠正查询重检索一次，incorrect 判「知识库无据」防幻觉，默认关，按 `app.ai.rag.crag.enabled` 开启）。
 - 三路融合意图识别：流式问答前用 LLM 语义识别、面试意图样例相似度、关键词规则兜底共同判断用户问题；结果包含 `intent`、`related`、`confidence`、`strategies` 和 `cached`，用于 RAG 路由、Prompt 选择和离题兜底。
 - 检索评测：`/api/knowledgebase/evaluate-retrieval` 复用知识库检索链路，计算 Hit@K、MRR、NDCG，结果保存到 `rag_evaluation_runs`。
 - 统一评测闭环：`/api/eval/run` 可同时跑意图识别用例、RAG 检索用例和 LLM-as-Judge 回答质量用例，保存到 `eval_runs`，并按 `baselineKey` 与最近基线比较，标记 `overallScore`、`intentAccuracy`、`intentMacroF1`、`ragHitRate`、`judgeAverageOverall` 等指标是否退化。
@@ -57,7 +58,7 @@
 - CSV/TSV 解析：保留表头、Markdown 表格和按行展开的键值记录。
 - Excel 解析：使用 Apache POI 读取 `.xls/.xlsx` 的 sheet、行和单元格，失败时降级 Tika 文本解析。
 - Text2SQL：仅暴露 `resumes`、`resume_analyses`、`interview_sessions`、`interview_answers`、`interview_schedule` 白名单表。
-- 安全边界：Text2SQL 由 LangChain4j 做 SELECT 校验，本项目额外注入当前 `user_id` 约束，并用只读 DataSource 强制连接只读。生产环境仍建议为 Text2SQL 配置数据库只读账号。
+- 安全边界：Text2SQL 只允许 SELECT/WITH、禁 UNION/INTERSECT/EXCEPT 与多语句、禁 OR 绕过；多表 JOIN 时逐表强制 `user_id = 当前用户` 约束（防只约束一张表 JOIN 出他人数据），并用只读 DataSource 强制连接只读。生产环境仍建议为 Text2SQL 配置数据库只读账号。
 
 ### 智能面试
 
@@ -457,8 +458,10 @@ APP_AI_RAG_RERANK_ENABLED=false
 | `app.ai.rag.rerank.provider` | `cloud` / `local`，默认 `cloud` |
 | `app.ai.rag.parent-expand.enabled` | 是否启用父子/兄弟上下文扩展 |
 | `app.ai.rag.intent-recognition.enabled` | 是否启用 RAG 意图识别 |
+| `app.ai.rag.decompose.enabled` | 是否启用 Agentic RAG 查询分解（复杂问题拆子查询，默认开） |
+| `app.ai.rag.crag.enabled` | 是否启用 Agentic RAG CRAG 纠正式检索（默认关，每次查询多一次小模型打分） |
 | `app.storage.*` | S3 兼容对象存储配置 |
-| `app.security.jwt.*` | JWT 配置 |
+| `app.security.jwt.*` | JWT 配置（生产必须设 `APP_JWT_SECRET`，用默认值后端拒绝启动） |
 
 ## 测试与构建
 
@@ -479,6 +482,16 @@ RAG 检索质量全量评测（需要真实 MySQL / Redis / Elasticsearch / Dash
 ```bash
 mvn -pl backend test -Dtest=RagRetrievalEvalTest '-Dtest.excludedGroups=' -Dgroups=rag-eval
 ```
+
+面试 Agent Critic 质量门评测（bad case 回归集，需要 DashScope，仅需 `AI_BAILIAN_API_KEY`）：
+
+```bash
+mvn -pl backend test -Dtest=InterviewCriticEvalTest '-Dtest.excludedGroups=' -Dgroups=agent-eval
+```
+
+评测集见 `eval/interview-agent/critic-badcase-dataset.yaml`（13 条：越界/难度错配/重复/prompt 注入/含糊 + 正例），
+报告写到 `eval/.work/critic-badcase-report.md`。设置 `CRITIC_EVAL_MIN_ACCURACY` 后低于阈值断言失败（供 CI 门禁）。
+本地一轮 qwen3.5-flash 结果：整体准确率 1.0，打回 Precision/Recall/F1 均为 1.0（9 个 bad case 全部拦截，4 个正例全部放行）。
 
 前端构建：
 
