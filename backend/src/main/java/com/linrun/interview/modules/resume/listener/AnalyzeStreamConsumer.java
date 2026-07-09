@@ -45,23 +45,8 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
     }
 
     @Override
-    protected String streamKey() {
-        return AsyncTaskStreamConstants.RESUME_ANALYZE_STREAM_KEY;
-    }
-
-    @Override
     protected String groupName() {
         return AsyncTaskStreamConstants.RESUME_ANALYZE_GROUP_NAME;
-    }
-
-    @Override
-    protected String consumerPrefix() {
-        return AsyncTaskStreamConstants.RESUME_ANALYZE_CONSUMER_PREFIX;
-    }
-
-    @Override
-    protected String threadName() {
-        return "analyze-consumer";
     }
 
     @Override
@@ -109,15 +94,6 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
     @Override
     protected void markFailed(AnalyzePayload payload, String error) {
         updateAnalyzeStatus(payload.resumeId(), AsyncTaskStatus.FAILED, error);
-    }
-
-    @Override
-    protected Map<String, String> buildRetryMessage(AnalyzePayload payload, int retryCount) {
-        return Map.of(
-            AsyncTaskStreamConstants.FIELD_RESUME_ID, payload.resumeId().toString(),
-            AsyncTaskStreamConstants.FIELD_CONTENT, payload.content(),
-            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-        );
     }
 
     private void updateAnalyzeStatus(Long resumeId, AsyncTaskStatus status, String error) {

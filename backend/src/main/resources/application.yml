@@ -57,6 +57,12 @@ spring:
   application:
     name: ai-interview-platform
 
+  # RabbitMQ 自动配置默认排除：仅 app.async.engine=rabbitmq 时由 common/async/RabbitMqEngineConfig
+  # 显式 @Import 装配，避免默认 rocketmq 引擎下也去连 RabbitMQ（与 RocketMQ 自动配置门控对称）。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+
   # 启用虚拟线程 (Java 21+)
   threads:
     virtual:
@@ -97,6 +103,15 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+
+  # RabbitMQ（仅 app.async.engine=rabbitmq 时生效；RabbitAutoConfiguration 见上方按引擎门控装配）。
+  # 本机默认 localhost:5672，容器编排用 RABBITMQ_HOST=rabbitmq 覆盖。
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
 
   servlet:
     multipart:
@@ -165,7 +180,7 @@ langchain4j:
 
 # RocketMQ（默认异步任务引擎，app.async.engine=rocketmq 时生效）。
 # RocketMQAutoConfiguration 已由 common/async/RocketMqEngineConfig 用 @ConditionalOnProperty 门控：
-# 仅默认/rocketmq 引擎才装配、才会读取下面的 name-server 连 broker；显式切 redis-stream 时整段不加载，
+# 仅默认/rocketmq 引擎才装配、才会读取下面的 name-server 连 broker；切 rabbitmq 时整段不加载，
 # 故此处给 name-server 设默认值是安全的。本机 broker 走 127.0.0.1:9876，容器编排用
 # ROCKETMQ_NAME_SERVER=rocketmq-namesrv:9876 覆盖（Spring relaxed-binding 映射到 rocketmq.name-server）。
 rocketmq:
@@ -177,9 +192,9 @@ rocketmq:
 
 # Application custom configuration
 app:
-  # 异步任务引擎：rocketmq（默认，可靠性方案：事务消息 + broker 重试 + 死信队列）| redis-stream（轻量回退，无需 broker）。
-  # 默认连 rocketmq.name-server（见上，本机默认 127.0.0.1:9876）；生产/消费/事务消息/DLQ 见 common/async 包。
-  # broker 不可用又想临时回退：设 APP_ASYNC_ENGINE=redis-stream，此时不加载任何 RocketMQ 装配。
+  # 异步任务引擎：rocketmq（默认，事务消息 + broker 重试 + 原生死信队列）| rabbitmq（direct exchange + DLX/DLQ + 重试建议链）。
+  # 两种引擎都是 broker 驱动，共用 common/async 的 consumeFromBroker 业务/幂等逻辑，一行配置互切。
+  # Windows/WSL2 下 RocketMQ 容器 9876 常连不通，改用真正的消息队列 RabbitMQ：设 APP_ASYNC_ENGINE=rabbitmq（需起 RabbitMQ）。
   async:
     engine: ${APP_ASYNC_ENGINE:rocketmq}
     rocketmq:

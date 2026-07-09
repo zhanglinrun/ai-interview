@@ -71,23 +71,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     }
 
     @Override
-    protected String streamKey() {
-        return AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY;
-    }
-
-    @Override
     protected String groupName() {
         return AsyncTaskStreamConstants.INTERVIEW_EVALUATE_GROUP_NAME;
-    }
-
-    @Override
-    protected String consumerPrefix() {
-        return AsyncTaskStreamConstants.INTERVIEW_EVALUATE_CONSUMER_PREFIX;
-    }
-
-    @Override
-    protected String threadName() {
-        return "evaluate-consumer";
     }
 
     @Override
@@ -167,14 +152,6 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected void markFailed(EvaluatePayload payload, String error) {
         updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.FAILED, error);
-    }
-
-    @Override
-    protected Map<String, String> buildRetryMessage(EvaluatePayload payload, int retryCount) {
-        return Map.of(
-            AsyncTaskStreamConstants.FIELD_SESSION_ID, payload.sessionId(),
-            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-        );
     }
 
     /**

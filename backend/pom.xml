@@ -187,11 +187,27 @@
          app.async.engine=rocketmq（默认）时启用：事务消息 + broker 重试 + 原生死信队列。
          Starter 2.3.x 用旧版 spring.factories，Spring Boot 3 不识别，故由
          common/async/RocketMqEngineConfig 以 @ConditionalOnProperty(matchIfMissing=true) 显式
-         @Import(RocketMQAutoConfiguration)；显式切 redis-stream 时整段不装配、不连 broker。 -->
+         @Import(RocketMQAutoConfiguration)；切 rabbitmq 引擎时整段不装配、不连 broker。 -->
     <dependency>
       <groupId>org.apache.rocketmq</groupId>
       <artifactId>rocketmq-spring-boot-starter</artifactId>
       <version>${rocketmq-spring.version}</version>
+    </dependency>
+
+    <!-- ===== RabbitMQ（可选异步任务引擎，app.async.engine=rabbitmq 时启用）=====
+         Windows/WSL2 本机开发下 RocketMQ 容器 9876 常连不通，改用 RabbitMQ 作为真正的消息队列
+         （非 redis-stream）。RabbitAutoConfiguration 由 spring.autoconfigure.exclude 默认排除，
+         仅 common/async/RabbitMqEngineConfig 以 @ConditionalOnProperty(engine=rabbitmq) 显式
+         @Import 装配：direct exchange + 每管道队列 + DLX/DLQ + 重试建议链。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-amqp</artifactId>
+    </dependency>
+    <!-- RabbitMQ 监听器重试建议链（RetryInterceptorBuilder + RejectAndDontRequeueRecoverer）依赖 spring-retry；
+         spring-rabbit 对其为 optional，不会传递引入，故显式声明（版本由 Spring Boot BOM 管理）。 -->
+    <dependency>
+      <groupId>org.springframework.retry</groupId>
+      <artifactId>spring-retry</artifactId>
     </dependency>
 
     <dependency>

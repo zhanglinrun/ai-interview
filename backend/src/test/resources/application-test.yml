@@ -49,9 +49,10 @@ neo4j:
 
 
 app:
-  # 测试环境固定用 redis-stream，避免启动依赖 RocketMQ broker（生产默认 rocketmq）
+  # 单元测试为纯 Mockito 测试，不加载 Spring 上下文，故此处引擎值不影响普通构建；
+  # 引擎取默认 rocketmq（如需跑加载完整上下文的 @SpringBootTest，应另起 broker 或桩化 TaskQueueChannel）。
   async:
-    engine: redis-stream
+    engine: rocketmq
   ai:
     default-provider: dashscope
     embedding-dimensions: 1536

@@ -15,8 +15,8 @@ import org.springframework.context.annotation.Import;
  * <p>这里用 {@link ConditionalOnProperty} 把它绑定到异步引擎开关，好处是两种引擎彻底解耦：
  * <ul>
  *   <li>{@code engine=rocketmq}（默认）：装配 RocketMQ，配合 {@code rocketmq.name-server} 连接 broker；</li>
- *   <li>{@code engine=redis-stream}（回退）：完全不加载 RocketMQ 自动配置，无需 broker/name-server，
- *       退化为纯 Redis Stream，实现「broker 故障时一行配置回退」。</li>
+ *   <li>{@code engine=rabbitmq}：完全不加载 RocketMQ 自动配置，无需 name-server，改由
+ *       {@link RabbitMqEngineConfig} 装配 RabbitMQ（Windows/WSL2 下宿主机连不通容器 RocketMQ 时使用）。</li>
  * </ul>
  */
 @Configuration

@@ -197,4 +197,33 @@ public final class AsyncTaskStreamConstants {
 
     /** RocketMQ 死信 topic 前缀（broker 约定：%DLQ% + 消费者组名） */
     public static final String ROCKETMQ_DLQ_TOPIC_PREFIX = "%DLQ%";
+
+    // ========== RabbitMQ 拓扑（app.async.engine=rabbitmq 时启用） ==========
+    // direct exchange，每条管道一个业务队列 + 一个死信队列（DLQ）；业务队列声明
+    // x-dead-letter-exchange 指向 DLX，消费重试耗尽后由容器拒绝、经 DLX 路由进 DLQ。
+    // TaskQueueChannel 的逻辑管道键（*_STREAM_KEY）映射为下面的 routing key。
+
+    /** 业务消息主交换机（direct） */
+    public static final String RABBIT_TASK_EXCHANGE = "ai.interview.task.exchange";
+
+    /** 死信交换机（direct） */
+    public static final String RABBIT_TASK_DLX = "ai.interview.task.dlx";
+
+    /** 简历分析：队列 / routing key / 死信队列 / 死信 routing key */
+    public static final String RABBIT_RESUME_ANALYZE_QUEUE = "resume.analyze.queue";
+    public static final String RABBIT_RESUME_ANALYZE_ROUTING = "resume.analyze";
+    public static final String RABBIT_RESUME_ANALYZE_DLQ = "resume.analyze.dlq";
+    public static final String RABBIT_RESUME_ANALYZE_DLQ_ROUTING = "resume.analyze.dlq";
+
+    /** 面试评估：队列 / routing key / 死信队列 / 死信 routing key */
+    public static final String RABBIT_INTERVIEW_EVALUATE_QUEUE = "interview.evaluate.queue";
+    public static final String RABBIT_INTERVIEW_EVALUATE_ROUTING = "interview.evaluate";
+    public static final String RABBIT_INTERVIEW_EVALUATE_DLQ = "interview.evaluate.dlq";
+    public static final String RABBIT_INTERVIEW_EVALUATE_DLQ_ROUTING = "interview.evaluate.dlq";
+
+    /** 语音面试评估：队列 / routing key / 死信队列 / 死信 routing key */
+    public static final String RABBIT_VOICE_EVALUATE_QUEUE = "voice.evaluate.queue";
+    public static final String RABBIT_VOICE_EVALUATE_ROUTING = "voice.evaluate";
+    public static final String RABBIT_VOICE_EVALUATE_DLQ = "voice.evaluate.dlq";
+    public static final String RABBIT_VOICE_EVALUATE_DLQ_ROUTING = "voice.evaluate.dlq";
 }

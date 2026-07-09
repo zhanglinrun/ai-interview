@@ -145,9 +145,28 @@ services:
     environment:
       JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876"
 
+  # RabbitMQ（APP_ASYNC_ENGINE=rabbitmq 时使用；Windows/WSL2 下比宿主机连容器 RocketMQ 更稳）。
+  # 管理台 http://localhost:15672（guest/guest）。默认引擎为 rocketmq 时此容器闲置不影响。
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: interview-rabbitmq
+    ports:
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 # 宿主机端口（与 .env.example 一致）：
 #   MySQL 33306 | Redis 26379 | ES 29200 | MinIO 29000/29001 | Neo4j 27474/27687
-#   RocketMQ namesrv 9876 | broker 10911/10909 | dashboard 29888
+#   RocketMQ namesrv 9876 | broker 10911/10909 | dashboard 29888 | RabbitMQ 5672/15672
 
 volumes:
   mysql_data:
@@ -156,3 +175,4 @@ volumes:
   redis_data:
   minio_data:
   rocketmq_broker_data:
+  rabbitmq_data:

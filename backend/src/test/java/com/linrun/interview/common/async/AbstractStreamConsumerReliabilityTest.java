@@ -1,11 +1,11 @@
 package com.linrun.interview.common.async;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,7 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.StreamMessageId;
 
-@DisplayName("Stream 消费者可靠性：幂等去重 / 重试 / 死信")
+@DisplayName("Broker 消费者可靠性：幂等去重 / 失败标记 / 死信触发")
 @ExtendWith(MockitoExtension.class)
 class AbstractStreamConsumerReliabilityTest {
 
@@ -33,23 +33,24 @@ class AbstractStreamConsumerReliabilityTest {
 
     private TestConsumer consumer;
 
-    private static final String STREAM_KEY = "test:stream";
     private static final String GROUP_NAME = "test-group";
-    private static final StreamMessageId MSG_ID = new StreamMessageId(1, 0);
 
     @BeforeEach
     void setUp() {
         consumer = new TestConsumer(redisService);
     }
 
-    private Map<String, String> message(String taskId, String retryCount) {
+    private Map<String, String> message(String taskId) {
         Map<String, String> data = new HashMap<>();
         data.put("payload", "p1");
         if (taskId != null) {
             data.put(AsyncTaskStreamConstants.FIELD_TASK_ID, taskId);
         }
-        data.put(AsyncTaskStreamConstants.FIELD_RETRY_COUNT, retryCount);
         return data;
+    }
+
+    private String dedupKey(String taskId) {
+        return AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
     }
 
     @Nested
@@ -57,109 +58,63 @@ class AbstractStreamConsumerReliabilityTest {
     class Idempotency {
 
         @Test
-        @DisplayName("任务已标记 DONE 时跳过业务并直接 ACK")
+        @DisplayName("任务已标记 DONE 时跳过业务，不再重复执行")
         void skipWhenDone() {
             String taskId = "task-done";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            when(redisService.getIdempotencyState(dedupKey))
+            when(redisService.getIdempotencyState(dedupKey(taskId)))
                 .thenReturn(AsyncTaskStreamConstants.DEDUP_STATE_DONE);
 
-            consumer.processMessage(MSG_ID, message(taskId, "0"));
+            consumer.consumeFromBroker(message(taskId), 0);
 
             assertThat(consumer.businessRuns.get()).isZero();
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
-            verify(redisService, never()).tryAcquireIdempotency(anyString(), any());
+            verify(redisService, never()).markIdempotencyDone(anyString(), any());
         }
 
         @Test
-        @DisplayName("成功执行后写入 DONE 标记并 ACK")
+        @DisplayName("成功执行后写入 DONE 标记")
         void markDoneAfterSuccess() {
             String taskId = "task-ok";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            when(redisService.getIdempotencyState(dedupKey)).thenReturn(null);
-            when(redisService.tryAcquireIdempotency(eq(dedupKey), any())).thenReturn(true);
+            when(redisService.getIdempotencyState(dedupKey(taskId))).thenReturn(null);
 
-            consumer.processMessage(MSG_ID, message(taskId, "0"));
+            consumer.consumeFromBroker(message(taskId), 0);
 
             assertThat(consumer.businessRuns.get()).isEqualTo(1);
-            verify(redisService).markIdempotencyDone(eq(dedupKey),
+            assertThat(consumer.completedMarked).isTrue();
+            verify(redisService).markIdempotencyDone(eq(dedupKey(taskId)),
                 eq(Duration.ofMillis(AsyncTaskStreamConstants.DEDUP_DONE_TTL_MS)));
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
-        }
-
-        @Test
-        @DisplayName("占位被他人持有(PROCESSING)时让出执行且不 ACK")
-        void yieldWhenProcessingByOther() {
-            String taskId = "task-busy";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            when(redisService.getIdempotencyState(dedupKey))
-                .thenReturn(null)
-                .thenReturn(AsyncTaskStreamConstants.DEDUP_STATE_PROCESSING);
-            when(redisService.tryAcquireIdempotency(eq(dedupKey), any())).thenReturn(false);
-
-            consumer.processMessage(MSG_ID, message(taskId, "0"));
-
-            assertThat(consumer.businessRuns.get()).isZero();
-            verify(redisService, never()).streamAck(any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("抢占失败但任务已被他人完成(DONE)时跳过业务并 ACK")
-        void ackWhenDoneAfterFailedAcquire() {
-            String taskId = "task-raced-done";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            // 首查未完成；抢占占位失败后再查，发现另一消费者恰好已写入 DONE
-            when(redisService.getIdempotencyState(dedupKey))
-                .thenReturn(null)
-                .thenReturn(AsyncTaskStreamConstants.DEDUP_STATE_DONE);
-            when(redisService.tryAcquireIdempotency(eq(dedupKey), any())).thenReturn(false);
-
-            consumer.processMessage(MSG_ID, message(taskId, "0"));
-
-            assertThat(consumer.businessRuns.get()).isZero();
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
         }
     }
 
     @Nested
-    @DisplayName("重试与死信")
-    class RetryAndDlq {
+    @DisplayName("失败与死信")
+    class FailureAndDlq {
 
         @Test
-        @DisplayName("业务失败且未达上限时重新入队，并释放处理中占位")
-        void retryWhenBelowMax() {
+        @DisplayName("业务失败且未达上限时抛出触发重试，不标记 FAILED")
+        void throwWhenBelowMax() {
             String taskId = "task-retry";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            when(redisService.getIdempotencyState(dedupKey)).thenReturn(null);
-            when(redisService.tryAcquireIdempotency(eq(dedupKey), any())).thenReturn(true);
+            when(redisService.getIdempotencyState(dedupKey(taskId))).thenReturn(null);
             consumer.failBusiness = true;
 
-            consumer.processMessage(MSG_ID, message(taskId, "0"));
+            assertThatThrownBy(() -> consumer.consumeFromBroker(message(taskId), 0))
+                .isInstanceOf(IllegalStateException.class);
 
-            // 重新入队（retryCount=1）走 streamAdd 到原 Stream
-            verify(redisService).streamAdd(eq(STREAM_KEY), any(), eq(AsyncTaskStreamConstants.STREAM_MAX_LEN));
-            verify(redisService).releaseIdempotencyIfProcessing(dedupKey);
-            verify(redisService, never()).streamAddDlq(anyString(), any());
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
+            assertThat(consumer.failedMarked).isFalse();
+            verify(redisService, never()).markIdempotencyDone(anyString(), any());
         }
 
         @Test
-        @DisplayName("重试耗尽时转入死信队列并标记失败")
-        void toDlqWhenExhausted() {
+        @DisplayName("业务失败且达到上限时标记 FAILED 并抛出（交 broker 路由死信）")
+        void markFailedWhenExhausted() {
             String taskId = "task-dead";
-            String dedupKey = AsyncTaskStreamConstants.DEDUP_KEY_PREFIX + GROUP_NAME + ":" + taskId;
-            when(redisService.getIdempotencyState(dedupKey)).thenReturn(null);
-            when(redisService.tryAcquireIdempotency(eq(dedupKey), any())).thenReturn(true);
+            when(redisService.getIdempotencyState(dedupKey(taskId))).thenReturn(null);
             consumer.failBusiness = true;
 
-            // retryCount 已达最大值，应转死信而非再次入队
-            consumer.processMessage(MSG_ID,
-                message(taskId, String.valueOf(AsyncTaskStreamConstants.MAX_RETRY_COUNT)));
+            assertThatThrownBy(() -> consumer.consumeFromBroker(
+                message(taskId), AsyncTaskStreamConstants.MAX_RETRY_COUNT))
+                .isInstanceOf(IllegalStateException.class);
 
-            verify(redisService).streamAddDlq(
-                eq(STREAM_KEY + AsyncTaskStreamConstants.DLQ_STREAM_SUFFIX), any());
             assertThat(consumer.failedMarked).isTrue();
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
         }
     }
 
@@ -170,23 +125,24 @@ class AbstractStreamConsumerReliabilityTest {
         @Test
         @DisplayName("消息无 taskId 时跳过幂等保护，仍执行业务")
         void noTaskIdSkipsIdempotency() {
-            consumer.processMessage(MSG_ID, message(null, "0"));
+            consumer.consumeFromBroker(message(null), 0);
 
             assertThat(consumer.businessRuns.get()).isEqualTo(1);
+            assertThat(consumer.completedMarked).isTrue();
             verify(redisService, never()).getIdempotencyState(anyString());
-            verify(redisService, never()).tryAcquireIdempotency(anyString(), any());
-            verify(redisService).streamAck(STREAM_KEY, GROUP_NAME, MSG_ID);
+            verify(redisService, never()).markIdempotencyDone(anyString(), any());
         }
     }
 
     /**
-     * 最小可测子类：业务执行计数，可切换为失败以驱动重试 / 死信路径。
+     * 最小可测子类：业务执行计数，可切换为失败以驱动失败 / 死信路径。
      */
     private static class TestConsumer extends AbstractStreamConsumer<String> {
 
         final AtomicInteger businessRuns = new AtomicInteger(0);
         boolean failBusiness = false;
         boolean failedMarked = false;
+        boolean completedMarked = false;
 
         TestConsumer(RedisService redisService) {
             super(redisService);
@@ -198,23 +154,8 @@ class AbstractStreamConsumerReliabilityTest {
         }
 
         @Override
-        protected String streamKey() {
-            return STREAM_KEY;
-        }
-
-        @Override
         protected String groupName() {
             return GROUP_NAME;
-        }
-
-        @Override
-        protected String consumerPrefix() {
-            return "test-consumer-";
-        }
-
-        @Override
-        protected String threadName() {
-            return "test-consumer";
         }
 
         @Override
@@ -242,20 +183,12 @@ class AbstractStreamConsumerReliabilityTest {
 
         @Override
         protected void markCompleted(String payload) {
-            // no-op
+            completedMarked = true;
         }
 
         @Override
         protected void markFailed(String payload, String error) {
             failedMarked = true;
-        }
-
-        @Override
-        protected Map<String, String> buildRetryMessage(String payload, int retryCount) {
-            Map<String, String> message = new HashMap<>();
-            message.put("payload", payload);
-            message.put(AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount));
-            return message;
         }
     }
 }

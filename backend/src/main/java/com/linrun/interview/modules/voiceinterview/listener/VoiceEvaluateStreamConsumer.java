@@ -38,23 +38,8 @@ public class VoiceEvaluateStreamConsumer extends AbstractStreamConsumer<VoiceEva
     }
 
     @Override
-    protected String streamKey() {
-        return AsyncTaskStreamConstants.VOICE_EVALUATE_STREAM_KEY;
-    }
-
-    @Override
     protected String groupName() {
         return AsyncTaskStreamConstants.VOICE_EVALUATE_GROUP_NAME;
-    }
-
-    @Override
-    protected String consumerPrefix() {
-        return AsyncTaskStreamConstants.VOICE_EVALUATE_CONSUMER_PREFIX;
-    }
-
-    @Override
-    protected String threadName() {
-        return "voice-evaluate-consumer";
     }
 
     @Override
@@ -94,13 +79,5 @@ public class VoiceEvaluateStreamConsumer extends AbstractStreamConsumer<VoiceEva
     protected void markFailed(VoiceEvaluatePayload payload, String error) {
         voiceInterviewService.updateEvaluateStatus(
                 Long.parseLong(payload.sessionId()), AsyncTaskStatus.FAILED, error);
-    }
-
-    @Override
-    protected Map<String, String> buildRetryMessage(VoiceEvaluatePayload payload, int retryCount) {
-        return Map.of(
-            AsyncTaskStreamConstants.FIELD_VOICE_SESSION_ID, payload.sessionId(),
-            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-        );
     }
 }
