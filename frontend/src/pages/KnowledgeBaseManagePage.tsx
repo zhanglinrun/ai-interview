@@ -1088,6 +1088,12 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           原因：{trace.routeReasoning}
                         </p>
                       )}
+                      {trace.graphAttempted && (
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          图谱：{trace.graphHit ? '命中' : '未命中（已降级向量检索）'}
+                          {trace.graphHit && trace.graphResult ? ` · ${trace.graphResult}` : ''}
+                        </p>
+                      )}
                       <div className="mt-3 grid gap-3 lg:grid-cols-3">
                         {([
                           ['原始召回', retrieved, 'score'],

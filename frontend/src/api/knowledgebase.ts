@@ -160,6 +160,9 @@ export interface RagQueryTrace {
   rewrittenQuestion: string | null;
   routeStrategy: string | null;
   routeReasoning: string | null;
+  graphAttempted: boolean | null;
+  graphHit: boolean | null;
+  graphResult: string | null;
   retrievedJson: string | null;
   rerankedJson: string | null;
   finalSourcesJson: string | null;

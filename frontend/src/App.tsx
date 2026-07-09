@@ -23,6 +23,8 @@ const VoiceInterviewPage = lazy(() => import('./pages/VoiceInterviewPage'));
 const VoiceInterviewEvaluationPage = lazy(() => import('./pages/VoiceInterviewEvaluationPage'));
 const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage'));
 const InterviewHubPage = lazy(() => import('./pages/InterviewHubPage'));
+const EvalRunPage = lazy(() => import('./pages/EvalRunPage'));
+const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -220,6 +222,12 @@ function App() {
 
             {/* 问答助手（知识库聊天） */}
             <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
+
+            {/* 统一评测闭环 */}
+            <Route path="eval" element={<EvalRunPage />} />
+
+            {/* 知识图谱可视化 */}
+            <Route path="knowledge-graph" element={<KnowledgeGraphPage />} />
             <Route path="login" element={<LoginPage />} />
           </Route>
 

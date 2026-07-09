@@ -1,7 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, ChevronUp, FileStack } from 'lucide-react';
+import { ChevronDown, ChevronUp, Cpu, FileStack } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { ResumeListItem } from '../api/history';
 import type { KnowledgeBaseItem } from '../api/knowledgebase';
+import { llmProviderApi } from '../api/llmProvider';
+import type { ProviderItem } from '../types/llmProvider';
 import type { InterviewMode } from '../hooks/useInterviewConfig';
 import InterviewKnowledgeBaseSelector from './InterviewKnowledgeBaseSelector';
 
@@ -22,6 +25,8 @@ interface InterviewAdvancedOptionsProps {
   loadingKnowledgeBases?: boolean;
   selectedKbIds?: number[];
   onKnowledgeBaseToggle?: (id: number) => void;
+  llmProvider?: string;
+  onLlmProviderChange?: (provider: string) => void;
 }
 
 export default function InterviewAdvancedOptions({
@@ -39,7 +44,29 @@ export default function InterviewAdvancedOptions({
   loadingKnowledgeBases = false,
   selectedKbIds = [],
   onKnowledgeBaseToggle,
+  llmProvider,
+  onLlmProviderChange,
 }: InterviewAdvancedOptionsProps) {
+  const [providers, setProviders] = useState<ProviderItem[]>([]);
+
+  useEffect(() => {
+    if (!onLlmProviderChange) {
+      return;
+    }
+    let cancelled = false;
+    llmProviderApi
+      .list()
+      .then(list => {
+        if (!cancelled) {
+          setProviders(list);
+        }
+      })
+      .catch(err => console.error('Failed to load providers:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [onLlmProviderChange]);
+
   return (
     <>
       <button
@@ -79,6 +106,31 @@ export default function InterviewAdvancedOptions({
                 ))}
               </select>
             </div>
+
+            {onLlmProviderChange && (
+              <div className="bg-slate-50/80 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-3 mb-3">
+                  <Cpu className="w-5 h-5 text-primary-500" />
+                  <p className="font-semibold text-sm text-slate-900 dark:text-white">
+                    出题模型（可选）
+                  </p>
+                </div>
+                <select
+                  value={llmProvider ?? ''}
+                  onChange={e => onLlmProviderChange(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700
+                    bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white
+                    focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-shadow"
+                >
+                  <option value="">默认模型（跟随系统设置）</option>
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.id}{p.model ? ` · ${p.model}` : ''}{p.defaultChatProvider ? '（默认）' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {mode === 'text' && onKnowledgeBaseToggle && (
               <InterviewKnowledgeBaseSelector

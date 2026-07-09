@@ -1,6 +1,6 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {motion} from 'framer-motion';
-import {Calendar, ChevronRight, Database, FileStack, LogIn, LogOut, MessageSquare, Mic2, Moon, Settings, Sun, Users,} from 'lucide-react';
+import {Calendar, ChevronRight, Database, FileStack, FlaskConical, LogIn, LogOut, MessageSquare, Mic2, Moon, Network, Settings, Sun, Users,} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
@@ -37,6 +37,8 @@ function resolveDocumentTitle(pathname: string): string {
   if (pathname === '/knowledgebase/upload') return `上传文档 · ${APP_NAME}`;
   if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
   if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
+  if (pathname === '/knowledge-graph') return `知识图谱 · ${APP_NAME}`;
+  if (pathname === '/eval') return `统一评测 · ${APP_NAME}`;
   if (pathname === '/settings') return `设置 · ${APP_NAME}`;
   return APP_NAME;
 }
@@ -142,6 +144,8 @@ export default function Layout() {
       items: [
         { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database, description: '管理知识文档' },
         { id: 'chat', path: '/knowledgebase/chat', label: '问答助手', icon: MessageSquare, description: '基于知识库问答' },
+        { id: 'knowledge-graph', path: '/knowledge-graph', label: '知识图谱', icon: Network, description: '技能/知识点关系图谱' },
+        { id: 'eval', path: '/eval', label: '统一评测', icon: FlaskConical, description: '意图/RAG/裁判评测与回归' },
       ],
     },
     {
