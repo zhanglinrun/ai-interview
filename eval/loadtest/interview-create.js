@@ -17,9 +17,8 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { BASE_URL, authHeaders, resolveToken } from './helpers.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
-const TOKEN = __ENV.TOKEN || '';
 const SKILL_ID = __ENV.SKILL_ID || 'java-backend';
 const QUESTION_COUNT = parseInt(__ENV.QUESTION_COUNT || '3', 10);
 
@@ -48,18 +47,18 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  return { token: resolveToken() };
+}
+
+export default function (data) {
   const payload = JSON.stringify({
     questionCount: QUESTION_COUNT,
     forceCreate: true,
     skillId: SKILL_ID,
     difficulty: 'mid',
   });
-  const headers = { 'Content-Type': 'application/json' };
-  if (TOKEN) {
-    headers.Authorization = `Bearer ${TOKEN}`;
-  }
-  const params = { headers };
+  const params = { headers: authHeaders(data.token) };
 
   const res = http.post(`${BASE_URL}/api/interview/sessions`, payload, params);
   bizLatency.add(res.timings.duration);

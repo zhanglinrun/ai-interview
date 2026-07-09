@@ -22,13 +22,9 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { BASE_URL, authHeaders, parseIds, resolveToken } from './helpers.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
-const TOKEN = __ENV.TOKEN || '';
-const KB_IDS = (__ENV.KB_IDS || '1')
-  .split(',')
-  .map((s) => parseInt(s.trim(), 10))
-  .filter((n) => !Number.isNaN(n));
+const KB_IDS = parseIds(__ENV.KB_IDS, '1');
 
 const QUESTIONS = [
   '什么是缓存穿透，如何防止',
@@ -56,13 +52,14 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  return { token: resolveToken() };
+}
+
+export default function (data) {
   const question = QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)];
   const payload = JSON.stringify({ knowledgeBaseIds: KB_IDS, question });
-  const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
-  if (TOKEN) {
-    headers.Authorization = `Bearer ${TOKEN}`;
-  }
+  const headers = authHeaders(data.token, { Accept: 'text/event-stream' });
 
   const res = http.post(`${BASE_URL}/api/knowledgebase/query/stream`, payload, { headers });
   ttftProxy.add(res.timings.waiting);

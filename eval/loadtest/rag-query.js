@@ -19,13 +19,9 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { BASE_URL, authHeaders, parseIds, resolveToken } from './helpers.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
-const TOKEN = __ENV.TOKEN || '';
-const KB_IDS = (__ENV.KB_IDS || '1')
-  .split(',')
-  .map((s) => parseInt(s.trim(), 10))
-  .filter((n) => !Number.isNaN(n));
+const KB_IDS = parseIds(__ENV.KB_IDS, '1');
 
 // 一组覆盖长短查询的问题：短查询走更大的 topK 召回，长查询走精排，贴近真实分布。
 const QUESTIONS = [
@@ -66,14 +62,14 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  return { token: resolveToken() };
+}
+
+export default function (data) {
   const question = QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)];
   const payload = JSON.stringify({ knowledgeBaseIds: KB_IDS, question });
-  const headers = { 'Content-Type': 'application/json' };
-  if (TOKEN) {
-    headers.Authorization = `Bearer ${TOKEN}`;
-  }
-  const params = { headers };
+  const params = { headers: authHeaders(data.token) };
 
   const res = http.post(`${BASE_URL}/api/knowledgebase/query`, payload, params);
   bizLatency.add(res.timings.duration);

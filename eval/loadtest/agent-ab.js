@@ -12,15 +12,11 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { BASE_URL, authHeaders, parseIds, resolveToken } from './helpers.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
-const TOKEN = __ENV.TOKEN || '';
 const SKILL_ID = __ENV.SKILL_ID || 'java-backend';
 const QUESTION_COUNT = parseInt(__ENV.QUESTION_COUNT || '3', 10);
-const KB_IDS = (__ENV.KB_IDS || '')
-  .split(',')
-  .map((s) => parseInt(s.trim(), 10))
-  .filter((n) => !Number.isNaN(n));
+const KB_IDS = parseIds(__ENV.KB_IDS, '');
 
 const failRate = new Rate('agent_question_fail');
 const bizLatency = new Trend('agent_question_biz_latency', true);
@@ -47,7 +43,11 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  return { token: resolveToken() };
+}
+
+export default function (data) {
   const payload = {
     questionCount: QUESTION_COUNT,
     forceCreate: true,
@@ -58,12 +58,8 @@ export default function () {
     payload.knowledgeBaseIds = KB_IDS;
   }
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (TOKEN) {
-    headers.Authorization = `Bearer ${TOKEN}`;
-  }
-
-  const res = http.post(`${BASE_URL}/api/interview/sessions`, JSON.stringify(payload), { headers });
+  const res = http.post(`${BASE_URL}/api/interview/sessions`, JSON.stringify(payload),
+    { headers: authHeaders(data.token) });
   bizLatency.add(res.timings.duration);
 
   let ok = res.status === 200;

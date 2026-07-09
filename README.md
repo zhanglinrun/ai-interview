@@ -45,8 +45,9 @@
 - Rerank 精排：默认使用 DashScope `gte-rerank-v2` 云端精排；显式配置 `provider=local` 时才启用本地 ONNX BGE Reranker。
 - small-to-big 上下文扩展：命中小 chunk 后优先保留命中片段，再补充邻近兄弟 chunk 和父级章节，减少上下文碎片化。
 - 引用溯源：回答末尾返回来源片段，非流式接口会返回 sources、confidence 和无效引用编号。
-- 检索 Trace：保存原问题、改写问题、路由策略、命中 chunk、rerank 后顺序、最终引用和答案。
-- 多源路由：QueryRouter 可将问题路由到知识库 ES、Text2SQL 或二者混合，结构化 SQL 结果跳过 Rerank 并置顶。
+- 检索 Trace：保存原问题、改写问题、路由策略、命中 chunk、rerank 后顺序、最终引用、答案，以及图谱（Neo4j Text2Cypher）是否参与/命中/降级。
+- 多源路由：QueryRouter 可将问题路由到知识库 ES、Text2SQL、Neo4j 图谱或混合，结构化 SQL 结果跳过 Rerank 并置顶。
+- 知识图谱：`(:Skill)-[:COVERS]->(:Concept)`（启动时从 SKILL.md 预置）+ 文档向量化时同步概念/文档/关系节点；提供 `/api/knowledgebase/graph/overview`、`/neighbors` 只读子图端点，前端「知识图谱」页可视化并下钻，Neo4j 未启用时优雅降级。
 - Agentic RAG：查询分解（复杂/多跳/对比问题拆成子查询并行检索后 RRF 融合，规则预筛 + LLM 二次判定，默认开）+ CRAG 纠正式检索（rerank 后小模型打分 correct/ambiguous/incorrect，ambiguous 用纠正查询重检索一次，incorrect 判「知识库无据」防幻觉，默认关，按 `app.ai.rag.crag.enabled` 开启）。
 - 三路融合意图识别：流式问答前用 LLM 语义识别、面试意图样例相似度、关键词规则兜底共同判断用户问题；结果包含 `intent`、`related`、`confidence`、`strategies` 和 `cached`，用于 RAG 路由、Prompt 选择和离题兜底。
 - 检索评测：`/api/knowledgebase/evaluate-retrieval` 复用知识库检索链路，计算 Hit@K、MRR、NDCG，结果保存到 `rag_evaluation_runs`。
@@ -65,8 +66,8 @@
 - Skill 出题：内置 Java 后端、前端、算法、系统设计、AI Agent、阿里/字节/腾讯专项等方向。
 - JD 解析：根据岗位描述匹配面试 Skill 和考察范围。
 - Multi-Agent 自适应出题：Planner→Interviewer→Critic 显式状态机 + Reflexion，Interviewer 可调用知识库检索、简历读取等工具后生成下一题。
-- 文字模拟面试：支持创建会话、获取当前问题、提交/修改回答、结束会话；可查看 Agent 轨迹与计划进度。
-- 异步评估：通过消息队列（默认 RocketMQ 事务消息，可回退 Redis Stream）触发面试评估任务，统一生成评分、反馈、优势和改进建议。
+- 文字模拟面试：支持创建会话、获取当前问题、提交/修改回答、结束会话；可查看 Agent 轨迹与计划进度；可在「更多选项」按 Provider 选择出题模型（留空走系统默认）。
+- 异步评估：通过消息队列（默认 RocketMQ 事务消息，可切 RabbitMQ）触发面试评估任务，统一生成评分、反馈、优势和改进建议；消费侧幂等，重复投递不会把已完成评估改写为失败。
 - PDF 导出：支持导出面试报告和简历分析报告。
 
 ### 简历与日程
@@ -214,7 +215,7 @@ uv run run_ragas.py --from-jsonl .work/qa-export-20260703-103205.jsonl
 | 模型接入 | OpenAI 兼容接口、DashScope、Kimi、DeepSeek、GLM、LM Studio |
 | 向量检索 | Elasticsearch 8.17、LangChain4j ElasticsearchEmbeddingStore |
 | 关系数据库 | MySQL 8、MyBatis-Plus、Druid |
-| 缓存与异步 | Redis、RocketMQ（默认，事务消息 + broker 重试 + DLQ）/ Redis Stream（回退） |
+| 缓存与异步 | Redis、RocketMQ（默认，事务消息 + broker 重试 + 原生 DLQ）/ RabbitMQ（direct exchange + DLX/DLQ + 重试建议链，Windows/WSL2 推荐） |
 | 文档解析 | MinerU、Apache Tika、Apache POI |
 | 文件存储 | S3 兼容对象存储，完整容器环境使用 MinIO，开发依赖可用 RustFS |
 | 精排 | DashScope `gte-rerank-v2`，可选本地 ONNX BGE Reranker |
@@ -257,9 +258,10 @@ ai-interview
 │   └── src
 │       ├── api                      # 后端 API 封装
 │       ├── components               # 通用组件和业务组件
-│       └── pages                    # 知识库、RAG 对话、简历、面试、设置页面
+│       └── pages                    # 知识库、RAG 对话、知识图谱、统一评测、简历、面试、设置页面
 ├── eval                            # 评测与压测（k6、RAG 评测集）
-│   ├── loadtest/                   # k6 接口压测脚本
+│   ├── RUNBOOK.md                  # 压测 + 各评测 + 回填 README 的一条龙操作手册
+│   ├── loadtest/                   # k6 接口压测脚本（helpers.js 自动登录换 token）
 │   ├── rag-retrieval/              # RAG 召回质量评测集（80 题）
 │   ├── ragas/                      # RAGAS 生成质量评测
 │   └── corpus/                     # 评测 PDF 语料（本地，不进 git）
@@ -326,8 +328,19 @@ docker compose -f docker-compose.dev.yml up -d
 - MinIO：API `localhost:29000`，控制台 `localhost:29001`
 - Neo4j：HTTP `localhost:27474`，Bolt `localhost:27687`
 - RocketMQ：namesrv `localhost:9876`，broker `10911`，控制台 `localhost:29888`
+- RabbitMQ：AMQP `localhost:5672`，管理台 `localhost:15672`（guest/guest）
 
 MinIO bucket `ai-interview` 由 compose 自动创建；账号密码见 `.env.example` 中的 `MINIO_*` / `APP_STORAGE_*`。
+
+> **Windows / WSL2 用户注意（异步任务引擎）**：Docker Desktop（WSL2 mirrored 网络）下宿主机常
+> **连不通容器里的 RocketMQ `9876`**（TCP 握手成功但数据被转发层丢弃），导致简历分析/面试评估等
+> 异步任务失败。本机开发请在 `.env` 里改用 **RabbitMQ** 引擎（真正的消息队列，非轻量回退）：
+>
+> ```properties
+> APP_ASYNC_ENGINE=rabbitmq
+> ```
+>
+> 两种引擎共用同一套幂等/死信业务逻辑，一行配置切换。完整容器化部署（应用与 RocketMQ 同网络）不受此影响，可继续用默认 RocketMQ。
 
 ### 3. 启动后端
 
@@ -431,6 +444,7 @@ APP_AI_RAG_RERANK_ENABLED=false
 | RAG 检索评测 | `POST /api/knowledgebase/evaluate-retrieval` |
 | 统一评测闭环 | `POST /api/eval/run` |
 | RAG Trace | `GET /api/knowledgebase/traces`、`GET /api/knowledgebase/traces/{traceId}` |
+| 知识图谱 | `GET /api/knowledgebase/graph/overview`、`GET /api/knowledgebase/graph/neighbors` |
 | 表格数据预览 | `GET /api/knowledgebase/{id}/data/preview` |
 | RAG 会话 | `POST /api/rag-chat/sessions`、`POST /api/rag-chat/sessions/{id}/messages/stream` |
 | 知识库版本 | `GET /api/knowledgebase/{id}/versions`、`POST /api/knowledgebase/{id}/versions/{versionId}/switch` |
@@ -497,6 +511,14 @@ mvn -pl backend test -Dtest=InterviewCriticEvalTest '-Dtest.excludedGroups=' -Dg
 报告写到 `eval/.work/critic-badcase-report.md`。设置 `CRITIC_EVAL_MIN_ACCURACY` 后低于阈值断言失败（供 CI 门禁）。
 本地一轮 qwen3.5-flash 结果：整体准确率 1.0，打回 Precision/Recall/F1 均为 1.0（9 个 bad case 全部拦截，4 个正例全部放行）。
 
+图谱检索评测（技能→概念 覆盖度，需要真实 Neo4j，后端启动一次预置技能图谱后运行）：
+
+```bash
+mvn -pl backend test -Dtest=GraphRetrievalEvalTest '-Dtest.excludedGroups=' -Dgroups=graph-eval
+```
+
+k6 压测、RAG/RAGAS/图谱评测与统一评测闭环的完整操作步骤（起依赖 → 拿 JWT → 播种知识库 → 跑各项 → 回填本 README）见 [`eval/RUNBOOK.md`](eval/RUNBOOK.md)。
+
 前端构建：
 
 ```bash
@@ -513,7 +535,7 @@ mvn -pl backend -am package -DskipTests
 ## 备注
 
 - 完整容器化部署可参考 `dev-ops/docker-compose-app.yml`（根目录 `docker-compose.yml` 为兼容入口），但日常开发更推荐 `dev-ops/docker-compose-environment.yml + 本机后端 + 本机前端`。
-- Windows + Docker Desktop（WSL2 mirrored 网络模式）下，宿主机 RocketMQ 客户端可能无法连通容器发布的 `9876` 端口（TCP 握手成功但数据被转发层丢弃）。本机开发可在 `.env` 设置 `APP_ASYNC_ENGINE=redis-stream` 回退轻量引擎；完整容器化部署（应用与 RocketMQ 同网络）不受影响，仍走默认 RocketMQ。
+- Windows + Docker Desktop（WSL2 mirrored 网络模式）下，宿主机 RocketMQ 客户端可能无法连通容器发布的 `9876` 端口（TCP 握手成功但数据被转发层丢弃）。本机开发可在 `.env` 设置 `APP_ASYNC_ENGINE=rabbitmq` 切换到 RabbitMQ 引擎（真正的消息队列，DLX/DLQ + 重试建议链）；完整容器化部署（应用与 RocketMQ 同网络）不受影响，仍走默认 RocketMQ。异步任务引擎抽象为 `TaskQueueChannel`（`app.async.engine=rocketmq|rabbitmq`），两引擎共用 `common/async` 的 `consumeFromBroker` 幂等/死信逻辑。
 - 语音面试依赖 ASR/TTS 和浏览器麦克风权限，属于扩展交互能力；如果只展示 RAG 项目，可以不作为主讲内容。
 - 本地 Elasticsearch Basic 许可证不支持 ES 原生 RRF；本项目在应用层做 RRF 融合。默认 `hybrid` 模式可用；若仅跑向量链路可设 `APP_AI_RAG_HYBRID_MODE=vector`。
 - Text2SQL 应使用生产只读数据库账号；应用层只读连接是额外保护，不替代数据库权限。

@@ -23,9 +23,8 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { BASE_URL, authHeaders, resolveToken } from './helpers.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
-const TOKEN = __ENV.TOKEN || '';
 const MODE = __ENV.MODE || 'list'; // list | missing
 
 const failRate = new Rate('kb_list_fail');
@@ -64,12 +63,12 @@ function targetUrl() {
   return `${BASE_URL}/api/knowledgebase/list`;
 }
 
-export default function () {
-  const headers = {};
-  if (TOKEN) {
-    headers.Authorization = `Bearer ${TOKEN}`;
-  }
-  const res = http.get(targetUrl(), { headers });
+export function setup() {
+  return { token: resolveToken() };
+}
+
+export default function (data) {
+  const res = http.get(targetUrl(), { headers: authHeaders(data.token) });
   bizLatency.add(res.timings.duration);
 
   // 统一响应 Result<T>：HTTP 200 且 code==0/200 才算成功；missing 模式下「查不到」也是正常返回。
