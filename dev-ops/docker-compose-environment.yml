@@ -6,6 +6,12 @@
 #   docker compose -f docker-compose.dev.yml up -d
 #
 # 宿主机端口刻意避开 agent-group（13306/16379/19200/9000/18081 等）及常见默认端口。
+#
+# name 显式钉死：ai-group 的 compose 也在各自 docs/dev-ops 目录下运行，默认项目名同为
+# "dev-ops"，会互相识别成同一项目（up 时把对方容器当 orphan/待 Recreate，可能覆盖对方基础设施）。
+# 本机已有容器/卷均属于 ai-interview 项目（卷名 ai-interview_*），与此保持一致。
+
+name: ai-interview
 
 services:
   mysql:

@@ -133,6 +133,26 @@ public class InterviewPersistenceService {
     });
   }
 
+  /**
+   * 把 totalQuestions 同步为实际已出题数（Agent 动态出题 + 提前交卷时，
+   * 计划题数与实际出题数不一致，报告/列表按实际数展示）。
+   */
+  @Transactional(rollbackFor = Exception.class)
+  public void syncTotalQuestionsToActual(String sessionId) {
+    findSessionEntityBySessionId(sessionId).ifPresent(session -> {
+      try {
+        List<InterviewQuestionDTO> questions = parseQuestionList(session.getQuestionsJson());
+        if (!questions.isEmpty() && session.getTotalQuestions() != null
+            && questions.size() < session.getTotalQuestions()) {
+          session.setTotalQuestions(questions.size());
+          MapperUtils.save(interviewSessionMapper, session);
+        }
+      } catch (JsonProcessingException e) {
+        log.warn("同步实际题数失败（保留计划题数）: sessionId={}", sessionId, e);
+      }
+    });
+  }
+
   @Transactional(rollbackFor = Exception.class)
   public void updateCurrentQuestionIndex(String sessionId, int index) {
     findSessionEntityBySessionId(sessionId).ifPresent(session -> {

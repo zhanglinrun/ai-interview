@@ -327,11 +327,12 @@ public class UnifiedEvaluationService {
             .collect(Collectors.toList());
 
         int totalQuestions = qaRecords.size();
+        // 总分按「全部已出题目」平均（未回答记 0 分），提前交卷跳过的题会拉低总分；
+        // 只平均已答题会出现「答 2 题得 82」这种与作答率脱节的高分
         int overallScore = answeredCount == 0 ? 0
-            : (int) questionDetails.stream()
-                .filter(q -> q.userAnswer() != null && !q.userAnswer().isBlank())
+            : (int) Math.round(questionDetails.stream()
                 .mapToInt(QuestionEvaluation::score)
-                .average().orElse(0);
+                .average().orElse(0));
 
         String feedbackWithRate = overallFeedback;
         if (answeredCount < totalQuestions) {

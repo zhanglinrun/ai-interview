@@ -528,6 +528,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           </motion.button>
           <motion.button
             onClick={() => setDebugOpen((v) => !v)}
+            title="开发者工具：单独调试意图识别 / Query 改写 / Rerank / 路由等 RAG 模块，观察每个环节的中间结果"
             className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -540,11 +541,15 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           <motion.button
             onClick={() => setEvalOpen(true)}
             disabled={selectedKbIds.size === 0}
+            title="开发者工具：对勾选的知识库批量跑检索质量评测（Hit@K / MRR / NDCG），需先在右侧勾选知识库"
             className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm disabled:opacity-50"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            RAG 评测
+            <span className="inline-flex items-center gap-1.5">
+              <BarChart3 className="w-4 h-4" />
+              RAG 评测
+            </span>
           </motion.button>
           <motion.button
             onClick={onBack}
@@ -812,7 +817,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                         <div key={i} className="text-xs text-slate-500 dark:text-slate-400 truncate">
                                           {i + 1}. {s.documentTitle}
                                           {s.similarity != null && (
-                                            <span className="ml-1 text-slate-400">（相似度 {s.similarity.toFixed(2)}）</span>
+                                            <span className="ml-1 text-slate-400">（相关度 {s.similarity.toFixed(2)}）</span>
                                           )}
                                         </div>
                                       ))}
@@ -1095,7 +1100,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
               onClick={(e) => e.stopPropagation()}
               className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-primary-500" />
                   RAG 评测
@@ -1107,6 +1112,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   <X className="w-5 h-5" />
                 </button>
               </div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 leading-relaxed">
+                开发者工具：用 JSON 评测集对已勾选知识库跑检索质量回归，输出 Hit@K / MRR / NDCG
+                等指标，用于验证「换切块 / 换检索策略后效果有没有变差」。日常问答不需要用到。
+              </p>
               <textarea
                 value={evalInput}
                 onChange={(e) => setEvalInput(e.target.value)}
@@ -1231,7 +1240,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
               onClick={(e) => e.stopPropagation()}
               className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Bug className="w-5 h-5 text-primary-500" />
                   RAG 模块调试
@@ -1243,6 +1252,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   <X className="w-5 h-5" />
                 </button>
               </div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 leading-relaxed">
+                开发者工具：输入一个问题，单独运行 RAG 链路中的某个模块（意图识别 / Prompt 组装 /
+                Query 改写 / Rerank / 路由），查看中间结果，定位「答得不好是哪个环节的问题」。
+              </p>
               <input
                 type="text"
                 value={debugQuestion}

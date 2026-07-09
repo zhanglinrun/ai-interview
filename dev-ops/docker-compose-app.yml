@@ -4,6 +4,11 @@
 #   docker compose -f docker-compose-app.yml up -d --build
 # 或在项目根目录：
 #   docker compose -f docker-compose.yml up -d --build
+#
+# name 显式钉死，防止与 ai-group 的 docs/dev-ops compose 撞默认项目名 "dev-ops"（详见
+# docker-compose-environment.yml 头注）。
+
+name: ai-interview
 
 services:
   mysql:

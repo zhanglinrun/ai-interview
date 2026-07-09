@@ -15,6 +15,11 @@ const TYPE_COLOR: Record<string, string> = {
   Concept: '#10b981',
   Document: '#f59e0b',
 };
+const TYPE_LABEL: Record<string, string> = {
+  Skill: '技能方向',
+  Concept: '知识概念',
+  Document: '你的文档',
+};
 const nodeColor = (type: string) => TYPE_COLOR[type] ?? '#64748b';
 
 interface Positioned extends GraphNode {
@@ -109,8 +114,33 @@ export default function KnowledgeGraphPage() {
       <PageHeader
         eyebrow="知识图谱"
         title="技能 / 知识图谱"
-        description="Neo4j 中的 Skill—COVERS→Concept 与文档概念关系；点节点下钻一跳子图，可用于面试出题的知识点关联展示"
+        description="把面试方向、知识点和你的文档连成一张网，看清「这个方向要考哪些点、我的资料覆盖了哪些」"
       />
+
+      {/* 这张图是什么 / 怎么用 */}
+      <div className="surface-card p-5 grid gap-4 md:grid-cols-3 text-sm">
+        <div>
+          <p className="font-semibold text-stone-800 dark:text-stone-100 mb-1">这是什么</p>
+          <p className="text-stone-500 dark:text-stone-400 leading-relaxed text-[13px]">
+            紫色是面试<span className="font-medium text-indigo-500">技能方向</span>（如 Redis、Java 后端），
+            绿色是它覆盖的<span className="font-medium text-emerald-500">知识概念</span>，
+            橙色是你上传的<span className="font-medium text-amber-500">文档</span>。连线表示「方向考察概念 / 概念来自文档」。
+          </p>
+        </div>
+        <div>
+          <p className="font-semibold text-stone-800 dark:text-stone-100 mb-1">数据从哪来</p>
+          <p className="text-stone-500 dark:text-stone-400 leading-relaxed text-[13px]">
+            技能方向是系统预置的；你每上传并向量化一份文档，系统会自动从文档标题结构里抽取概念挂到图上，不需要手工维护。
+          </p>
+        </div>
+        <div>
+          <p className="font-semibold text-stone-800 dark:text-stone-100 mb-1">有什么用</p>
+          <p className="text-stone-500 dark:text-stone-400 leading-relaxed text-[13px]">
+            点任意节点（或搜索「Redis」）下钻一跳子图，能看到一个方向关联的知识点分布；
+            问答助手遇到「XX 方向要考什么」这类问题时也会查这张图回答。
+          </p>
+        </div>
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <form
@@ -140,10 +170,10 @@ export default function KnowledgeGraphPage() {
           {Object.entries(TYPE_COLOR).map(([type, color]) => (
             <span key={type} className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
-              {type}
+              {TYPE_LABEL[type] ?? type}
             </span>
           ))}
-          <span>节点 {view.nodes.length}（Skill {skillCount} · 概念/文档 {conceptCount}） · 边 {view.edges.length}</span>
+          <span>节点 {view.nodes.length}（技能 {skillCount} · 概念/文档 {conceptCount}） · 关系 {view.edges.length}</span>
         </div>
       </div>
 

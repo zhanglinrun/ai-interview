@@ -2,7 +2,7 @@ import {useMemo, useRef} from 'react';
 import {motion} from 'framer-motion';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import type {InterviewMessage, InterviewQuestion, InterviewSession} from '../types/interview';
-import {Send} from 'lucide-react';
+import {Flag, Send} from 'lucide-react';
 import InterviewMessageBubble from './InterviewMessageBubble';
 import LoadingButtonContent from './LoadingButtonContent';
 
@@ -46,84 +46,102 @@ export default function InterviewChatPanel({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-200px)] max-w-4xl mx-auto">
-      {/* 进度条 */}
-        <div
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6 mb-4 shadow-sm dark:shadow-slate-900/50 border border-slate-100 dark:border-slate-700">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-            题目 {currentQuestion ? currentQuestion.questionIndex + 1 : 0} / {session.totalQuestions}
-          </span>
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-            {Math.round(progress)}%
-          </span>
+    <div className="flex flex-col h-[calc(100vh-190px)] min-h-[520px]">
+      {/* 聊天卡片：头部进度 + 消息流 + 输入区一体化 */}
+      <div className="surface-card flex-1 overflow-hidden flex flex-col min-h-0">
+        {/* 头部：题号 + 分类 + 进度 */}
+        <div className="px-6 pt-5 pb-4 border-b border-stone-200/70 dark:border-stone-800">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-stone-800 dark:text-stone-100">
+                第 {currentQuestion ? currentQuestion.questionIndex + 1 : 0} 题
+                <span className="text-stone-400 dark:text-stone-500 font-normal"> / 共 {session.totalQuestions} 题</span>
+              </span>
+              {currentQuestion?.category && (
+                <span className="px-2.5 py-0.5 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-xs font-medium rounded-full border border-primary-100 dark:border-primary-800/40">
+                  {currentQuestion.category}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-medium tabular-nums text-stone-400 dark:text-stone-500">
+              {Math.round(progress)}%
+            </span>
+          </div>
+          <div className="h-1.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+            />
+          </div>
         </div>
-            <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-          <motion.div
-            className="h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.3 }}
+
+        {/* 消息流 */}
+        <div className="flex-1 min-h-0 bg-stone-50/60 dark:bg-stone-950/30">
+          <Virtuoso
+            ref={virtuosoRef}
+            data={messages}
+            initialTopMostItemIndex={messages.length - 1}
+            followOutput="smooth"
+            className="flex-1 h-full"
+            itemContent={(_index, msg) => (
+              <div className="pb-5 px-6 first:pt-6">
+                <InterviewMessageBubble
+                  role={msg.type === 'interviewer' ? 'interviewer' : 'user'}
+                  text={msg.content}
+                  category={msg.category}
+                />
+              </div>
+            )}
           />
         </div>
-      </div>
-
-      {/* 聊天区域 */}
-        <div
-            className="flex-1 bg-white dark:bg-slate-800 rounded-2xl shadow-sm dark:shadow-slate-900/50 overflow-hidden flex flex-col min-h-0 border border-slate-100 dark:border-slate-700">
-        <Virtuoso
-          ref={virtuosoRef}
-          data={messages}
-          initialTopMostItemIndex={messages.length - 1}
-          followOutput="smooth"
-          className="flex-1"
-          itemContent={(_index, msg) => (
-            <div className="pb-4 px-6 first:pt-6">
-              <InterviewMessageBubble
-                role={msg.type === 'interviewer' ? 'interviewer' : 'user'}
-                text={msg.content}
-                category={msg.category}
-              />
-            </div>
-          )}
-        />
 
         {/* 输入区域 */}
-            <div className="border-t border-slate-200 dark:border-slate-600 p-4 bg-slate-50 dark:bg-slate-700/50">
-          {draftSaved && (
-            <p className="text-xs text-slate-400 mb-2">答案已暂存</p>
-          )}
-          <div className="flex gap-3">
-            <textarea
-              value={answer}
-              onChange={(e) => onAnswerChange(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder="输入你的回答... (Ctrl/Cmd + Enter 提交)"
-              className="flex-1 px-4 py-3 border border-slate-300 dark:border-slate-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
-              rows={3}
-              disabled={isSubmitting}
-            />
-            <div className="flex flex-col gap-2">
+        <div className="border-t border-stone-200/70 dark:border-stone-800 px-5 py-4 bg-white/80 dark:bg-stone-900/70 backdrop-blur">
+          <textarea
+            value={answer}
+            onChange={(e) => onAnswerChange(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="组织你的回答，讲清原理再结合场景…"
+            className="w-full px-4 py-3 text-[15px] leading-6 border border-stone-200 dark:border-stone-700 rounded-xl
+              focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500 resize-none
+              bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100
+              placeholder-stone-400 dark:placeholder-stone-500 transition-shadow"
+            rows={3}
+            disabled={isSubmitting}
+          />
+          <div className="flex items-center justify-between mt-2.5">
+            <div className="flex items-center gap-3 text-xs text-stone-400 dark:text-stone-500">
+              <span className="hidden sm:inline">Ctrl / Cmd + Enter 提交</span>
+              {draftSaved && (
+                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  草稿已暂存
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => onShowCompleteConfirm(true)}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-sm font-medium rounded-lg text-stone-500 dark:text-stone-400
+                  hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20
+                  transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              >
+                <Flag className="w-3.5 h-3.5" />
+                提前交卷
+              </button>
               <motion.button
                 onClick={onSubmit}
                 disabled={!answer.trim() || isSubmitting}
-                className="px-6 py-3 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                whileHover={{ scale: isSubmitting || !answer.trim() ? 1 : 1.02 }}
-                whileTap={{ scale: isSubmitting || !answer.trim() ? 1 : 0.98 }}
+                className="px-6 py-2 btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 inline-flex items-center gap-2"
+                whileTap={{ scale: isSubmitting || !answer.trim() ? 1 : 0.97 }}
               >
                 <LoadingButtonContent loading={isSubmitting} loadingText="提交中">
                   <Send className="w-4 h-4" />
-                  提交
+                  提交回答
                 </LoadingButtonContent>
-              </motion.button>
-              <motion.button
-                onClick={() => onShowCompleteConfirm(true)}
-                disabled={isSubmitting}
-                className="px-6 py-3 bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-medium hover:bg-slate-300 dark:hover:bg-slate-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                whileHover={{ scale: isSubmitting ? 1 : 1.02 }}
-                whileTap={{ scale: isSubmitting ? 1 : 0.98 }}
-              >
-                提前交卷
               </motion.button>
             </div>
           </div>

@@ -88,7 +88,9 @@ public class LlmProviderBootstrapService {
     String defaultEmbeddingProvider = resolveExistingEmbeddingProvider(configuredEmbeddingProvider, defaultChatProvider);
 
     LocalDateTime now = LocalDateTime.now();
-    MapperUtils.save(globalSettingMapper, LlmGlobalSettingEntity.builder()
+    // 必须直接 insert：MapperUtils.save 见到非空 id 会走 updateById，
+    // 对不存在的单例行 update 影响 0 行且不报错，导致全局配置永远初始化不出来
+    globalSettingMapper.insert(LlmGlobalSettingEntity.builder()
         .id(LlmGlobalSettingEntity.SINGLETON_ID)
         .defaultChatProviderId(defaultChatProvider)
         .defaultEmbeddingProviderId(defaultEmbeddingProvider)

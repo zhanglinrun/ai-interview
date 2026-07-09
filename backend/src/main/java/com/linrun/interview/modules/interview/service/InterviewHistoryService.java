@@ -44,6 +44,9 @@ public class InterviewHistoryService {
         }
 
         InterviewSessionEntity session = sessionOpt.get();
+        // answers 是 @TableField(exist=false) 临时字段，selectOne 不会填充，须显式加载，
+        // 否则逐题详情全部落到「未回答」分支（得分 0、回答为空）
+        session.setAnswers(interviewPersistenceService.findAnswersBySessionId(sessionId));
 
         // 解析JSON字段
         List<Object> questions = parseJson(session.getQuestionsJson(), new TypeReference<>() {});
@@ -153,6 +156,8 @@ public class InterviewHistoryService {
         }
 
         InterviewSessionEntity session = sessionOpt.get();
+        // 同 getInterviewDetail：answers 需显式加载，否则 PDF 问答详情章节整体缺失
+        session.setAnswers(interviewPersistenceService.findAnswersBySessionId(sessionId));
         try {
             return pdfExportService.exportInterviewReport(session);
         } catch (Exception e) {

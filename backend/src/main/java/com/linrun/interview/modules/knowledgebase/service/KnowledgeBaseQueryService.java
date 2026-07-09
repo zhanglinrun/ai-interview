@@ -15,6 +15,7 @@ import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
 import com.linrun.interview.modules.knowledgebase.rag.CompositeContentRetriever;
+import com.linrun.interview.modules.knowledgebase.rag.ContentUtil;
 import com.linrun.interview.modules.knowledgebase.rag.CorrectiveRetrievalGrader;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryDecomposer;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
@@ -928,8 +929,10 @@ public class KnowledgeBaseQueryService {
             TextSegment segment = content.textSegment();
             Long knowledgeBaseId = extractKnowledgeBaseId(content);
             var metadata = segment.metadata();
+            // 图谱检索命中（skipRerank 标记）没有 docId/fileName 元数据，标为「知识图谱」而非「未知知识库」
+            String noKbTitle = ContentUtil.isSkipRerank(content) ? "知识图谱" : "未知知识库";
             String fallbackTitle = knowledgeBaseId == null
-                ? "未知知识库" : nameMap.getOrDefault(knowledgeBaseId, "未知知识库");
+                ? noKbTitle : nameMap.getOrDefault(knowledgeBaseId, noKbTitle);
             String documentTitle = firstNonBlank(metadata.getString("fileName"), fallbackTitle);
             String category = metadata.getString("category");
             boolean cited = citedIndexes != null && citedIndexes.contains(i + 1);
@@ -958,7 +961,8 @@ public class KnowledgeBaseQueryService {
             RagSourceDTO source = sources.get(i);
             sb.append(i + 1).append(". **").append(buildSourceDisplayTitle(source)).append("**");
             if (source.similarity() != null) {
-                sb.append("（相似度：").append(String.format(Locale.ROOT, "%.2f", source.similarity())).append("）");
+                // rerank 相关性分（0~1，模型相对分，非余弦相似度），命名「相关度」避免误读
+                sb.append("（相关度 ").append(String.format(Locale.ROOT, "%.2f", source.similarity())).append("）");
             }
             sb.append("\n\n   > ").append(source.snippet()).append("\n\n");
         }
@@ -1023,7 +1027,13 @@ public class KnowledgeBaseQueryService {
         if (text == null || text.isBlank()) {
             return "";
         }
-        String snippet = text.replaceAll("\\s+", " ").trim();
+        // 去掉 Markdown 语法（标题 #、加粗/斜体 */_、行内代码 `、引用 >），
+        // 否则 snippet 在前端「参考来源」引用块里会被 react-markdown 渲染成巨大标题/斜体
+        String snippet = text
+            .replaceAll("(?m)^#{1,6}\\s*", "")
+            .replaceAll("[*_`>]", "")
+            .replaceAll("\\s+", " ")
+            .trim();
         if (snippet.length() <= SOURCE_SNIPPET_MAX_CHARS) {
             return snippet;
         }

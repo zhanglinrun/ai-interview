@@ -29,10 +29,10 @@ cd ../backend && mvn spring-boot:run
 ```
 
 - 后端 `http://localhost:8082`，Swagger `http://localhost:8082/swagger-ui.html`。
-- Windows/WSL2 若 RocketMQ 9876 连不通：`.env` 设 `APP_ASYNC_ENGINE=rabbitmq`（compose 已含 RabbitMQ，管理台 `http://localhost:15672`，guest/guest）。
+- Windows/WSL2 若 RocketMQ 9876 连不通：`.env` 设 `APP_ASYNC_ENGINE=rabbitmq`（compose 已含 RabbitMQ，管理台 `http://localhost:15672`，guest/guest）。若 5672/15672 被其他项目占用（如 ai-group），在 `.env` 同步改 `RABBITMQ_PORT` / `RABBITMQ_HOST_PORT` / `RABBITMQ_MGMT_HOST_PORT`（本机当前为 25672/25673）。
 - 首次启动会触发 `SkillGraphBootstrap` 预置技能图谱（供第 6 步图谱评测）。
-- **MySQL 卷是旧的（升级前建过库）**：先跑一次存量库升级脚本（幂等），否则 RAG Trace 会因缺列静默丢失：
-  `mysql -h127.0.0.1 -P33306 -uai_interview -p ai_interview < backend/src/main/resources/sql/upgrade/2026-07-graph-trace-dedup.sql`
+- **MySQL 卷是旧的（升级前建过库）**：先跑一次存量库升级脚本（幂等，补 `rag_query_traces` 的查询分解/CRAG/图谱共 6 列 + 版本表去重索引），否则 RAG Trace 会因缺列静默丢失（问答不受影响，只剩 warn 日志）。端口/库名/账号以 `.env` 为准：
+  `mysql -h127.0.0.1 -P33306 -u<MYSQL_USER> -p <MYSQL_DB> < backend/src/main/resources/sql/upgrade/2026-07-graph-trace-dedup.sql`
 
 ---
 

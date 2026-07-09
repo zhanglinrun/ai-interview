@@ -87,14 +87,14 @@ export default function AgentInsightPanel({sessionId, refreshKey = 0, className 
   const toggle = (key: string) => setExpanded(prev => ({...prev, [key]: !prev[key]}));
 
   return (
-    <aside className={`bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm dark:shadow-slate-900/50 border border-slate-100 dark:border-slate-700 overflow-y-auto ${className}`}>
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-primary-600 flex items-center justify-center">
+    <aside className={`surface-card p-5 overflow-y-auto scrollbar-thin ${className}`}>
+      <div className="flex items-center gap-2.5 mb-4">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-primary-600 flex items-center justify-center shadow-sm">
           <Sparkles className="w-4 h-4 text-white" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">AI 面试官编排</h3>
-          <p className="text-xs text-slate-400">Planner · Interviewer · Critic</p>
+          <h3 className="text-sm font-semibold text-stone-800 dark:text-stone-100">AI 面试官编排</h3>
+          <p className="text-[11px] text-stone-400">规划 Planner · 出题 Interviewer · 审题 Critic</p>
         </div>
       </div>
 

@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 
+// 后端代理目标可配置：VITE_API_TARGET=http://localhost:18082 pnpm dev
+// （默认 8082；本机同时跑 ai-group 时其 member-service 占 8082，需换端口避让）
+const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:8082';
+const wsTarget = apiTarget.replace(/^http/, 'ws');
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -26,11 +31,11 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:8082',
+        target: apiTarget,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8082',
+        target: wsTarget,
         ws: true,
       },
     },

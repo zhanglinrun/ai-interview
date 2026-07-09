@@ -28,6 +28,31 @@ public class KnowledgeGraphSyncService {
 
   private static final Pattern HEADER_PATTERN = Pattern.compile("^(#{1,4})\\s+(.+)$", Pattern.MULTILINE);
 
+  /**
+   * 概念黑名单：文档模板/说明性小节标题（如简历模板里的 "Instructions"、"Additional Requirements"）
+   * 不是知识概念，入图只会产生无意义节点。
+   */
+  private static final Set<String> CONCEPT_STOPWORDS = Set.of(
+      "instructions", "instruction", "additional requirements", "additional requirement",
+      "additional resources", "additional resource", "resources", "resource",
+      "requirements", "requirement", "notes", "note", "summary", "overview", "introduction",
+      "目录", "说明", "备注", "简介", "概述", "前言", "附录", "参考资料", "参考文献");
+
+  private static boolean isMeaningfulConcept(String title) {
+    if (title == null) {
+      return false;
+    }
+    String normalized = title.strip().toLowerCase();
+    if (normalized.isBlank() || normalized.length() > 80) {
+      return false;
+    }
+    // 纯数字/纯标点的标题（如 "1."、"---"）没有概念含义
+    if (normalized.replaceAll("[\\d\\s\\p{Punct}]+", "").isBlank()) {
+      return false;
+    }
+    return !CONCEPT_STOPWORDS.contains(normalized);
+  }
+
   private final KnowledgeBaseQueryProperties queryProperties;
   private final KnowledgeSegmentService segmentService;
 
@@ -79,7 +104,7 @@ public class KnowledgeGraphSyncService {
     Matcher matcher = HEADER_PATTERN.matcher(text);
     while (matcher.find()) {
       String title = matcher.group(2).trim();
-      if (!title.isBlank() && title.length() <= 80) {
+      if (isMeaningfulConcept(title)) {
         concepts.add(title);
       }
     }
@@ -96,13 +121,13 @@ public class KnowledgeGraphSyncService {
         .filter(line -> !line.isBlank())
         .findFirst()
         .orElse("");
-    if (!firstLine.isBlank() && firstLine.length() <= 80 && !firstLine.startsWith("#")) {
+    if (!firstLine.startsWith("#") && isMeaningfulConcept(firstLine)) {
       concepts.add(firstLine);
     }
     Matcher boldMatcher = Pattern.compile("\\*\\*(.+?)\\*\\*").matcher(text);
     while (boldMatcher.find() && concepts.size() < 8) {
       String term = boldMatcher.group(1).trim();
-      if (!term.isBlank() && term.length() <= 80) {
+      if (isMeaningfulConcept(term)) {
         concepts.add(term);
       }
     }

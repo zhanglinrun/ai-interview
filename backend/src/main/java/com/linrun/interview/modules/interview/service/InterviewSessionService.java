@@ -640,6 +640,8 @@ public class InterviewSessionService {
         try {
             persistenceService.updateSessionStatus(sessionId,
                 InterviewSessionEntity.SessionStatus.COMPLETED);
+            // 提前交卷：计划题数收敛为实际已出题数，报告/列表不再显示「6 题」实际只出了 3 题
+            persistenceService.syncTotalQuestionsToActual(sessionId);
             persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
         } catch (BusinessException e) {
             throw e;

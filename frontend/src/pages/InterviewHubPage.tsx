@@ -175,6 +175,33 @@ export default function InterviewHubPage() {
             onChange={config.setDifficulty}
           />
 
+          {/* 题目数量（文字面试）：提到主面板，不再藏在「更多选项」里 */}
+          {config.mode === 'text' && (
+            <div>
+              <label className="block mb-3 text-sm font-semibold text-stone-700 dark:text-stone-200">
+                题目数量
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {[6, 8, 10, 12].map(n => (
+                  <button
+                    key={n}
+                    onClick={() => config.setQuestionCount(n)}
+                    className={`py-2.5 rounded-xl text-sm font-medium transition-all border ${
+                      config.questionCount === n
+                        ? 'bg-primary-600 border-primary-600 text-white shadow-sm shadow-primary-500/25'
+                        : 'bg-white/60 dark:bg-stone-900/50 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:border-primary-300 dark:hover:border-primary-700'
+                    }`}
+                  >
+                    {n} 题
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-stone-400 dark:text-stone-500">
+                AI 面试官按大纲逐题出题，提前交卷时按实际出题数评分
+              </p>
+            </div>
+          )}
+
           <InterviewAdvancedOptions
             mode={config.mode}
             showMore={config.showMore}
@@ -182,8 +209,6 @@ export default function InterviewHubPage() {
             resumeId={config.resumeId}
             onResumeChange={config.setResumeId}
             resumes={config.resumes}
-            questionCount={config.questionCount}
-            onQuestionCountChange={config.setQuestionCount}
             plannedDuration={config.plannedDuration}
             onPlannedDurationChange={config.setPlannedDuration}
             knowledgeBases={config.knowledgeBases}

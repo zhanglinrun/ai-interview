@@ -54,7 +54,7 @@ export function useInterviewConfig(options?: {
   const [showMore, setShowMore] = useState(false);
   const [resumeId, setResumeId] = useState<number | undefined>(undefined);
   const [resumes, setResumes] = useState<ResumeListItem[]>([]);
-  const [questionCount, setQuestionCount] = useState<number>(6);
+  const [questionCount, setQuestionCount] = useState<number>(8);
   const [plannedDuration, setPlannedDuration] = useState(30);
   const [llmProvider, setLlmProvider] = useState(DEFAULT_LLM_PROVIDER);
   const [customJdText, setCustomJdText] = useState('');
