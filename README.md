@@ -540,3 +540,12 @@ mvn -pl backend -am package -DskipTests
 - 本地 Elasticsearch Basic 许可证不支持 ES 原生 RRF；本项目在应用层做 RRF 融合。默认 `hybrid` 模式可用；若仅跑向量链路可设 `APP_AI_RAG_HYBRID_MODE=vector`。
 - Text2SQL 应使用生产只读数据库账号；应用层只读连接是额外保护，不替代数据库权限。
 - 表结构以 `backend/src/main/resources/sql/schema.sql` 为准；Schema 变更需同步更新该文件。
+- **存量库升级**：`schema.sql` 只在空库初始化时执行，已有数据的库需手动跑
+  `backend/src/main/resources/sql/upgrade/2026-07-graph-trace-dedup.sql`（幂等，可重复执行），
+  补 `rag_query_traces` 的图谱三列与 `knowledge_base_version` 去重索引；不执行则 RAG Trace
+  会因缺列而静默丢失（不影响问答主流程）。全新库或删卷重建无需执行。
+
+  ```bash
+  mysql -h127.0.0.1 -P33306 -uai_interview -p ai_interview \
+    < backend/src/main/resources/sql/upgrade/2026-07-graph-trace-dedup.sql
+  ```

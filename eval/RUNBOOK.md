@@ -31,6 +31,8 @@ cd ../backend && mvn spring-boot:run
 - 后端 `http://localhost:8082`，Swagger `http://localhost:8082/swagger-ui.html`。
 - Windows/WSL2 若 RocketMQ 9876 连不通：`.env` 设 `APP_ASYNC_ENGINE=rabbitmq`（compose 已含 RabbitMQ，管理台 `http://localhost:15672`，guest/guest）。
 - 首次启动会触发 `SkillGraphBootstrap` 预置技能图谱（供第 6 步图谱评测）。
+- **MySQL 卷是旧的（升级前建过库）**：先跑一次存量库升级脚本（幂等），否则 RAG Trace 会因缺列静默丢失：
+  `mysql -h127.0.0.1 -P33306 -uai_interview -p ai_interview < backend/src/main/resources/sql/upgrade/2026-07-graph-trace-dedup.sql`
 
 ---
 
