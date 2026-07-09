@@ -121,9 +121,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
                 "DATA_QUERY 类型仅支持 CSV / Excel 表格文件");
         }
 
-        // 2. 内容哈希去重（跨版本）
+        // 2. 内容哈希去重（按用户隔离的跨版本去重；跨用户不互相阻断，也不泄漏他人文档存在性）
         String contentHash = fileHashService.calculateHash(file);
-        if (versionService.findByContentHash(contentHash).isPresent()) {
+        if (versionService.findByContentHash(contentHash, userId).isPresent()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容已存在，请勿重复上传");
         }
 
@@ -205,8 +205,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库无版本记录: " + docId));
         String newVersion = nextVersion(latest.getVersion());
 
+        // 内容哈希去重（按用户隔离，与主表 (user_id, file_hash) 唯一键一致）
         String contentHash = fileHashService.calculateHash(file);
-        if (versionService.findByContentHash(contentHash).isPresent()) {
+        if (versionService.findByContentHash(contentHash, userId).isPresent()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容已存在，请勿重复上传");
         }
 

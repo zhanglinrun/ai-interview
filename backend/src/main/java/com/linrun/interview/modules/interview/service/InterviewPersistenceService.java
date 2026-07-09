@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -242,6 +243,102 @@ public class InterviewPersistenceService {
     } catch (JsonProcessingException e) {
       log.error("序列化报告失败: {}", e.getMessage(), e);
     }
+  }
+
+  /**
+   * 读取已落库的评估报告（幂等返回）。仅当会话已 EVALUATED 且落有总分时返回，
+   * 供 {@code GET /report} 直接复用，避免每次请求都重跑完整 LLM 评估、并与异步评估竞态。
+   * 会话未评估时返回空，交由调用方决定是否触发一次同步评估。
+   */
+  public Optional<InterviewReportDTO> loadStoredReport(String sessionId) {
+    Optional<InterviewSessionEntity> sessionOpt = findBySessionId(sessionId);
+    if (sessionOpt.isEmpty()) {
+      return Optional.empty();
+    }
+    InterviewSessionEntity session = sessionOpt.get();
+    if (session.getStatus() != InterviewSessionEntity.SessionStatus.EVALUATED
+        || session.getOverallScore() == null) {
+      return Optional.empty();
+    }
+    try {
+      List<InterviewQuestionDTO> questions = parseQuestionList(session.getQuestionsJson());
+      Map<Integer, InterviewAnswerEntity> answerByIndex = findAnswersBySessionId(sessionId).stream()
+          .collect(Collectors.toMap(InterviewAnswerEntity::getQuestionIndex, a -> a, (a, b) -> a));
+
+      List<InterviewReportDTO.QuestionEvaluation> questionDetails = new ArrayList<>();
+      for (InterviewQuestionDTO q : questions) {
+        InterviewAnswerEntity ans = answerByIndex.get(q.questionIndex());
+        String category = ans != null && ans.getCategory() != null ? ans.getCategory() : q.category();
+        questionDetails.add(new InterviewReportDTO.QuestionEvaluation(
+            q.questionIndex(), q.question(), category,
+            ans != null ? ans.getUserAnswer() : null,
+            ans != null && ans.getScore() != null ? ans.getScore() : 0,
+            ans != null ? ans.getFeedback() : null));
+      }
+
+      return Optional.of(new InterviewReportDTO(
+          sessionId,
+          questions.size(),
+          session.getOverallScore(),
+          buildCategoryScores(questionDetails),
+          questionDetails,
+          session.getOverallFeedback(),
+          parseStringList(session.getStrengthsJson()),
+          parseStringList(session.getImprovementsJson()),
+          parseReferenceAnswers(session.getReferenceAnswersJson())));
+    } catch (Exception e) {
+      log.warn("读取已存面试报告失败，回退到重新评估: sessionId={}", sessionId, e);
+      return Optional.empty();
+    }
+  }
+
+  private List<InterviewQuestionDTO> parseQuestionList(String json) throws JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return List.of();
+    }
+    return objectMapper.readValue(json, new TypeReference<List<InterviewQuestionDTO>>() {});
+  }
+
+  private List<String> parseStringList(String json) {
+    if (json == null || json.isBlank()) {
+      return List.of();
+    }
+    try {
+      return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+    } catch (JsonProcessingException e) {
+      return List.of();
+    }
+  }
+
+  private List<InterviewReportDTO.ReferenceAnswer> parseReferenceAnswers(String json) {
+    if (json == null || json.isBlank()) {
+      return List.of();
+    }
+    try {
+      return objectMapper.readValue(json,
+          new TypeReference<List<InterviewReportDTO.ReferenceAnswer>>() {});
+    } catch (JsonProcessingException e) {
+      return List.of();
+    }
+  }
+
+  /** 类别得分由逐题分数按 category 分组求均值重建（评估时未单独落库 categoryScores）。 */
+  private List<InterviewReportDTO.CategoryScore> buildCategoryScores(
+      List<InterviewReportDTO.QuestionEvaluation> details) {
+    Map<String, int[]> agg = new LinkedHashMap<>();
+    for (InterviewReportDTO.QuestionEvaluation d : details) {
+      String category = d.category() == null || d.category().isBlank() ? "综合" : d.category();
+      int[] sumCount = agg.computeIfAbsent(category, k -> new int[2]);
+      sumCount[0] += d.score();
+      sumCount[1] += 1;
+    }
+    List<InterviewReportDTO.CategoryScore> result = new ArrayList<>();
+    for (Map.Entry<String, int[]> entry : agg.entrySet()) {
+      int count = entry.getValue()[1];
+      int avg = count == 0 ? 0 : Math.round((float) entry.getValue()[0] / count);
+      result.add(new InterviewReportDTO.CategoryScore(entry.getKey(), avg, count));
+    }
+    return result;
   }
 
   public Optional<InterviewSessionEntity> findBySessionId(String sessionId) {

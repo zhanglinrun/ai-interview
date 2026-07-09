@@ -22,8 +22,8 @@ public interface KnowledgeDocumentVersionService {
     /** 按 docId 查最新版本。 */
     Optional<KnowledgeBaseVersionEntity> findLatestByDocId(Long docId);
 
-    /** 按内容哈希查（跨文档跨版本去重）。 */
-    Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash);
+    /** 按内容哈希 + 上传用户查（按用户隔离的跨文档跨版本去重，避免跨用户互相阻断上传并泄漏他人文档存在性）。 */
+    Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash, Long userId);
 
     /** 按 docId + version 精确查（版本号唯一性）。 */
     Optional<KnowledgeBaseVersionEntity> findByDocIdAndVersion(Long docId, String version);

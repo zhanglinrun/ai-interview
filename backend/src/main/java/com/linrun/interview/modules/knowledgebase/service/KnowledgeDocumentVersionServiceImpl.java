@@ -50,10 +50,11 @@ public class KnowledgeDocumentVersionServiceImpl implements KnowledgeDocumentVer
   }
 
   @Override
-  public Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash) {
+  public Optional<KnowledgeBaseVersionEntity> findByContentHash(String contentHash, Long userId) {
     return Optional.ofNullable(versionMapper.selectOne(
       Wrappers.<KnowledgeBaseVersionEntity>lambdaQuery()
         .eq(KnowledgeBaseVersionEntity::getContentHash, contentHash)
+        .eq(KnowledgeBaseVersionEntity::getUploadUser, String.valueOf(userId))
         .last("LIMIT 1")));
   }
 

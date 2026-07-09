@@ -695,7 +695,18 @@ public class InterviewSessionService {
             throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "面试尚未完成，无法生成报告");
         }
 
-        log.info("生成面试报告: {}", sessionId);
+        // 幂等：已评估会话直接返回已落库报告，不重跑 LLM 评估
+        // （消灭「每次 GET /report 都跑一轮完整 LLM 评估 + token 成本 + 与异步评估消费者竞态双跑」）
+        Optional<InterviewReportDTO> storedReport = persistenceService.loadStoredReport(sessionId);
+        if (storedReport.isPresent()) {
+            log.info("面试报告已存在，直接返回已落库报告: {}", sessionId);
+            if (session.getStatus() != SessionStatus.EVALUATED) {
+                sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+            }
+            return storedReport.get();
+        }
+
+        log.info("生成面试报告（首次同步评估）: {}", sessionId);
 
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
 
@@ -714,15 +725,13 @@ public class InterviewSessionService {
             questions
         );
 
-        // 更新 Redis 缓存状态
-        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
-
-        // 保存报告到数据库
+        // 先落库（DB 是真相源），再更新 Redis 缓存状态，保持与异步评估一致
         try {
             persistenceService.saveReport(sessionId, report);
         } catch (Exception e) {
             log.warn("保存报告到数据库失败: {}", e.getMessage(), e);
         }
+        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
 
         return report;
     }

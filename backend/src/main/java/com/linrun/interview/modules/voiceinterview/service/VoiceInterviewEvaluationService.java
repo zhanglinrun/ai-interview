@@ -17,12 +17,10 @@ import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewMessageM
 import com.linrun.interview.modules.voiceinterview.mapper.VoiceInterviewSessionMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.linrun.interview.common.mybatis.EntityQueries;
-import com.linrun.interview.common.mybatis.MapperUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -46,16 +44,24 @@ public class VoiceInterviewEvaluationService {
     private final VoiceInterviewEvaluationMapper evaluationRepository;
     private final VoiceInterviewMessageMapper messageRepository;
     private final VoiceInterviewSessionMapper sessionRepository;
+    private final VoiceEvaluationPersistenceService evaluationPersistenceService;
     private final ObjectMapper objectMapper;
     private final InterviewSkillService skillService;
 
     /**
      * 生成语音面试评估（由异步消费者调用）
-     * LLM 调用在事务外执行，仅 DB 写入在事务内
+     * LLM 调用在事务外执行，仅 DB 写入在事务内（委托 {@link VoiceEvaluationPersistenceService}）。
+     * 幂等：已存在评估结果时直接跳过，避免消息重投重复跑 LLM 并撞唯一键把已完成评估打成 FAILED。
      */
     public void generateEvaluation(Long sessionId) {
         try {
             log.info("开始生成语音面试评估: sessionId={}", sessionId);
+
+            if (EntityQueries.selectOne(evaluationRepository,
+                    VoiceInterviewEvaluationEntity::getSessionId, sessionId).isPresent()) {
+                log.info("语音面试评估已存在，跳过重复评估: sessionId={}", sessionId);
+                return;
+            }
 
             VoiceInterviewSessionEntity session = getSession(sessionId);
             List<VoiceInterviewMessageEntity> messages = messageRepository.selectList(
@@ -65,7 +71,7 @@ public class VoiceInterviewEvaluationService {
 
             if (messages.isEmpty()) {
                 log.warn("语音面试会话无对话记录，生成空评估结果: sessionId={}", sessionId);
-                saveEmptyEvaluationTransactional(sessionId, session);
+                evaluationPersistenceService.saveEmptyEvaluation(sessionId, session);
                 return;
             }
 
@@ -79,7 +85,7 @@ public class VoiceInterviewEvaluationService {
             EvaluationReport report = unifiedEvaluationService.evaluate(
                 chatModel, sessionIdStr, qaRecords, null, referenceContext);
 
-            saveEvaluationTransactional(sessionId, session, report);
+            evaluationPersistenceService.saveEvaluation(sessionId, session, report);
 
         } catch (BusinessException e) {
             throw e;
@@ -165,59 +171,6 @@ public class VoiceInterviewEvaluationService {
         if (aiText.contains("自我介绍") || aiText.contains("介绍一下自己")) return "自我介绍";
         if (aiText.contains("职业规划") || aiText.contains("为什么") || aiText.contains("优缺点")) return "HR问题";
         return "技术问题";
-    }
-
-    @Transactional
-    public void saveEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session,
-                                 EvaluationReport report) {
-        try {
-            List<EvaluationReport.QuestionEvaluation> questionItems = report.questionDetails();
-            List<EvaluationReport.ReferenceAnswer> refAnswerItems = report.referenceAnswers();
-
-            VoiceInterviewEvaluationEntity entity = VoiceInterviewEvaluationEntity.builder()
-                .sessionId(sessionId)
-                .overallScore(report.overallScore())
-                .overallFeedback(report.overallFeedback())
-                .questionEvaluationsJson(objectMapper.writeValueAsString(questionItems))
-                .strengthsJson(objectMapper.writeValueAsString(report.strengths()))
-                .improvementsJson(objectMapper.writeValueAsString(report.improvements()))
-                .referenceAnswersJson(objectMapper.writeValueAsString(refAnswerItems))
-                .interviewerRole(session.getRoleType())
-                .interviewDate(session.getStartTime())
-                .build();
-
-            MapperUtils.save(evaluationRepository, entity);
-            log.info("评估结果已保存: sessionId={}, score={}", sessionId, entity.getOverallScore());
-        } catch (Exception e) {
-            log.error("保存评估结果失败: sessionId={}", sessionId, e);
-            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "保存评估失败: " + e.getMessage(), e);
-        }
-    }
-
-    @Transactional
-    public void saveEmptyEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session) {
-        try {
-            VoiceInterviewEvaluationEntity entity = EntityQueries.selectOne(
-                evaluationRepository, VoiceInterviewEvaluationEntity::getSessionId, sessionId)
-                .orElseGet(() -> VoiceInterviewEvaluationEntity.builder().sessionId(sessionId).build());
-
-            entity.setOverallScore(0);
-            entity.setOverallFeedback("本次语音面试未形成有效对话记录，暂无可评估内容。");
-            entity.setQuestionEvaluationsJson("[]");
-            entity.setStrengthsJson("[]");
-            entity.setImprovementsJson("[\"请先完成至少一轮有效问答后再生成评估。\"]");
-            entity.setReferenceAnswersJson("[]");
-            entity.setInterviewerRole(session.getRoleType());
-            entity.setInterviewDate(session.getStartTime());
-
-            MapperUtils.save(evaluationRepository, entity);
-            log.info("空评估结果已保存: sessionId={}", sessionId);
-        } catch (Exception e) {
-            log.error("保存空评估结果失败: sessionId={}", sessionId, e);
-            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
-                "保存空评估失败: " + e.getMessage(), e);
-        }
     }
 
     private VoiceEvaluationDetailDTO buildDetailDTO(VoiceInterviewEvaluationEntity entity) {
