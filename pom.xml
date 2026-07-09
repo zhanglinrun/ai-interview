@@ -61,9 +61,9 @@
          2.3.x 仍走 spring.factories，Spring Boot 3 下需手动补 AutoConfiguration.imports（见 backend resources）。 -->
     <rocketmq-spring.version>2.3.5</rocketmq-spring.version>
     <!-- surefire 默认排除评测组：rag-eval（RAG 检索，连真实 ES + DashScope）、
-         agent-eval（面试 Agent Critic 质量门，连真实 DashScope）。评测集见 eval/。
-         触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
-    <test.excludedGroups>rag-eval,agent-eval</test.excludedGroups>
+         agent-eval（面试 Agent Critic 质量门，连真实 DashScope）、graph-eval（图谱检索，连真实 Neo4j）。
+         评测集见 eval/。触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
+    <test.excludedGroups>rag-eval,agent-eval,graph-eval</test.excludedGroups>
   </properties>
 
   <dependencyManagement>

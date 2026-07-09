@@ -21,11 +21,19 @@ public class InterviewNeo4jContentRetriever implements ContentRetriever {
 
     private final Neo4jText2CypherRetriever neo4jText2CypherRetriever;
     private final ContentRetriever fallbackRetriever;
+    private final RagQueryTrace trace;
 
     public InterviewNeo4jContentRetriever(Neo4jText2CypherRetriever neo4jText2CypherRetriever,
                                           ContentRetriever fallbackRetriever) {
+        this(neo4jText2CypherRetriever, fallbackRetriever, null);
+    }
+
+    public InterviewNeo4jContentRetriever(Neo4jText2CypherRetriever neo4jText2CypherRetriever,
+                                          ContentRetriever fallbackRetriever,
+                                          RagQueryTrace trace) {
         this.neo4jText2CypherRetriever = neo4jText2CypherRetriever;
         this.fallbackRetriever = fallbackRetriever;
+        this.trace = trace;
     }
 
     @Override
@@ -40,13 +48,22 @@ public class InterviewNeo4jContentRetriever implements ContentRetriever {
             results = neo4jText2CypherRetriever.retrieve(query);
         } catch (Exception e) {
             log.warn("Neo4j 检索异常，降级知识库检索, query={}", query.text(), e);
+            recordGraphTrace(false, null);
             return fallbackRetriever.retrieve(query);
         }
         if (results == null || results.isEmpty() || isCypherResultEmpty(results)) {
             log.info("Neo4j 检索结果为空，降级知识库检索, query={}", query.text());
+            recordGraphTrace(false, null);
             return fallbackRetriever.retrieve(query);
         }
+        recordGraphTrace(true, results.get(0).textSegment().text());
         return results.stream().map(ContentUtil::markAsSkipRerank).collect(Collectors.toList());
+    }
+
+    private void recordGraphTrace(boolean hit, String result) {
+        if (trace != null) {
+            trace.graph(true, hit, result);
+        }
     }
 
     private boolean isCypherResultEmpty(List<Content> results) {
@@ -78,6 +95,7 @@ public class InterviewNeo4jContentRetriever implements ContentRetriever {
         private int maxRetries = 1;
         private ChatModel chatModel;
         private ContentRetriever fallbackRetriever;
+        private RagQueryTrace trace;
 
         public Builder graph(dev.langchain4j.community.rag.content.retriever.neo4j.Neo4jGraph graph) {
             this.graph = graph;
@@ -119,6 +137,11 @@ public class InterviewNeo4jContentRetriever implements ContentRetriever {
             return this;
         }
 
+        public Builder trace(RagQueryTrace trace) {
+            this.trace = trace;
+            return this;
+        }
+
         public InterviewNeo4jContentRetriever build() {
             Neo4jText2CypherRetriever.Builder neo4jBuilder = Neo4jText2CypherRetriever.builder()
                 .graph(graph)
@@ -136,7 +159,7 @@ public class InterviewNeo4jContentRetriever implements ContentRetriever {
             if (dialect != null) {
                 neo4jBuilder.dialect(dialect);
             }
-            return new InterviewNeo4jContentRetriever(neo4jBuilder.build(), fallbackRetriever);
+            return new InterviewNeo4jContentRetriever(neo4jBuilder.build(), fallbackRetriever, trace);
         }
     }
 }

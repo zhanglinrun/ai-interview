@@ -14,6 +14,9 @@ public class RagQueryTrace {
     private final List<String> decomposedQueries = new ArrayList<>();
     private String cragGrade;
     private String cragAction;
+    private boolean graphAttempted;
+    private boolean graphHit;
+    private String graphResult;
     private final List<TraceContent> retrieved = new ArrayList<>();
     private final List<TraceContent> reranked = new ArrayList<>();
 
@@ -48,6 +51,31 @@ public class RagQueryTrace {
     public void crag(String grade, String action) {
         this.cragGrade = grade;
         this.cragAction = action;
+    }
+
+    public boolean graphAttempted() {
+        return graphAttempted;
+    }
+
+    public boolean graphHit() {
+        return graphHit;
+    }
+
+    public String graphResult() {
+        return graphResult;
+    }
+
+    /**
+     * 记录图谱（Neo4j Text2Cypher）参与情况。
+     *
+     * @param attempted 是否尝试了图谱检索
+     * @param hit       图谱是否命中（false 表示为空或异常，已降级向量检索）
+     * @param result    命中时的 Cypher 结果原文（会截断成片段）
+     */
+    public void graph(boolean attempted, boolean hit, String result) {
+        this.graphAttempted = attempted;
+        this.graphHit = hit;
+        this.graphResult = result == null ? null : snippet(result);
     }
 
     public String routeStrategy() {

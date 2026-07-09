@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
     PRIMARY KEY (`version_id`),
     UNIQUE KEY `uk_kbv_doc_version` (`doc_id`, `version`),
     KEY `idx_kbv_doc_id` (`doc_id`),
+    KEY `idx_kbv_upload_user_hash` (`upload_user`, `content_hash`),
     CONSTRAINT `fk_kbv_doc` FOREIGN KEY (`doc_id`) REFERENCES `knowledge_bases` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -279,6 +280,9 @@ CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     `decomposed_queries_json` TEXT         NULL,
     `crag_grade`              VARCHAR(20)  NULL,
     `crag_action`             VARCHAR(200) NULL,
+    `graph_attempted`         TINYINT      NULL,
+    `graph_hit`               TINYINT      NULL,
+    `graph_result`            TEXT         NULL,
     `knowledge_base_ids_json` TEXT         NULL,
     `retrieved_json`          TEXT         NULL,
     `reranked_json`           TEXT         NULL,

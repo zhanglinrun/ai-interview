@@ -725,7 +725,7 @@ public class KnowledgeBaseQueryService {
         ContentRetriever routedSql = sqlRetriever == null ? null
             : ProgressAwareContentRetriever.wrap(
                 sqlRetriever, progressCallback, ProgressAwareContentRetriever.Kind.SQL);
-        InterviewNeo4jContentRetriever neo4jRetriever = buildNeo4jRetriever(esFallback, knowledgeBaseOnly);
+        InterviewNeo4jContentRetriever neo4jRetriever = buildNeo4jRetriever(esFallback, knowledgeBaseOnly, trace);
         ContentRetriever routedNeo4j = neo4jRetriever == null ? null
             : ProgressAwareContentRetriever.wrap(
                 neo4jRetriever, progressCallback, ProgressAwareContentRetriever.Kind.NEO4J);
@@ -835,7 +835,7 @@ public class KnowledgeBaseQueryService {
     }
 
     private InterviewNeo4jContentRetriever buildNeo4jRetriever(
-        ContentRetriever fallbackRetriever, boolean knowledgeBaseOnly) {
+        ContentRetriever fallbackRetriever, boolean knowledgeBaseOnly, RagQueryTrace trace) {
         if (knowledgeBaseOnly || !graph.isEnabled() || neo4jDriver == null) {
             return null;
         }
@@ -845,6 +845,7 @@ public class KnowledgeBaseQueryService {
                 .chatModel(getRoutingChatModel())
                 .promptTemplate(cypherPromptTemplate)
                 .fallbackRetriever(fallbackRetriever)
+                .trace(trace)
                 .build();
         } catch (Exception e) {
             log.warn("[KnowledgeBaseQueryService] Neo4j 检索器创建失败，跳过图检索: {}", e.getMessage(), e);

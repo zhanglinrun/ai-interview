@@ -43,6 +43,15 @@ public class RagQueryTraceEntity {
     /** CRAG 纠正动作：none / rewrite_retry / fallback_no_evidence（P2） */
     private String cragAction;
 
+    /** 是否尝试了 Neo4j 图谱（Text2Cypher）检索 */
+    private Boolean graphAttempted;
+
+    /** 图谱是否命中（false=为空/异常已降级向量检索） */
+    private Boolean graphHit;
+
+    /** 图谱命中时的 Cypher 结果片段 */
+    private String graphResult;
+
     private String knowledgeBaseIdsJson;
 
     private String retrievedJson;
