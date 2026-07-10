@@ -15,6 +15,8 @@ interface InterviewAdvancedOptionsProps {
   resumeId: number | undefined;
   onResumeChange: (resumeId: number | undefined) => void;
   resumes: ResumeListItem[];
+  questionCount?: number;
+  onQuestionCountChange?: (questionCount: number) => void;
   plannedDuration: number;
   onPlannedDurationChange: (plannedDuration: number) => void;
   knowledgeBases?: KnowledgeBaseItem[];

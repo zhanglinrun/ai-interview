@@ -3,17 +3,20 @@ import type { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Plus, Trash2, Plug, CheckCircle, XCircle,
-  Eye, EyeOff, RefreshCw, Server, Edit2, Mic, Volume2, ChevronDown, Database,
+  Eye, EyeOff, RefreshCw, Server, Edit2, Mic, Volume2, ChevronDown, Database, KeyRound, Lock,
 } from 'lucide-react';
 import { llmProviderApi } from '../api/llmProvider';
-import { getErrorMessage } from '../api/request';
+import { userLlmProviderApi } from '../api/userLlmProvider';
+import { getErrorMessage, ApiError } from '../api/request';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingButtonContent from '../components/LoadingButtonContent';
+import MyModelForm from '../components/MyModelForm';
 import { EmptyState, LoadingState } from '../components/PageState';
 import type {
   ProviderItem, CreateProviderRequest, UpdateProviderRequest,
   ProviderTestResult, AsrConfig, TtsConfig, AsrConfigRequest, TtsConfigRequest,
 } from '../types/llmProvider';
+import type { MyProviderDTO } from '../types/userLlmProvider';
 
 const DEFAULT_EMBEDDING_DIMENSIONS = 1024;
 
@@ -291,6 +294,12 @@ export default function SettingsPage() {
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState('');
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
+  // 管理员配置区（全局 Provider / 语音）无权限时隐藏，避免向普通用户报错
+  const [adminForbidden, setAdminForbidden] = useState(false);
+
+  // 「我的模型」（BYOK，当前登录用户）
+  const [myProvider, setMyProvider] = useState<MyProviderDTO | null>(null);
+  const [myProviderLoading, setMyProviderLoading] = useState(true);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -376,13 +385,30 @@ export default function SettingsPage() {
       setDefaultEmbeddingProviderId(defaultProvider.defaultEmbeddingProvider);
       setAsrConfig(asr);
       setTtsConfig(tts);
+      setAdminForbidden(false);
     } catch (err) {
-      console.error('Failed to load settings:', err);
-      showToast(getErrorMessage(err, '加载数据失败'), 'error');
+      // 普通用户无管理员权限时静默隐藏管理员配置区，仅保留「我的模型」
+      if (err instanceof ApiError && (err.code === 403 || err.code === 401)) {
+        setAdminForbidden(true);
+      } else {
+        console.error('Failed to load settings:', err);
+        showToast(getErrorMessage(err, '加载数据失败'), 'error');
+      }
     } finally {
       setLoading(false);
     }
   }, [showToast]);
+
+  const loadMyProvider = useCallback(async () => {
+    try {
+      const dto = await userLlmProviderApi.getMine();
+      setMyProvider(dto);
+    } catch (err) {
+      console.error('Failed to load my model:', err);
+    } finally {
+      setMyProviderLoading(false);
+    }
+  }, []);
 
   const handleReloadProviders = async () => {
     try {
@@ -399,7 +425,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadMyProvider();
+  }, [loadData, loadMyProvider]);
 
   // --- Modal helpers ---
   const openCreateModal = () => {
@@ -702,8 +729,43 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* 我的模型（BYOK，当前登录用户自带 Key） */}
+      <div className="mb-8">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
+            <KeyRound className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-slate-800 dark:text-white">我的模型</h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              配置你自己的 Chat 模型 Key（BYOK），用于问答 / 出题 / 面试评估；向量化仍由平台统一承担
+            </p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          {myProviderLoading ? (
+            <LoadingState />
+          ) : (
+            <MyModelForm
+              initial={myProvider}
+              showDelete
+              onToast={showToast}
+              onSaved={loadMyProvider}
+              onDeleted={loadMyProvider}
+            />
+          )}
+        </div>
+      </div>
+
       {/* Loading state */}
-      {loading ? (
+      {adminForbidden ? (
+        <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+          <Lock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>
+            模型服务与语音服务为管理员配置项，普通用户无需在此设置。你只需在上方「我的模型」配置自己的 Key 即可使用 AI 功能。
+          </span>
+        </div>
+      ) : loading ? (
         <LoadingState />
       ) : (
         <AnimatePresence mode="wait">

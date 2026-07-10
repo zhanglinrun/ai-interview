@@ -112,7 +112,7 @@ public class InterviewQuestionService {
     }
 
     public List<InterviewQuestionDTO> generateQuestionsBySkill(
-            String llmProvider,
+            Long userId,
             String skillId,
             String difficulty,
             String resumeText,
@@ -124,8 +124,8 @@ public class InterviewQuestionService {
 
         SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
-        ChatModel questionChatClient =
-            llmProviderRegistry.getChatModelOrDefault(llmProvider);
+        // 用户触发的批量出题走 BYOK：用当前用户的「我的模型」（userId 由会话入口捕获后传入）
+        ChatModel questionChatClient = llmProviderRegistry.getUserChatModel(userId);
 
         boolean hasResume = resumeText != null && !resumeText.isBlank();
         String historicalSection = buildHistoricalSection(historicalQuestions);

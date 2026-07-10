@@ -77,8 +77,8 @@ public class VoiceInterviewEvaluationService {
 
             List<QaRecord> qaRecords = buildQaRecords(messages);
 
-            String provider = session.getLlmProvider();
-            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+            // 异步语音评估无 UserContext：从会话实体取 userId，走该用户的 BYOK「我的模型」
+            ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
 
             String sessionIdStr = String.valueOf(sessionId);
             String referenceContext = skillService.buildEvaluationReferenceSectionSafe(session.getSkillId());

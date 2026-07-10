@@ -6,8 +6,10 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.modules.llmprovider.model.LlmGlobalSettingEntity;
 import com.linrun.interview.modules.llmprovider.model.LlmProviderEntity;
+import com.linrun.interview.modules.llmprovider.model.UserLlmProviderEntity;
 import com.linrun.interview.modules.llmprovider.mapper.LlmGlobalSettingMapper;
 import com.linrun.interview.modules.llmprovider.mapper.LlmProviderMapper;
+import com.linrun.interview.modules.llmprovider.mapper.UserLlmProviderMapper;
 import com.linrun.interview.modules.llmprovider.service.ApiKeyEncryptionService;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
@@ -47,6 +49,7 @@ public class LlmProviderRegistry {
     private final Map<String, EmbeddingModel> embeddingModelCache = new ConcurrentHashMap<>();
     private final LlmProviderMapper llmProviderMapper;
     private final LlmGlobalSettingMapper llmGlobalSettingMapper;
+    private final UserLlmProviderMapper userLlmProviderMapper;
     private final ApiKeyEncryptionService encryptionService;
     /** 全局 ChatModel 监听器（如 Langfuse generation 采集）；无则空列表。 */
     private final List<ChatModelListener> chatModelListeners;
@@ -63,11 +66,13 @@ public class LlmProviderRegistry {
             LlmProviderProperties properties,
             LlmProviderMapper llmProviderMapper,
             LlmGlobalSettingMapper llmGlobalSettingMapper,
+            UserLlmProviderMapper userLlmProviderMapper,
             ApiKeyEncryptionService encryptionService,
             List<ChatModelListener> chatModelListeners) {
         this.properties = properties;
         this.llmProviderMapper = llmProviderMapper;
         this.llmGlobalSettingMapper = llmGlobalSettingMapper;
+        this.userLlmProviderMapper = userLlmProviderMapper;
         this.encryptionService = encryptionService;
         this.chatModelListeners = chatModelListeners == null ? List.of() : chatModelListeners;
     }
@@ -151,6 +156,75 @@ public class LlmProviderRegistry {
         String cacheKey = resolveProviderId(providerId) + "::stream::" + modelName;
         return streamingChatModelCache.computeIfAbsent(cacheKey,
             key -> createStreamingChatModel(resolveProviderId(providerId), modelName));
+    }
+
+    /**
+     * 获取指定用户的 BYOK {@link ChatModel}（缓存 key 含 userId，用户间互不串用）。
+     *
+     * <p>从 {@code user_llm_provider} 读取该用户配置的「我的模型」并解密 Key 构建；未配置时抛
+     * {@link ErrorCode#USER_LLM_NOT_CONFIGURED}，由上层引导用户去设置页配置。
+     */
+    public ChatModel getUserChatModel(Long userId) {
+        return chatModelCache.computeIfAbsent(userChatCacheKey(userId), key -> {
+            ProviderSnapshot config = loadUserProviderOrThrow(userId);
+            log.info("[LlmProviderRegistry] Creating new user ChatModel: userId={}, model={}",
+                userId, config.model());
+            return createChatModel(config, config.model());
+        });
+    }
+
+    /**
+     * 获取指定用户的 BYOK {@link StreamingChatModel}（缓存 key 含 userId，用户间互不串用）。
+     *
+     * <p>语义同 {@link #getUserChatModel(Long)}，用于 SSE / 语音实时对话等流式场景。
+     */
+    public StreamingChatModel getUserStreamingChatModel(Long userId) {
+        return streamingChatModelCache.computeIfAbsent(userStreamCacheKey(userId), key -> {
+            ProviderSnapshot config = loadUserProviderOrThrow(userId);
+            log.info("[LlmProviderRegistry] Creating new user StreamingChatModel: userId={}, model={}",
+                userId, config.model());
+            return createStreamingChatModel(config, config.model());
+        });
+    }
+
+    /**
+     * 清除指定用户的 Chat/Streaming 模型缓存，使用户更新/删除「我的模型」后即时生效。
+     */
+    public void evictUser(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        chatModelCache.remove(userChatCacheKey(userId));
+        streamingChatModelCache.remove(userStreamCacheKey(userId));
+        log.info("[LlmProviderRegistry] Evicted user model cache: userId={}", userId);
+    }
+
+    private String userChatCacheKey(Long userId) {
+        return "user:" + userId + "::chat";
+    }
+
+    private String userStreamCacheKey(Long userId) {
+        return "user:" + userId + "::stream";
+    }
+
+    private ProviderSnapshot loadUserProviderOrThrow(Long userId) {
+        if (userId == null || userLlmProviderMapper == null) {
+            throw new BusinessException(ErrorCode.USER_LLM_NOT_CONFIGURED,
+                ErrorCode.USER_LLM_NOT_CONFIGURED.getMessage());
+        }
+        UserLlmProviderEntity entity = Optional.ofNullable(userLlmProviderMapper.selectById(userId))
+            .orElseThrow(() -> new BusinessException(ErrorCode.USER_LLM_NOT_CONFIGURED,
+                ErrorCode.USER_LLM_NOT_CONFIGURED.getMessage()));
+        return new ProviderSnapshot(
+            "user:" + userId,
+            entity.getBaseUrl(),
+            encryptionService.decrypt(entity.getApiKeyNonce(), entity.getApiKeyCiphertext()),
+            entity.getChatModel(),
+            null,
+            null,
+            false,
+            entity.getTemperature()
+        );
     }
 
     /**

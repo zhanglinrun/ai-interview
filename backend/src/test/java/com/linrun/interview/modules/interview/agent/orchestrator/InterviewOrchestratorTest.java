@@ -23,6 +23,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -53,8 +54,8 @@ class InterviewOrchestratorTest {
     factory = mock(AgentAiServiceFactory.class);
     interviewer = mock(InterviewerAiService.class);
     critic = mock(CriticAiService.class);
-    when(factory.interviewer(anyString())).thenReturn(interviewer);
-    when(factory.critic(anyString())).thenReturn(critic);
+    when(factory.interviewer(anyLong())).thenReturn(interviewer);
+    when(factory.critic(anyLong())).thenReturn(critic);
 
     properties = new AgentOrchestrationProperties();
     properties.setMetricsEnabled(false); // meterRegistry 传 null，关闭指标避免 NPE

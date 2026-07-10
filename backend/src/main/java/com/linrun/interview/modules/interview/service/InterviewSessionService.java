@@ -163,7 +163,7 @@ public class InterviewSessionService {
 
             // 基于 Skill 生成面试问题（关联知识库时按 Skill 主题词 RAG 检索注入出题 prompt）
             questions = questionService.generateQuestionsBySkill(
-                request.llmProvider(),
+                userId,
                 skillId,
                 difficulty,
                 request.resumeText(),
@@ -712,13 +712,8 @@ public class InterviewSessionService {
 
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
 
-        // 获取 LLM 客户端
-        String provider = null;
-        Optional<InterviewSessionEntity> entityOpt = persistenceService.findBySessionId(sessionId);
-        if (entityOpt.isPresent()) {
-            provider = entityOpt.get().getLlmProvider();
-        }
-        ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+        // 用户触发的报告评估走 BYOK：用会话所属用户的「我的模型」（会话已按当前用户校验归属）
+        ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
 
         InterviewReportDTO report = evaluationService.evaluateInterview(
             chatModel,

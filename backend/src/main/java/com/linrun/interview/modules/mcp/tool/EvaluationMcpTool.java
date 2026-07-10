@@ -4,6 +4,7 @@ import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.evaluation.EvaluationReport;
 import com.linrun.interview.common.evaluation.QaRecord;
 import com.linrun.interview.common.evaluation.UnifiedEvaluationService;
+import com.linrun.interview.modules.mcp.config.McpServerProperties;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ public class EvaluationMcpTool {
 
     private final UnifiedEvaluationService unifiedEvaluationService;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final McpServerProperties mcpProperties;
 
     public record AnswerEvaluation(
         Integer score,
@@ -52,7 +54,12 @@ public class EvaluationMcpTool {
 
         String sessionId = "mcp-" + UUID.randomUUID();
         try {
-            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(null);
+            // MCP 按 API Key 鉴权、以 app.mcp.user-id 绑定归属用户：配置了则走该用户 BYOK，
+            // 未配置则回退全局（与其余 chat 调用点的 BYOK 语义一致）
+            Long mcpUserId = mcpProperties.getUserId();
+            ChatModel chatModel = mcpUserId != null
+                ? llmProviderRegistry.getUserChatModel(mcpUserId)
+                : llmProviderRegistry.getChatModelOrDefault(null);
             EvaluationReport report = unifiedEvaluationService.evaluate(
                 chatModel, sessionId,
                 List.of(new QaRecord(1, question.trim(), QUESTION_CATEGORY, answer.trim())),

@@ -3,6 +3,7 @@ package com.linrun.interview.modules.knowledgebase;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.annotation.RateLimit;
 import com.linrun.interview.common.result.Result;
+import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
@@ -54,7 +55,7 @@ public class RagModuleController {
   @GetMapping("/rewrite")
   @RateLimit(dimension = RateLimit.Dimension.USER, count = 10)
   public Result<List<String>> testRewrite(@RequestParam String question) {
-    ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(null);
+    ChatModel chatModel = llmProviderRegistry.getUserChatModel(UserContext.requireUserId());
     String templateText = loadClasspathPrompt("classpath:prompts/knowledgebase-query-rewrite.st");
     PromptTemplate template = new PromptTemplate(templateText);
     InterviewQueryTransformer transformer = new InterviewQueryTransformer(chatModel, template, true);

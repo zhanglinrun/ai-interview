@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.ai.PromptSanitizer;
 import com.linrun.interview.common.ai.PromptSecurityConstants;
+import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.interviewschedule.model.CreateScheduleRequest;
 import com.linrun.interview.modules.interviewschedule.model.ParseResponse;
 import lombok.RequiredArgsConstructor;
@@ -115,7 +116,8 @@ public class InterviewParseService {
 
         // Step 2: Rule parsing failed, try AI parsing
         log.info("规则解析失败，尝试 AI 解析");
-        result = parseWithAI(rawText, source); // 使用source作为provider参数
+        // 邀请解析为用户触发的同步请求：走当前用户的 BYOK「我的模型」
+        result = parseWithAI(rawText, UserContext.requireUserId());
         if (isValidResult(result)) {
             log.info("AI 解析成功");
             return new ParseResponse(true, result, 0.8, "ai", "AI 解析成功");
@@ -297,7 +299,7 @@ public class InterviewParseService {
 
     // ========== AI Parsing ==========
 
-    private CreateScheduleRequest parseWithAI(String rawText, String provider) {
+    private CreateScheduleRequest parseWithAI(String rawText, Long userId) {
         try {
             String currentDate = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
             String safeRawText = promptSanitizer.sanitize(rawText);
@@ -305,7 +307,7 @@ public class InterviewParseService {
                 PromptSecurityConstants.DATA_BOUNDARY_INSTRUCTION + "\n" +
                 promptSanitizer.wrapWithDelimiters("parse-input", safeRawText));
 
-            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+            ChatModel chatModel = llmProviderRegistry.getUserChatModel(userId);
 
             String content = chatModel.chat(ChatRequest.builder()
                     .messages(UserMessage.from(prompt))

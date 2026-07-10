@@ -275,29 +275,40 @@ public class KnowledgeBaseQueryService {
                 .getContentAsString(StandardCharsets.UTF_8));
     }
 
-    private ChatModel getChatModel() {
-        return getRoutingChatModel();
+    /**
+     * BYOK 路由（PRD D4）：用户触发的 chat 走该用户「我的模型」（{@code userId} 非空）；系统 / 评测
+     * 触发（{@code userId} 为空，如 {@link #retrieveForEvaluation}）沿用全局默认 Provider 与分场景模型名，
+     * 行为与 BYOK 前一致。用户未配置「我的模型」时 {@code getUserChatModel} 抛
+     * {@link ErrorCode#USER_LLM_NOT_CONFIGURED}，由上层引导去设置页。
+     */
+    private ChatModel getChatModel(Long userId) {
+        return userId != null
+            ? llmProviderRegistry.getUserChatModel(userId)
+            : llmProviderRegistry.getChatModelWithModel(null, routing.getModel());
     }
 
-    private ChatModel getRoutingChatModel() {
-        return llmProviderRegistry.getChatModelWithModel(null, routing.getModel());
+    private ChatModel getRewriteChatModel(Long userId) {
+        return userId != null
+            ? llmProviderRegistry.getUserChatModel(userId)
+            : llmProviderRegistry.getChatModelWithModel(null, rewriteModel);
     }
 
-    private ChatModel getRewriteChatModel() {
-        return llmProviderRegistry.getChatModelWithModel(null, rewriteModel);
+    private ChatModel getDecomposeChatModel(Long userId) {
+        return userId != null
+            ? llmProviderRegistry.getUserChatModel(userId)
+            : llmProviderRegistry.getChatModelWithModel(null, decompose.getModel());
     }
 
-    private ChatModel getDecomposeChatModel() {
-        return llmProviderRegistry.getChatModelWithModel(null, decompose.getModel());
+    private ChatModel getCragChatModel(Long userId) {
+        return userId != null
+            ? llmProviderRegistry.getUserChatModel(userId)
+            : llmProviderRegistry.getChatModelWithModel(null, crag.getModel());
     }
 
-    private ChatModel getCragChatModel() {
-        return llmProviderRegistry.getChatModelWithModel(null, crag.getModel());
-    }
-
-    private StreamingChatModel getStreamingChatModel() {
-        return llmProviderRegistry.getStreamingChatModelWithModel(
-            null, generation.getStreamingModel());
+    private StreamingChatModel getStreamingChatModel(Long userId) {
+        return userId != null
+            ? llmProviderRegistry.getUserStreamingChatModel(userId)
+            : llmProviderRegistry.getStreamingChatModelWithModel(null, generation.getStreamingModel());
     }
 
     /**
@@ -307,7 +318,7 @@ public class KnowledgeBaseQueryService {
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return List.of();
         }
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, null, true);
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, null, true, null);
         return outcome.contents().stream().map(Content::textSegment).toList();
     }
 
@@ -330,24 +341,26 @@ public class KnowledgeBaseQueryService {
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
+        // 用户触发的 chat 走 BYOK：在认证请求线程一次性取出 userId，向下显式传参路由到「我的模型」。
+        Long userId = UserContext.requireUserId();
         countService.updateQuestionCounts(knowledgeBaseIds);
 
-        langfuseTracer.startTrace("rag.query", UserContext.getUserId(), null, question);
+        langfuseTracer.startTrace("rag.query", userId, null, question);
         long start = System.nanoTime();
         RagQueryTrace trace = new RagQueryTrace();
         LangfuseSpan retrieveSpan = langfuseTracer.span("rag-retrieve", question);
-        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, trace);
+        AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, trace, userId);
         List<Content> contents = outcome.contents();
         langfuseTracer.end(retrieveSpan, "retrieved=" + contents.size());
         if (contents.isEmpty()) {
-            traceService.save(UserContext.requireUserId(), knowledgeBaseIds, question, trace, List.of(),
+            traceService.save(userId, knowledgeBaseIds, question, trace, List.of(),
                 NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
             langfuseTracer.updateTraceOutput(NO_RESULT_RESPONSE);
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
         LangfuseSpan generateSpan = langfuseTracer.span("rag-generate", question);
-        String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of());
+        String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of(), userId);
         langfuseTracer.end(generateSpan, answer);
         langfuseTracer.updateTraceOutput(answer);
         CitationAnalyzer.CitationAnalysis citation = citationEnabled
@@ -358,7 +371,7 @@ public class KnowledgeBaseQueryService {
                 contents.stream().map(this::extractSimilarity).toList(), citation)
             : null;
         List<RagSourceDTO> sources = buildSources(contents, Set.copyOf(citation.citedIndexes()));
-        traceService.save(UserContext.requireUserId(), knowledgeBaseIds, question, trace, sources, answer,
+        traceService.save(userId, knowledgeBaseIds, question, trace, sources, answer,
             confidence, citation.invalidIndexes(), elapsedMillis(start));
         return new QueryResponse(answer, primaryKbId, kbNamesStr, sources, confidence, citation.invalidIndexes());
     }
@@ -434,7 +447,7 @@ public class KnowledgeBaseQueryService {
                             sink.next(PROGRESS_PREFIX + "正在生成回答...");
                         }
                         Flux<String> commonFlux = instrumentStream(
-                            normalizeStreamOutput(commonChatService.streamChat(question)));
+                            normalizeStreamOutput(commonChatService.streamChat(question, userId)));
                         final reactor.core.Disposable[] innerRef = new reactor.core.Disposable[1];
                         innerRef[0] = commonFlux.subscribe(
                             sink::next,
@@ -465,7 +478,7 @@ public class KnowledgeBaseQueryService {
                 long start = System.nanoTime();
                 RagQueryTrace trace = new RagQueryTrace();
                 AugmentationOutcome outcome = augment(knowledgeBaseIds, question, history, progressCallback,
-                    assistantMessageId, trace);
+                    assistantMessageId, trace, userId);
                 List<Content> contents = outcome.contents();
                 if (contents.isEmpty()) {
                     traceService.save(userId, knowledgeBaseIds, question, trace, List.of(),
@@ -482,7 +495,7 @@ public class KnowledgeBaseQueryService {
                 emitReference(sink, traceSources);
 
                 log.debug("检索到 {} 个相关片段", contents.size());
-                Flux<String> responseFlux = streamGenerate(outcome, history);
+                Flux<String> responseFlux = streamGenerate(outcome, history, userId);
 
                 log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
                 Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
@@ -557,21 +570,17 @@ public class KnowledgeBaseQueryService {
      * @param assistantMessageId assistant 消息 ID，非空时改写结果异步回写（亮点5）
      */
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
-                                        Consumer<String> progressCallback, Long assistantMessageId) {
-        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, null, false);
+                                        Consumer<String> progressCallback, Long assistantMessageId,
+                                        RagQueryTrace trace, Long userId) {
+        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, trace,
+            false, userId);
     }
 
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
                                         Consumer<String> progressCallback, Long assistantMessageId,
-                                        RagQueryTrace trace) {
-        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, trace, false);
-    }
-
-    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
-                                        Consumer<String> progressCallback, Long assistantMessageId,
-                                        RagQueryTrace trace, boolean knowledgeBaseOnly) {
+                                        RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId) {
         RetrievalAugmentor augmentor = buildAugmentor(
-            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly);
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly, userId);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         long startNanos = System.nanoTime();
@@ -582,7 +591,7 @@ public class KnowledgeBaseQueryService {
         // Agentic RAG：CRAG 纠正式检索（rerank 后对 top-N 打分，ambiguous 重检索一次，incorrect 判「知识库无据」防幻觉）
         if (crag.isEnabled() && !knowledgeBaseOnly && !outcome.contents().isEmpty()) {
             outcome = applyCorrectiveRag(knowledgeBaseIds, question, history,
-                progressCallback, assistantMessageId, trace, outcome);
+                progressCallback, assistantMessageId, trace, outcome, userId);
         }
         // 生成前发一次"正在生成回答"进度
         if (progressCallback != null) {
@@ -604,13 +613,13 @@ public class KnowledgeBaseQueryService {
     private AugmentationOutcome applyCorrectiveRag(List<Long> knowledgeBaseIds, String question,
                                                    List<ChatMessage> history, Consumer<String> progressCallback,
                                                    Long assistantMessageId, RagQueryTrace trace,
-                                                   AugmentationOutcome outcome) {
+                                                   AugmentationOutcome outcome, Long userId) {
         try {
             if (progressCallback != null) {
                 progressCallback.accept("正在校验检索结果...");
             }
             CorrectiveRetrievalGrader grader = new CorrectiveRetrievalGrader(
-                getCragChatModel(), cragPromptTemplate, crag.getGradeTopN(), crag.getSnippetMaxChars());
+                getCragChatModel(userId), cragPromptTemplate, crag.getGradeTopN(), crag.getSnippetMaxChars());
             CorrectiveRetrievalGrader.GradeResult gr = grader.grade(question, outcome.contents());
             switch (gr.grade()) {
                 case CORRECT -> {
@@ -637,7 +646,7 @@ public class KnowledgeBaseQueryService {
                     log.info("[CRAG] 片段部分相关，用纠正查询重检索一次: origin='{}', corrected='{}'",
                         question, corrected);
                     List<Content> corrctedContents = retrieveContentsOnly(
-                        knowledgeBaseIds, corrected, history, progressCallback, assistantMessageId, trace);
+                        knowledgeBaseIds, corrected, history, progressCallback, assistantMessageId, trace, userId);
                     List<Content> merged = mergeDedupContents(outcome.contents(), corrctedContents);
                     if (trace != null) {
                         trace.crag(gr.grade().name(), "re-retrieve:" + corrected);
@@ -662,9 +671,9 @@ public class KnowledgeBaseQueryService {
      */
     private List<Content> retrieveContentsOnly(List<Long> knowledgeBaseIds, String query,
                                                List<ChatMessage> history, Consumer<String> progressCallback,
-                                               Long assistantMessageId, RagQueryTrace trace) {
+                                               Long assistantMessageId, RagQueryTrace trace, Long userId) {
         RetrievalAugmentor augmentor = buildAugmentor(
-            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, false);
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, false, userId);
         UserMessage userMessage = UserMessage.from(query);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         return augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata)).contents();
@@ -697,16 +706,13 @@ public class KnowledgeBaseQueryService {
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
-                                              Consumer<String> progressCallback, Long assistantMessageId) {
-        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId, null, false);
-    }
-
-    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
-                                              RagQueryTrace trace, boolean knowledgeBaseOnly) {
-        Long userId = UserContext.requireUserId();
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId) {
+        // 数据隔离 userId（ES/SQL 按用户过滤）恒取自 UserContext（同步/评测线程有效，流式已在 sink 内恢复）；
+        // chat 路由 userId（BYOK）由参数显式传入，评测/系统路径为 null 时回退全局模型。
+        Long dataUserId = UserContext.requireUserId();
         List<InterviewElasticsearchContentRetriever> esRetrievers =
-            buildElasticsearchRetrievers(knowledgeBaseIds, null, trace, userId);
+            buildElasticsearchRetrievers(knowledgeBaseIds, null, trace, dataUserId);
         List<ContentRetriever> esRouterRetrievers = esRetrievers.stream()
             .map(r -> ProgressAwareContentRetriever.wrap(
                 r, progressCallback, ProgressAwareContentRetriever.Kind.ES))
@@ -715,31 +721,32 @@ public class KnowledgeBaseQueryService {
             ? esRouterRetrievers.getFirst()
             : new CompositeContentRetriever(new ArrayList<>(esRouterRetrievers));
         InterviewSqlContentRetriever sqlRetriever = sql.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewSqlContentRetriever(dataSource, getChatModel(), esFallback,
-                dataTableService.databaseStructure(userId),
-                dataTableService.allowedDynamicTables(userId),
+            ? new InterviewSqlContentRetriever(dataSource, getChatModel(userId), esFallback,
+                dataTableService.databaseStructure(dataUserId),
+                dataTableService.allowedDynamicTables(dataUserId),
                 sql.getQueryTimeoutSeconds(),
                 sql.getMaxRows(),
-                userId,
+                dataUserId,
                 sqlPromptTemplate)
             : null;
         ContentRetriever routedSql = sqlRetriever == null ? null
             : ProgressAwareContentRetriever.wrap(
                 sqlRetriever, progressCallback, ProgressAwareContentRetriever.Kind.SQL);
-        InterviewNeo4jContentRetriever neo4jRetriever = buildNeo4jRetriever(esFallback, knowledgeBaseOnly, trace);
+        InterviewNeo4jContentRetriever neo4jRetriever =
+            buildNeo4jRetriever(esFallback, knowledgeBaseOnly, trace, userId);
         ContentRetriever routedNeo4j = neo4jRetriever == null ? null
             : ProgressAwareContentRetriever.wrap(
                 neo4jRetriever, progressCallback, ProgressAwareContentRetriever.Kind.NEO4J);
         InterviewQueryTransformer rewriteTransformer = new InterviewQueryTransformer(
-            getRewriteChatModel(), rewritePromptTemplate, rewriteEnabled, progressCallback,
+            getRewriteChatModel(userId), rewritePromptTemplate, rewriteEnabled, progressCallback,
             assistantMessageId, ragChatMessageMapper, trace);
         InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
-            rewriteTransformer, getRewriteChatModel(), hydePromptTemplate, hydeEnabled, hydeMaxChars);
+            rewriteTransformer, getRewriteChatModel(userId), hydePromptTemplate, hydeEnabled, hydeMaxChars);
         // Agentic RAG：复杂问题（多跳/对比/综合）先分解成子查询，与原 query 并行检索后 RRF 融合去重。
         // 规则预筛 + LLM 二次判定，简单问题零额外调用；失败降级原改写链，不阻断检索。
         // 评测检索路径（knowledgeBaseOnly）不分解，保证 Hit/MRR/NDCG 口径稳定可复现。
         QueryTransformer queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(), decomposePromptTemplate,
+            ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(userId), decomposePromptTemplate,
                 decompose.getMaxSubQueries(), progressCallback, trace)
             : transformer;
         InterviewReRankingContentAggregator rerankAggregator = rerankEnabled && rerankService.isEnabled()
@@ -769,7 +776,7 @@ public class KnowledgeBaseQueryService {
                 .elasticsearchRetrievers(esRouterRetrievers)
                 .sqlRetriever(routedSql)
                 .neo4jRetriever(routedNeo4j)
-                .chatModel(getRoutingChatModel())
+                .chatModel(getChatModel(userId))
                 .enabled(isRouterEnabled(sqlRetriever, neo4jRetriever))
                 .progressCallback(progressCallback)
                 .trace(trace)
@@ -836,14 +843,14 @@ public class KnowledgeBaseQueryService {
     }
 
     private InterviewNeo4jContentRetriever buildNeo4jRetriever(
-        ContentRetriever fallbackRetriever, boolean knowledgeBaseOnly, RagQueryTrace trace) {
+        ContentRetriever fallbackRetriever, boolean knowledgeBaseOnly, RagQueryTrace trace, Long userId) {
         if (knowledgeBaseOnly || !graph.isEnabled() || neo4jDriver == null) {
             return null;
         }
         try {
             return InterviewNeo4jContentRetriever.builder()
                 .graph(Neo4jGraph.builder().driver(neo4jDriver).build())
-                .chatModel(getRoutingChatModel())
+                .chatModel(getChatModel(userId))
                 .promptTemplate(cypherPromptTemplate)
                 .fallbackRetriever(fallbackRetriever)
                 .trace(trace)
@@ -868,9 +875,9 @@ public class KnowledgeBaseQueryService {
     // ========== 生成 ==========
 
     private String generateAnswer(List<Long> knowledgeBaseIds, String question, AugmentationOutcome outcome,
-                                  List<ChatMessage> history) {
+                                  List<ChatMessage> history, Long userId) {
         try {
-            String answer = getChatModel().chat(buildGenerateRequest(outcome, history))
+            String answer = getChatModel(userId).chat(buildGenerateRequest(outcome, history))
                 .aiMessage().text();
             answer = normalizeAnswer(answer);
             log.info("知识库问答完成: kbIds={}", knowledgeBaseIds);
@@ -882,8 +889,8 @@ public class KnowledgeBaseQueryService {
         }
     }
 
-    private Flux<String> streamGenerate(AugmentationOutcome outcome, List<ChatMessage> history) {
-        return FluxStreamingBridge.stream(getStreamingChatModel(), buildGenerateRequest(outcome, history));
+    private Flux<String> streamGenerate(AugmentationOutcome outcome, List<ChatMessage> history, Long userId) {
+        return FluxStreamingBridge.stream(getStreamingChatModel(userId), buildGenerateRequest(outcome, history));
     }
 
     /**

@@ -7,6 +7,7 @@ import com.linrun.interview.common.ai.PromptTemplate;
 import com.linrun.interview.common.ai.StructuredOutputInvoker;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.common.security.UserContext;
 import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -183,7 +184,8 @@ public class InterviewSkillService {
 
         log.info("开始解析 JD，长度: {}", jdText.length());
 
-        ChatModel chatModel = llmProviderRegistry.getDefaultChatModel();
+        // JD 解析为用户触发的同步请求：走当前用户的 BYOK「我的模型」
+        ChatModel chatModel = llmProviderRegistry.getUserChatModel(UserContext.requireUserId());
         String systemPrompt = jdSystemPromptTemplate.render(Map.of(
             "referenceFileList", cachedReferenceFileList
         ));

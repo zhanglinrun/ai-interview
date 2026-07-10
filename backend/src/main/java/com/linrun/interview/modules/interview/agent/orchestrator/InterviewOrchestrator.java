@@ -157,7 +157,7 @@ public class InterviewOrchestrator {
     InterviewPlan plan;
     LangfuseSpan plannerSpan = langfuseTracer.span("planner", summarizePlanInput(request));
     try {
-      PlannerAiService planner = aiServiceFactory.planner(request.llmProvider());
+      PlannerAiService planner = aiServiceFactory.planner(request.userId());
       String planningInput = buildPlanningInput(request);
       InterviewPlan raw = planner.plan(planningInput);
       plan = normalizePlan(raw, request);
@@ -197,9 +197,9 @@ public class InterviewOrchestrator {
         request.knowledgeBaseIds() == null ? List.of() : request.knowledgeBaseIds()));
     AgentTraceCollector.start();
     try {
-      InterviewerAiService interviewer = aiServiceFactory.interviewer(request.llmProvider());
+      InterviewerAiService interviewer = aiServiceFactory.interviewer(request.userId());
       CriticAiService critic = properties.isCriticEnabled()
-          ? aiServiceFactory.critic(request.llmProvider()) : null;
+          ? aiServiceFactory.critic(request.userId()) : null;
 
       OrchestrationState state = OrchestrationState.ASKING;
       AgentQuestionOutput output = null;

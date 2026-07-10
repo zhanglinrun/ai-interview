@@ -4,6 +4,7 @@ import {Calendar, ChevronRight, Database, FileStack, FlaskConical, LogIn, LogOut
 import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
+import MyModelOnboarding from './MyModelOnboarding';
 import {authApi} from '../api/auth';
 import {AUTH_CHANGED_EVENT, getStoredUser, StoredUser} from '../api/authStorage';
 
@@ -314,6 +315,9 @@ export default function Layout() {
         subtitle={interviewModalPreset?.subtitle || '选择面试模式和主题，快速开始'}
         startButtonText={interviewModalPreset?.startButtonText || '开始面试'}
       />
+
+      {/* BYOK 全局引导：首登两步向导 + 未配置 Key 的全局提示 */}
+      <MyModelOnboarding user={user} />
     </div>
   );
 }

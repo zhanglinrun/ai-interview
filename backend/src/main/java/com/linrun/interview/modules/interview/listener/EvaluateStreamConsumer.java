@@ -132,9 +132,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             }
         }
 
-        // 获取 LLM 客户端
-        String provider = session.getLlmProvider();
-        ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+        // 异步评估无 UserContext：从会话实体恢复 userId，走该用户的 BYOK「我的模型」
+        ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);

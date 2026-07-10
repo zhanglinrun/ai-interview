@@ -56,8 +56,9 @@ public class McpServerConfig {
 
     @Bean
     public EvaluationMcpTool evaluationMcpTool(UnifiedEvaluationService unifiedEvaluationService,
-                                               LlmProviderRegistry llmProviderRegistry) {
-        return new EvaluationMcpTool(unifiedEvaluationService, llmProviderRegistry);
+                                               LlmProviderRegistry llmProviderRegistry,
+                                               McpServerProperties properties) {
+        return new EvaluationMcpTool(unifiedEvaluationService, llmProviderRegistry, properties);
     }
 
     @Bean

@@ -491,3 +491,16 @@ CREATE TABLE IF NOT EXISTS `llm_global_setting` (
     `updated_at`                   DATETIME(6) NOT NULL,
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 用户级 LLM Provider（BYOK：每用户一条「我的模型」，仅 Chat 走 per-user，Embedding 仍全局）
+CREATE TABLE IF NOT EXISTS `user_llm_provider` (
+    `user_id`               BIGINT        NOT NULL,
+    `base_url`              VARCHAR(512)  NOT NULL,
+    `api_key_ciphertext`    VARCHAR(1024) NOT NULL,
+    `api_key_nonce`         VARCHAR(128)  NOT NULL,
+    `chat_model`            VARCHAR(128)  NOT NULL,
+    `temperature`           DOUBLE        NULL,
+    `created_at`            DATETIME(6)   NULL,
+    `updated_at`            DATETIME(6)   NULL,
+    PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -23,7 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 四角色 Agent 的 AiServices 工厂：按 (ChatModel, agentType) 缓存实例。
  *
  * <p>反射解析 @Tool/schema 开销大，不每请求重建；key 用 ChatModel 实例本身——
- * Registry 换模型（Provider 配置变更/默认切换）时返回新实例，自然生成新缓存项。
+ * BYOK 下 {@code getUserChatModel(userId)} 按用户返回各自实例（用户间互不串用），用户更新/删除
+ * 「我的模型」触发 {@code evictUser} 后返回新实例，自然生成新缓存项。
  *
  * <p>Interviewer 挂载 ChatMemory（Redis 持久化窗口记忆，memoryId=面试 sessionId）
  * 与两个 @Tool；Planner/Critic 是无工具无记忆的单轮结构化输出。
@@ -44,16 +45,16 @@ public class AgentAiServiceFactory {
   private final ConcurrentHashMap<ChatModel, InterviewerAiService> interviewerCache = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<ChatModel, CriticAiService> criticCache = new ConcurrentHashMap<>();
 
-  public PlannerAiService planner(String llmProvider) {
-    ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(llmProvider);
+  public PlannerAiService planner(Long userId) {
+    ChatModel chatModel = llmProviderRegistry.getUserChatModel(userId);
     return plannerCache.computeIfAbsent(chatModel, model ->
         AiServices.builder(PlannerAiService.class)
             .chatModel(model)
             .build());
   }
 
-  public InterviewerAiService interviewer(String llmProvider) {
-    ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(llmProvider);
+  public InterviewerAiService interviewer(Long userId) {
+    ChatModel chatModel = llmProviderRegistry.getUserChatModel(userId);
     return interviewerCache.computeIfAbsent(chatModel, model ->
         AiServices.builder(InterviewerAiService.class)
             .chatModel(model)
@@ -67,8 +68,8 @@ public class AgentAiServiceFactory {
             .build());
   }
 
-  public CriticAiService critic(String llmProvider) {
-    ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(llmProvider);
+  public CriticAiService critic(Long userId) {
+    ChatModel chatModel = llmProviderRegistry.getUserChatModel(userId);
     return criticCache.computeIfAbsent(chatModel, model ->
         AiServices.builder(CriticAiService.class)
             .chatModel(model)

@@ -87,6 +87,15 @@
 - 分布式锁：知识库上传、切块、版本切换等写操作使用 Redisson 锁防并发冲突。
 - 指标监控：暴露 Actuator、Prometheus 指标，覆盖 RAG 流式延迟、结构化输出、异步队列等。
 
+### BYOK / 自带模型 Key
+
+在线 Demo 采用 **BYOK（Bring Your Own Key）**：每个用户在 **设置 → 我的模型** 配置自己的 OpenAI 兼容 Chat 模型（`baseUrl` + `apiKey` + `chatModel`，可选 `temperature`），Key 经 AES-GCM 加密存储、永不明文回显（仅回传脱敏提示）。
+
+- **按用户隔离**：用户触发的 Chat 调用（RAG 问答、出题 / 面试、评估、语音实时对话）都走各自的 Key，成本自付、互不串用。
+- **首登引导**：登录后若未配置会弹出两步向导（介绍 → 填 Key + 测试连通）；是否再次弹出完全由后端 `configured` 派生，无额外标记。
+- **缺 Key 兜底**：未配置时用户触发的 chat 返回 `USER_LLM_NOT_CONFIGURED`（7006），前端统一提示「请先在设置里配置你的模型 Key」并可一键直达配置，覆盖问答 / 出题 / 评估 / 语音。
+- **Embedding 保持全局**：向量化由平台统一承担，未配置 Key 也能上传 / 向量化知识库，但不能进行问答 / 出题 / 评估。
+
 ## RAG 主链路
 
 ```mermaid
@@ -454,6 +463,7 @@ APP_AI_RAG_RERANK_ENABLED=false
 | 候选人记忆 | `GET /api/interview/candidate-memory/profile` |
 | Skill | `GET /api/interview/skills`、`POST /api/interview/skills/parse-jd` |
 | 模型配置 | `GET /api/llm-provider/list`、`PUT /api/llm-provider/default-provider` |
+| 我的模型（BYOK） | `GET/PUT/DELETE /api/llm-provider/mine`、`POST /api/llm-provider/mine/test` |
 
 ## 配置重点
 

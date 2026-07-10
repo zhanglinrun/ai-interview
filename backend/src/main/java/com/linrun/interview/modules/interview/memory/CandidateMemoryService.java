@@ -73,7 +73,8 @@ public class CandidateMemoryService {
       return;
     }
     try {
-      ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(session.getLlmProvider());
+      // 异步抽取无 UserContext：从会话实体取 userId，走该用户的 BYOK「我的模型」
+      ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
       MemoryEntriesDTO dto = structuredOutputInvoker.invoke(
           chatModel, extractSystemPrompt.render(), buildExtractionInput(report),
           MemoryEntriesDTO.class, ErrorCode.AI_SERVICE_ERROR,

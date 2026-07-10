@@ -41,10 +41,10 @@ public class DashscopeLlmService {
         try {
             PromptContext promptContext = buildPromptContext(userInput, session, conversationHistory);
 
-            String provider = session.getLlmProvider();
-            log.info("[VoiceInterview] Session {} using LLM provider: {}", session.getId(), provider);
-
-            ChatModel chatModel = llmProviderRegistry.getChatModelOrDefault(provider);
+            // 语音实时对话在 WS 线程无 UserContext：从会话实体取 userId，走该用户的 BYOK「我的模型」
+            log.info("[VoiceInterview] Session {} using BYOK model for userId={}",
+                session.getId(), session.getUserId());
+            ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
 
             String content = chatModel.chat(ChatRequest.builder()
                 .messages(SystemMessage.from(promptContext.systemPrompt()),
@@ -79,10 +79,11 @@ public class DashscopeLlmService {
                                        List<String> conversationHistory) {
         try {
             PromptContext promptContext = buildPromptContext(userInput, session, conversationHistory);
-            String provider = session.getLlmProvider();
-            log.info("[VoiceInterview] Session {} using LLM provider (sentence stream): {}", session.getId(), provider);
-
-            StreamingChatModel streamingChatModel = llmProviderRegistry.getStreamingChatModelOrDefault(provider);
+            // 语音实时对话在 WS 线程无 UserContext：从会话实体取 userId，走该用户的 BYOK「我的模型」
+            log.info("[VoiceInterview] Session {} using BYOK streaming model for userId={}",
+                session.getId(), session.getUserId());
+            StreamingChatModel streamingChatModel =
+                llmProviderRegistry.getUserStreamingChatModel(session.getUserId());
             StringBuilder raw = new StringBuilder();
             AtomicLong lastEmitNanos = new AtomicLong(System.nanoTime());
             AtomicInteger lastEmitLength = new AtomicInteger(0);

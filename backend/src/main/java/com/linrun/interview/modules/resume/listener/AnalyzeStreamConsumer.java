@@ -73,17 +73,20 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
     @Override
     protected void processBusiness(AnalyzePayload payload) {
         Long resumeId = payload.resumeId();
-        if (resumeEntityMapper.selectById(resumeId) == null) {
+        ResumeEntity resume = resumeEntityMapper.selectById(resumeId);
+        if (resume == null) {
             log.warn("简历已被删除，跳过分析任务: resumeId={}", resumeId);
             return;
         }
-        ResumeAnalysisResponse analysis = gradingService.analyzeResume(payload.content());
-        ResumeEntity resume = resumeEntityMapper.selectById(resumeId);
-        if (resume == null) {
+        // 异步简历分析无 UserContext：从简历实体恢复 userId，走该用户的 BYOK「我的模型」
+        ResumeAnalysisResponse analysis =
+            gradingService.analyzeResume(payload.content(), resume.getUserId());
+        ResumeEntity latest = resumeEntityMapper.selectById(resumeId);
+        if (latest == null) {
             log.warn("简历在分析期间被删除，跳过保存结果: resumeId={}", resumeId);
             return;
         }
-        persistenceService.saveAnalysis(resume, analysis);
+        persistenceService.saveAnalysis(latest, analysis);
     }
 
     @Override
