@@ -1,0 +1,207 @@
+# 生产部署（大陆 4C4G 瘦身版）
+# 相比 docker-compose-app.yml 的差异：
+#   - 异步引擎 rabbitmq（去掉 RocketMQ 三容器，省 ~1.4G）
+#   - 不启 Neo4j（APP_AI_RAG_GRAPH_ENABLED=false，图谱优雅降级；4G 内存下不启）
+#   - 依赖服务（mysql/redis/es/minio/rabbitmq）不发布宿主机端口，仅走内网
+#   - 各容器 mem_limit 限制，app 靠 MaxRAMPercentage=75 + mem_limit=1g → 堆约 768m
+#   - 新增 Caddy 终止 HTTPS（自动 Let's Encrypt），反代到 frontend:80
+#
+# 用法（在服务器上，dev-ops 目录）：
+#   cp .env.prod.example .env   # 然后填好所有必填项
+#   docker compose --env-file .env -f docker-compose-prod.yml up -d --build
+#
+# 注意：Linux 上 ES 需要 sudo sysctl -w vm.max_map_count=262144（见 DEPLOY.md）
+
+name: ai-interview
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: interview-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 设置强密码}
+      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview}
+      MYSQL_USER: ${MYSQL_USER:-ai_interview}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 设置强密码}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    container_name: interview-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: interview-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    mem_limit: 1200m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    image: minio/minio:latest
+    container_name: interview-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请在 .env 设置}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请在 .env 设置强密码}
+    volumes:
+      - minio_data:/data
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    # 仅建桶，不设匿名公开读（桶内含简历/音频 PII，一律走后端鉴权/预签名）
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} &&
+      /usr/bin/mc mb --ignore-existing myminio/${MINIO_BUCKET:-ai-interview}
+      "
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: interview-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 设置强密码}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: interview-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      SERVER_PORT: 8080
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?必填：≥32 字节强随机}
+      APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:?必填：BYOK 加密密钥，启用后勿改}
+      APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: ${MYSQL_DB:-ai_interview}
+      MYSQL_USER: ${MYSQL_USER:-ai_interview}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      ES_HOST: http://elasticsearch:9200
+      ES_INDEX_NAME: ai-interview-vector
+      ES_DIMENSIONS: ${ES_DIMENSIONS:-1536}
+      APP_STORAGE_ENDPOINT: http://minio:9000
+      APP_STORAGE_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      APP_STORAGE_SECRET_KEY: ${MINIO_SECRET_KEY}
+      APP_STORAGE_BUCKET: ${MINIO_BUCKET:-ai-interview}
+      APP_STORAGE_REGION: us-east-1
+      # FileStorageService 用 minio.* 配置（非 app.storage.*），必须显式指向容器内 minio 服务
+      MINIO_URL: http://minio:9000
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ai-interview}
+      # 平台全局 Embedding Key（唯一 AI 成本；chat 由用户 BYOK 自带）
+      AI_BAILIAN_API_KEY: ${AI_BAILIAN_API_KEY:?必填：全局 embedding 用的 DashScope Key}
+      AI_MODEL: ${AI_MODEL:-qwen3.5-flash}
+      # 异步引擎：RabbitMQ（去 RocketMQ）
+      APP_ASYNC_ENGINE: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      # CORS：域名阶段填 https 域名 origin（浏览器实际访问的 origin，否则跨域 403）
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://interview.xiaoxiong123.cloud}
+      # 4G 不启 Neo4j → 图谱优雅降级（Neo4jConfiguration 按此门控不建 Driver bean）
+      APP_AI_RAG_GRAPH_ENABLED: ${APP_AI_RAG_GRAPH_ENABLED:-false}
+      # 不启 Neo4j：排除 langchain4j 社区 Neo4j 向量库自动配置（否则启动即连 localhost:7687 崩溃）；
+      # 同时保留 Rabbit 自动配置排除（由 RabbitMqEngineConfig 在 rabbitmq 引擎时再条件装配）。
+      SPRING_AUTOCONFIGURE_EXCLUDE: "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration,dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration,org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveDataAutoConfiguration"
+    mem_limit: 1024m
+
+  frontend:
+    build: ../frontend
+    container_name: interview-frontend
+    restart: unless-stopped
+    depends_on:
+      - app
+    mem_limit: 128m
+    # 不发布宿主机端口，由 Caddy 内网转发（frontend nginx 已内建 /api /ws 反代到 app:8080）
+
+  caddy:
+    image: caddy:2
+    container_name: interview-caddy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+
+volumes:
+  mysql_data:
+  elasticsearch_data:
+  redis_data:
+  minio_data:
+  rabbitmq_data:
+  caddy_data:
+  caddy_config:

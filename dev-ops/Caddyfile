@@ -1,0 +1,20 @@
+# Caddy 反向代理 + 自动 HTTPS（Let's Encrypt）
+# 前提：
+#   1) DNS: interview.xiaoxiong123.cloud A 记录 → 本服务器公网 IP
+#   2) 域名对本服务器已完成 ICP 备案（大陆机必需），且安全组放行 80 + 443
+#   3) frontend 容器已在同 compose 网络（Caddy 用服务名 frontend 访问）
+#
+# 首次启动 Caddy 会通过 80 端口的 HTTP-01 challenge 自动申请证书；
+# 若一直签不下来，多半是备案未通/80 被拦/DNS 未生效（见 DEPLOY.md 排障）。
+
+{
+	# ACME 通知邮箱（证书到期提醒），改成你自己的邮箱
+	email admin@xiaoxiong123.cloud
+}
+
+interview.xiaoxiong123.cloud {
+	encode gzip
+	# 前端 nginx 已内建 / (SPA)、/api (SSE 关缓冲)、/ws (WebSocket) 的处理，
+	# 这里整体转发到 frontend:80 即可。
+	reverse_proxy frontend:80
+}

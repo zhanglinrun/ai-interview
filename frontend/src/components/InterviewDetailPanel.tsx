@@ -130,7 +130,9 @@ function ScoreCard({
 
         <h3 className="text-2xl font-bold mb-3">面试评估</h3>
         <p className="text-white/90 max-w-2xl leading-relaxed">
-          {feedback || '表现良好，展示了扎实的技术基础。'}
+          {feedback || (score === null
+            ? '本次未作答或评估尚未完成，暂无评估反馈。'
+            : '暂无评估反馈。')}
         </p>
       </div>
     </div>

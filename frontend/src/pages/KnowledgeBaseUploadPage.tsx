@@ -73,14 +73,30 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
         accessibleBy,
       );
       setBatchResults(result.items);
-      setNotice(`批量上传完成：成功 ${result.success}，失败 ${result.failed}`);
       if (result.success > 0) {
+        // 批量接口不返回各文档 docId：上传成功后【后台异步】拉取 CONVERTED 知识库逐个触发切块，
+        // 切块后由 AFTER_COMMIT 事件 + 定时补偿任务完成向量化。fire-and-forget 不阻塞 UI，
+        // 避免"处理中"按钮长时间卡住（切块/向量化在后台进行，可在知识库管理页看进度）。
+        if (knowledgeBaseType === 'DOCUMENT_SEARCH') {
+          void (async () => {
+            try {
+              const pending = await knowledgeBaseApi.getAllKnowledgeBases(undefined, 'CONVERTED');
+              for (const kb of pending) {
+                await knowledgeBaseApi.splitDocument(kb.id).catch(() => undefined);
+              }
+            } catch {
+              // 触发失败不影响上传结果；用户可在知识库管理页手动"重新向量化"
+            }
+          })();
+        }
+        setNotice(`批量上传完成：成功 ${result.success}，失败 ${result.failed}。正在后台切块向量化，可在「知识库管理」查看进度。`);
         setTimeout(() => onUploadComplete({
           knowledgeBase: { id: 0, name: 'batch', category: '', fileSize: 0, contentLength: 0, docStatus: 'CONVERTED' },
           storage: { fileKey: '', fileUrl: '' },
           duplicate: false,
         }), 1200);
       } else {
+        setNotice(`批量上传完成：成功 ${result.success}，失败 ${result.failed}`);
         setUploading(false);
       }
     } catch (err: unknown) {

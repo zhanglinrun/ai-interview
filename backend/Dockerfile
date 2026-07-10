@@ -25,6 +25,9 @@ COPY --from=builder --chown=app:app /workspace/extracted/spring-boot-loader/ ./
 COPY --from=builder --chown=app:app /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=builder --chown=app:app /workspace/extracted/application/ ./
 
+# 日志目录（logback 写 /app/logs/app.log）：/app 由 WORKDIR 以 root 建，需给 app 用户可写
+RUN mkdir -p /app/logs && chown -R app:app /app/logs /app
+
 USER app
 
 EXPOSE 8080
