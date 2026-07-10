@@ -90,4 +90,13 @@ class LlmProviderControllerTest {
         assertThrows(com.linrun.interview.common.exception.BusinessException.class,
             () -> controller.deleteProvider("lmstudio"));
     }
+
+    @Test
+    @DisplayName("非管理员读取全局 Provider 列表被拒（BYOK 下仅管理员可见平台配置）")
+    void nonAdminCannotListProviders() {
+        UserContext.setRole("USER");
+
+        assertThrows(com.linrun.interview.common.exception.BusinessException.class,
+            () -> controller.listProviders());
+    }
 }

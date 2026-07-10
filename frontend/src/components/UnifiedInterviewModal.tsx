@@ -205,8 +205,6 @@ export default function UnifiedInterviewModal({
                   loadingKnowledgeBases={config.loadingKnowledgeBases}
                   selectedKbIds={config.selectedKbIds}
                   onKnowledgeBaseToggle={config.toggleKnowledgeBase}
-                  llmProvider={config.llmProvider}
-                  onLlmProviderChange={config.setLlmProvider}
                 />
               </div>
 

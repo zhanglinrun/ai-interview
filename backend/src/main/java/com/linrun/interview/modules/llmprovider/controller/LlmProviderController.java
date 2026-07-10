@@ -38,12 +38,14 @@ public class LlmProviderController {
   @GetMapping("/list")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
   public Result<List<ProviderDTO>> listProviders() {
+    UserContext.requireAdmin();
     return Result.success(configService.listProviders());
   }
 
   @GetMapping("/{id}")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
   public Result<ProviderDTO> getProvider(@PathVariable String id) {
+    UserContext.requireAdmin();
     return Result.success(configService.getProvider(id));
   }
 
@@ -90,6 +92,7 @@ public class LlmProviderController {
   @GetMapping("/default-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
   public Result<DefaultProviderDTO> getDefaultProvider() {
+    UserContext.requireAdmin();
     return Result.success(configService.getDefaultProvider());
   }
 
@@ -114,6 +117,7 @@ public class LlmProviderController {
   @GetMapping("/voice/asr")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
   public Result<AsrConfigDTO> getAsrConfig() {
+    UserContext.requireAdmin();
     return Result.success(configService.getAsrConfig());
   }
 
@@ -128,6 +132,7 @@ public class LlmProviderController {
   @GetMapping("/voice/tts")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
   public Result<TtsConfigDTO> getTtsConfig() {
+    UserContext.requireAdmin();
     return Result.success(configService.getTtsConfig());
   }
 

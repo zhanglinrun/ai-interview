@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { llmProviderApi } from '../api/llmProvider';
 import { userLlmProviderApi } from '../api/userLlmProvider';
+import { isAdmin } from '../api/authStorage';
 import { getErrorMessage, ApiError } from '../api/request';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingButtonContent from '../components/LoadingButtonContent';
@@ -294,7 +295,9 @@ export default function SettingsPage() {
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState('');
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
-  // 管理员配置区（全局 Provider / 语音）无权限时隐藏，避免向普通用户报错
+  // 管理员配置区（全局 Provider / 语音）仅管理员可见：普通用户只用「我的模型」BYOK
+  const [isAdminUser] = useState(() => isAdmin());
+  // 兜底：即便角色判定为管理员，若后端仍返回 403/401 也隐藏管理员配置区
   const [adminForbidden, setAdminForbidden] = useState(false);
 
   // 「我的模型」（BYOK，当前登录用户）
@@ -424,9 +427,14 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    loadData();
+    // 普通用户不拉取管理员配置（全局 Provider / 语音），避免无谓请求与信息暴露
+    if (isAdminUser) {
+      loadData();
+    } else {
+      setLoading(false);
+    }
     loadMyProvider();
-  }, [loadData, loadMyProvider]);
+  }, [isAdminUser, loadData, loadMyProvider]);
 
   // --- Modal helpers ---
   const openCreateModal = () => {
@@ -757,8 +765,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Loading state */}
-      {adminForbidden ? (
+      {/* 管理员配置区：仅管理员可见 */}
+      {(!isAdminUser || adminForbidden) ? (
         <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
           <Lock className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <span>
