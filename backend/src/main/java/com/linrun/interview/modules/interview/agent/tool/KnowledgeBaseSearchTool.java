@@ -1,9 +1,10 @@
 package com.linrun.interview.modules.interview.agent.tool;
 
+import com.linrun.interview.modules.interview.agent.model.InterviewEvidence;
+import com.linrun.interview.modules.interview.agent.model.InterviewEvidence.Bundle;
+import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.data.segment.TextSegment;
-import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -17,18 +18,14 @@ import java.util.stream.Collectors;
  * <p>方法用 {@link Tool} 注解，由 LC4j 框架在 function-calling 时自动选择调用。工具上下文
  * （knowledgeBaseIds）通过 {@link AgentContextHolder} 从 ThreadLocal 取，对模型透明。
  *
- * <p>检索复用新链路 {@link KnowledgeBaseQueryService#retrieveForEvaluation}（检索不生成），
- * 与前端 RAG 查询共用同一套检索/改写/融合/rerank 编排。
+ * <p>检索复用面试证据链，返回 evidence ID、来源与片段，便于编排轨迹审计。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class KnowledgeBaseSearchTool {
 
-    private static final int MAX_SNIPPET_CHARS = 300;
-    private static final int MAX_OBSERVATION_DOCS = 4;
-
-    private final KnowledgeBaseQueryService queryService;
+    private final InterviewKnowledgeRetrievalService retrievalService;
 
     @Tool("检索岗位知识库，了解该方向的考点、技术要求与评判标准。"
         + "参数 query 是要检索的关键词或问题。当你需要依据岗位资料出题或判断追问方向时调用。")
@@ -42,14 +39,12 @@ public class KnowledgeBaseSearchTool {
         }
 
         try {
-            List<TextSegment> docs = queryService.retrieveForEvaluation(
-                context.knowledgeBaseIds(), query);
-            if (docs.isEmpty()) {
+            Bundle bundle = retrievalService.retrieveEvidence(context.knowledgeBaseIds(), query);
+            if (bundle.promptEvidence().isEmpty()) {
                 return "知识库中未检索到与「" + query + "」相关的内容。";
             }
-            return docs.stream()
-                .limit(MAX_OBSERVATION_DOCS)
-                .map(segment -> "- " + truncate(segment.text()))
+            return bundle.promptEvidence().stream()
+                .map(this::formatEvidence)
                 .collect(Collectors.joining("\n"));
         } catch (Exception e) {
             log.warn("[KnowledgeBaseSearchTool] 检索失败: {}", e.getMessage(), e);
@@ -57,14 +52,7 @@ public class KnowledgeBaseSearchTool {
         }
     }
 
-    private String truncate(String text) {
-        if (text == null) {
-            return "";
-        }
-        String normalized = text.replaceAll("\\s+", " ").trim();
-        if (normalized.length() <= MAX_SNIPPET_CHARS) {
-            return normalized;
-        }
-        return normalized.substring(0, MAX_SNIPPET_CHARS) + "...";
+    private String formatEvidence(InterviewEvidence evidence) {
+        return "- [" + evidence.id() + "] " + evidence.source() + ": " + evidence.snippet();
     }
 }

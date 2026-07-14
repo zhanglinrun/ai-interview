@@ -16,9 +16,15 @@ export interface InterviewQuestion {
   question: string;
   type: string;
   category: string;
+  topicSummary?: string | null;
   userAnswer: string | null;
   score: number | null;
   feedback: string | null;
+  isFollowUp?: boolean;
+  parentQuestionIndex?: number | null;
+  capabilityAtomId?: string | null;
+  followUpAction?: 'DEEPEN' | 'CLARIFY' | 'REMEDIATE' | 'SWITCH_TOPIC' | null;
+  evidenceIds?: string[];
 }
 
 export interface InterviewMessage {
@@ -129,11 +135,20 @@ export interface AgentTraceGroup {
 }
 
 export interface CandidateMemoryProfile {
+  capabilityAtomId: string | null;
   topic: string;
+  averageScore: number | null;
+  observationCount: number;
+  sessionCount: number;
+  masteryLevel: 'STRENGTH' | 'DEVELOPING' | 'WEAKNESS';
+  verificationState: 'PROVISIONAL' | 'VERIFIED';
+  confidenceLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   weaknessCount: number;
+  developingCount: number;
   strengthCount: number;
   latestKind: string;
   latestEvidence: string;
+  latestEvidenceIds: string[];
   lastSessionId: string;
   lastAt: string;
 }

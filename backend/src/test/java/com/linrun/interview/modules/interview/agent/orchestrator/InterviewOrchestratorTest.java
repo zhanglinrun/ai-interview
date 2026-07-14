@@ -5,6 +5,7 @@ import com.linrun.interview.modules.interview.agent.AgentAiServiceFactory;
 import com.linrun.interview.modules.interview.agent.AgentOrchestrationProperties;
 import com.linrun.interview.modules.interview.agent.AgentTraceService;
 import com.linrun.interview.modules.interview.agent.CriticAiService;
+import com.linrun.interview.modules.interview.agent.InterviewTurnDecisionService;
 import com.linrun.interview.modules.interview.agent.InterviewerAiService;
 import com.linrun.interview.modules.interview.agent.model.AgentQuestionOutput;
 import com.linrun.interview.modules.interview.agent.model.CriticVerdict;
@@ -13,6 +14,7 @@ import com.linrun.interview.modules.interview.agent.orchestrator.InterviewOrches
 import com.linrun.interview.modules.interview.agent.orchestrator.InterviewOrchestrator.NextQuestionRequest;
 import com.linrun.interview.modules.interview.memory.CandidateMemoryService;
 import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
+import com.linrun.interview.modules.interview.skill.InterviewSkillService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -64,10 +66,13 @@ class InterviewOrchestratorTest {
     CandidateMemoryService candidateMemoryService = mock(CandidateMemoryService.class);
     InterviewKnowledgeRetrievalService knowledgeRetrievalService =
         mock(InterviewKnowledgeRetrievalService.class);
+    when(knowledgeRetrievalService.buildEvidencePrompt(any())).thenReturn("");
+    InterviewTurnDecisionService turnDecisionService = new InterviewTurnDecisionService(
+        mock(InterviewSkillService.class), knowledgeRetrievalService);
     LangfuseTracer langfuseTracer = mock(LangfuseTracer.class);
 
     orchestrator = new InterviewOrchestrator(factory, properties, traceService,
-        candidateMemoryService, knowledgeRetrievalService, new ObjectMapper(),
+        candidateMemoryService, knowledgeRetrievalService, turnDecisionService, new ObjectMapper(),
         langfuseTracer, null);
   }
 

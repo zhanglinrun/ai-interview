@@ -223,9 +223,12 @@ public class InterviewSessionService {
         Integer parentIndex = generated.isFollowUp() ? parentMainIndex : null;
         String category = generated.topicName() != null && !generated.topicName().isBlank()
             ? generated.topicName() : "Agent 出题";
-        return InterviewQuestionDTO.create(index, generated.question(), AGENT_QUESTION_TYPE,
+        String type = generated.capabilityAtomId() != null && !generated.capabilityAtomId().isBlank()
+            ? generated.capabilityAtomId() : AGENT_QUESTION_TYPE;
+        return InterviewQuestionDTO.createAgent(index, generated.question(), type,
             generated.isFollowUp() ? category + "（追问）" : category,
-            generated.topicName(), generated.isFollowUp(), parentIndex);
+            generated.topicName(), generated.isFollowUp(), parentIndex,
+            generated.capabilityAtomId(), generated.followUpAction(), generated.evidenceIds());
     }
 
     /**

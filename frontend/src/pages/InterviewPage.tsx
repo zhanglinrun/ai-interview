@@ -311,7 +311,7 @@ export default function Interview({
         <AgentInsightPanel
           sessionId={session.sessionId}
           refreshKey={insightRefresh}
-          className="max-h-[calc(100vh-180px)] xl:sticky xl:top-24"
+          className="xl:max-h-[calc(100vh-180px)] xl:sticky xl:top-24"
         />
       </motion.div>
 

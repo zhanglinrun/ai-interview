@@ -17,8 +17,11 @@
 - Reflection：自我反思与修正（Reflexion / Self-Refine / CRITIC）
 
 ### 多 Agent 系统
-- Orchestrator-Subagent：主从模式，编排器分配任务
-- Peer-to-Peer：对等模式，Agent 间平等协作
+- 严格工作定义：至少两个参与者分别拥有目标/职责、上下文/状态和“观察—决策—行动”循环，并能根据彼此结果动态调整行动
+- Orchestrator-Subagent：中心编排模式，编排器分配任务，Subagent 仍能自主规划、调用工具、返回结果或请求再次委派
+- Peer-to-Peer：对等模式，Agent 间通过协商、辩论、投票或竞争完成任务
+- 判断边界：是否有中心编排器不是关键；只有多个角色 Prompt 或固定顺序的单次 LLM 调用，通常更适合称为 Agent Workflow
+- 工程代价：通信协议、共享状态、一致性、终止检测、权限隔离、可观测性，以及额外 Token、延迟和故障面
 - A2A（Agent-to-Agent）通信协议
 
 ### 安全

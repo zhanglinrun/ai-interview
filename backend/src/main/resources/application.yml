@@ -252,7 +252,7 @@ app:
       memory-window: ${APP_AI_AGENT_MEMORY_WINDOW:20}
       # 编排指标上报（agent.critic.verdicts / reflexion.rounds / question.latency）
       metrics-enabled: ${APP_AI_AGENT_METRICS_ENABLED:true}
-      # 跨会话候选人画像记忆：评估后 LLM 抽取薄弱点/掌握点，Planner 下次面试注入
+      # 跨会话能力画像：逐题评估结果确定性沉淀为能力观测，Planner 下次面试注入
       candidate-memory:
         enabled: ${APP_AI_AGENT_CANDIDATE_MEMORY_ENABLED:true}
         max-entries: ${APP_AI_AGENT_CANDIDATE_MEMORY_MAX_ENTRIES:8}

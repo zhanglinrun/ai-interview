@@ -1,6 +1,6 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {motion} from 'framer-motion';
-import {Calendar, ChevronRight, Database, FileStack, FlaskConical, LogIn, LogOut, MessageSquare, Mic2, Moon, Network, Settings, Sun, Users,} from 'lucide-react';
+import {Calendar, ChevronRight, Database, FileStack, FlaskConical, LogIn, LogOut, Menu, MessageSquare, Mic2, Moon, Network, Settings, Sun, Users, X,} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
@@ -50,6 +50,7 @@ export default function Layout() {
   const {theme, toggleTheme} = useTheme();
   const navigate = useNavigate();
   const [user, setUser] = useState<StoredUser | null>(() => getStoredUser());
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [interviewModalPreset, setInterviewModalPreset] = useState<{
     defaultMode: 'text' | 'voice';
     defaultResumeId?: number;
@@ -60,7 +61,19 @@ export default function Layout() {
 
   useEffect(() => {
     document.title = resolveDocumentTitle(currentPath);
+    setMobileNavOpen(false);
   }, [currentPath]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const syncUser = () => setUser(getStoredUser());
@@ -181,18 +194,61 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-screen">
+      <header className="fixed inset-x-0 top-0 z-30 h-16 px-4 flex items-center justify-between border-b border-stone-200/80 bg-white/90 backdrop-blur-xl dark:border-stone-800 dark:bg-stone-950/90 md:hidden">
+        <Link to="/history" className="flex items-center gap-2.5 min-w-0">
+          <img
+            src="/bear-doctor-logo.png"
+            alt=""
+            className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
+          />
+          <span className="truncate text-sm font-semibold text-stone-900 dark:text-stone-50">AI面试平台</span>
+        </Link>
+        <button
+          type="button"
+          aria-label="打开导航菜单"
+          aria-controls="app-sidebar"
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen(true)}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-900"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </header>
+
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="关闭导航菜单"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[1px] md:hidden"
+        />
+      )}
+
       {/* 左侧边栏 */}
-      <aside className="w-64 bg-white/60 dark:bg-stone-950/60 backdrop-blur-2xl border-r border-white/40 dark:border-white/10 fixed h-screen left-0 top-0 z-50 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-colors duration-300">
+      <aside
+        id="app-sidebar"
+        className={`w-64 bg-white/95 dark:bg-stone-950/95 md:bg-white/60 md:dark:bg-stone-950/60 backdrop-blur-2xl border-r border-white/40 dark:border-white/10 fixed h-dvh md:h-screen left-0 top-0 z-50 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.08)] md:shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 md:translate-x-0 ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         {/* Logo */}
-        <div className="p-5 border-b border-stone-200/80 dark:border-stone-800">
-          <Link to="/history" className="flex items-center gap-3 group">
+        <div className="p-5 border-b border-stone-200/80 dark:border-stone-800 flex items-center gap-3">
+          <Link to="/history" className="flex flex-1 min-w-0 items-center gap-3 group">
             <img
               src="/bear-doctor-logo.png"
               alt="AI面试平台"
               className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
             />
-            <span className="text-base font-semibold text-stone-900 dark:text-stone-50 tracking-tight">AI面试平台</span>
+            <span className="truncate text-base font-semibold text-stone-900 dark:text-stone-50 tracking-tight">AI面试平台</span>
           </Link>
+          <button
+            type="button"
+            aria-label="关闭导航菜单"
+            onClick={() => setMobileNavOpen(false)}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-900 md:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* 主题切换按钮 */}
@@ -233,6 +289,7 @@ export default function Layout() {
                       <Link
                         key={item.id}
                         to={item.path}
+                        onClick={() => setMobileNavOpen(false)}
                         className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-300
                           ${active
                             ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300 shadow-sm border border-primary-500/20'
@@ -279,7 +336,10 @@ export default function Layout() {
           ) : (
             <button
               type="button"
-              onClick={() => navigate('/login')}
+              onClick={() => {
+                setMobileNavOpen(false);
+                navigate('/login');
+              }}
               className="mb-2 w-full inline-flex items-center justify-center gap-2 rounded-lg btn-primary px-3 py-2 text-sm font-medium"
             >
               <LogIn className="w-4 h-4" />
@@ -291,7 +351,7 @@ export default function Layout() {
       </aside>
 
       {/* 主内容区 */}
-      <main className="flex-1 ml-64 p-8 md:p-10 min-h-screen overflow-y-auto">
+      <main className="flex-1 min-w-0 w-full p-4 pt-20 md:ml-64 md:p-10 min-h-screen overflow-y-auto">
         <motion.div
           key={currentPath}
           initial={{ opacity: 0, y: 12 }}

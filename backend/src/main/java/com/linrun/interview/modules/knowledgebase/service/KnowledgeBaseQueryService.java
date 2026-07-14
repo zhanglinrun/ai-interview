@@ -323,6 +323,31 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
+     * 面试逐轮证据检索：保留 ES 双路混合检索、父子/兄弟上下文扩展、RRF 与 rerank，
+     * 但跳过 Query Rewrite、HyDE、Query Decomposition 与 CRAG 的 LLM 调用。
+     *
+     * <p>面试场景的查询已经由目标能力原子构造，继续做生成式改写收益有限，却会给每道题
+     * 增加模型延迟和费用。返回 {@link Content} 而不是只返回 {@link TextSegment}，避免丢失
+     * rerank score 等内容级元数据，供上层形成可追溯证据。
+     */
+    public List<Content> retrieveContentsForInterviewEvidence(List<Long> knowledgeBaseIds,
+                                                               String question) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+                || normalizeQuestion(question).isBlank()) {
+            return List.of();
+        }
+        RetrievalAugmentor augmentor = buildAugmentor(
+            knowledgeBaseIds, List.of(), null, null, null, true, null, false);
+        UserMessage userMessage = UserMessage.from(question);
+        Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, List.of());
+        long startNanos = System.nanoTime();
+        dev.langchain4j.rag.AugmentationResult result =
+            augmentor.augment(new dev.langchain4j.rag.AugmentationRequest(userMessage, metadata));
+        recordRetrievalMetrics(startNanos, result.contents());
+        return List.copyOf(result.contents());
+    }
+
+    /**
      * 查询知识库并返回完整响应（含 sources/citation）
      */
     public QueryResponse queryKnowledgeBase(QueryRequest request) {
@@ -708,6 +733,14 @@ public class KnowledgeBaseQueryService {
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
                                               RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId) {
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
+            trace, knowledgeBaseOnly, userId, true);
+    }
+
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId,
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId,
+                                              boolean queryTransformationEnabled) {
         // 数据隔离 userId（ES/SQL 按用户过滤）恒取自 UserContext（同步/评测线程有效，流式已在 sink 内恢复）；
         // chat 路由 userId（BYOK）由参数显式传入，评测/系统路径为 null 时回退全局模型。
         Long dataUserId = UserContext.requireUserId();
@@ -737,18 +770,22 @@ public class KnowledgeBaseQueryService {
         ContentRetriever routedNeo4j = neo4jRetriever == null ? null
             : ProgressAwareContentRetriever.wrap(
                 neo4jRetriever, progressCallback, ProgressAwareContentRetriever.Kind.NEO4J);
-        InterviewQueryTransformer rewriteTransformer = new InterviewQueryTransformer(
-            getRewriteChatModel(userId), rewritePromptTemplate, rewriteEnabled, progressCallback,
-            assistantMessageId, ragChatMessageMapper, trace);
-        InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
-            rewriteTransformer, getRewriteChatModel(userId), hydePromptTemplate, hydeEnabled, hydeMaxChars);
-        // Agentic RAG：复杂问题（多跳/对比/综合）先分解成子查询，与原 query 并行检索后 RRF 融合去重。
-        // 规则预筛 + LLM 二次判定，简单问题零额外调用；失败降级原改写链，不阻断检索。
-        // 评测检索路径（knowledgeBaseOnly）不分解，保证 Hit/MRR/NDCG 口径稳定可复现。
-        QueryTransformer queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(userId), decomposePromptTemplate,
-                decompose.getMaxSubQueries(), progressCallback, trace)
-            : transformer;
+        QueryTransformer queryTransformer;
+        if (!queryTransformationEnabled) {
+            queryTransformer = query -> List.of(query);
+        } else {
+            InterviewQueryTransformer rewriteTransformer = new InterviewQueryTransformer(
+                getRewriteChatModel(userId), rewritePromptTemplate, rewriteEnabled, progressCallback,
+                assistantMessageId, ragChatMessageMapper, trace);
+            InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
+                rewriteTransformer, getRewriteChatModel(userId), hydePromptTemplate,
+                hydeEnabled, hydeMaxChars);
+            // Agentic RAG：复杂问题先分解成子查询；知识库评测路径不分解，保证指标可复现。
+            queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
+                ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(userId),
+                    decomposePromptTemplate, decompose.getMaxSubQueries(), progressCallback, trace)
+                : transformer;
+        }
         InterviewReRankingContentAggregator rerankAggregator = rerankEnabled && rerankService.isEnabled()
             ? InterviewReRankingContentAggregator.builder()
                 .scoringModel(rerankService)

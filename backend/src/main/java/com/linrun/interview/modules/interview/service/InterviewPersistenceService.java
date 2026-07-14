@@ -262,6 +262,8 @@ public class InterviewPersistenceService {
           sessionId, report.overallScore(), answersToSave.size());
     } catch (JsonProcessingException e) {
       log.error("序列化报告失败: {}", e.getMessage(), e);
+      throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+          "保存面试报告失败", e);
     }
   }
 
@@ -271,7 +273,16 @@ public class InterviewPersistenceService {
    * 会话未评估时返回空，交由调用方决定是否触发一次同步评估。
    */
   public Optional<InterviewReportDTO> loadStoredReport(String sessionId) {
-    Optional<InterviewSessionEntity> sessionOpt = findBySessionId(sessionId);
+    return loadStoredReport(findBySessionId(sessionId), sessionId);
+  }
+
+  /** 异步消费者使用的内部入口，不依赖请求线程 {@link UserContext}。 */
+  public Optional<InterviewReportDTO> loadStoredReportInternal(String sessionId) {
+    return loadStoredReport(findBySessionIdInternal(sessionId), sessionId);
+  }
+
+  private Optional<InterviewReportDTO> loadStoredReport(
+      Optional<InterviewSessionEntity> sessionOpt, String sessionId) {
     if (sessionOpt.isEmpty()) {
       return Optional.empty();
     }

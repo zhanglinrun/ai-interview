@@ -1,101 +1,201 @@
 package com.linrun.interview.modules.interview.service;
 
 import com.linrun.interview.common.ai.PromptSanitizer;
+import com.linrun.interview.modules.interview.agent.model.InterviewEvidence;
+import com.linrun.interview.modules.interview.agent.model.InterviewEvidence.Bundle;
 import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
 import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.rag.content.Content;
+import dev.langchain4j.rag.content.ContentMetadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 面试出题的知识库检索桥接：会话关联知识库时，按 Skill 主题词走 RAG 检索链
- * （改写/路由/混合检索/rerank 与前端 RAG 查询共用），把命中的 chunk 组装成
- * 出题 prompt 的「岗位知识库参考」段落。
- *
- * <p>检索必须在请求线程内完成（{@code UserContext} 为 ThreadLocal，
- * 不能进出题的虚拟线程池），因此由 {@link InterviewQuestionService} 在派发并行出题前调用。
+ * 面试出题的知识库检索桥接：把 RAG 结果保留为带稳定 ID、来源和分数的结构化证据，
+ * 再按需渲染成受 Prompt 注入边界保护的文本。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class InterviewKnowledgeRetrievalService {
 
-    /** 注入出题 prompt 的最大 chunk 数 */
-    private static final int MAX_CHUNKS = 6;
-    /** 单个 chunk 注入的最大字符数 */
-    private static final int MAX_CHARS_PER_CHUNK = 600;
-    /** 拼接查询时最多使用的分类数 */
-    private static final int MAX_QUERY_CATEGORIES = 4;
+  private static final int MAX_CANDIDATES = 6;
+  private static final int MAX_PROMPT_EVIDENCE = 4;
+  private static final int MAX_CHARS_PER_CHUNK = 600;
+  private static final int MAX_QUERY_CATEGORIES = 4;
 
-    private final KnowledgeBaseQueryService knowledgeBaseQueryService;
-    private final PromptSanitizer promptSanitizer;
+  private final KnowledgeBaseQueryService knowledgeBaseQueryService;
+  private final PromptSanitizer promptSanitizer;
 
-    /**
-     * 按 Skill 主题词检索关联知识库，返回可直接拼进出题 prompt 的参考段落。
-     * 知识库为空或检索无命中时返回空字符串（出题降级为无知识库路径，不阻断主流程）。
-     */
-    public String buildKbReferenceSection(List<Long> knowledgeBaseIds, SkillDTO skill) {
-        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || skill == null) {
-            return "";
-        }
-        String query = buildQuery(skill);
-        try {
-            List<TextSegment> segments =
-                knowledgeBaseQueryService.retrieveForEvaluation(knowledgeBaseIds, query);
-            if (segments.isEmpty()) {
-                log.info("面试出题知识库检索无命中: kbIds={}, query={}", knowledgeBaseIds, query);
-                return "";
-            }
-            List<TextSegment> top = segments.stream().limit(MAX_CHUNKS).toList();
-            log.info("面试出题知识库检索命中: kbIds={}, query={}, hit={}, sources={}",
-                knowledgeBaseIds, query, top.size(),
-                top.stream().map(this::describeSource).distinct().toList());
-
-            String body = top.stream()
-                .map(segment -> "- [" + describeSource(segment) + "] " + truncate(segment.text()))
-                .collect(Collectors.joining("\n"));
-            return "以下是岗位关联知识库中检索到的资料要点，出题时请优先围绕这些资料的知识点，"
-                + "并保证题目仍符合面试方向与难度要求：\n"
-                + promptSanitizer.wrapWithDelimiters("kb_reference", promptSanitizer.sanitize(body));
-        } catch (Exception e) {
-            log.warn("面试出题知识库检索失败，降级为无知识库出题: kbIds={}", knowledgeBaseIds, e);
-            return "";
-        }
+  /**
+   * Planner 使用的宽查询入口。底层同样走逐轮轻量检索通道，不触发生成式查询改写。
+   */
+  public String buildKbReferenceSection(List<Long> knowledgeBaseIds, SkillDTO skill) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || skill == null) {
+      return "";
     }
-
-    private String buildQuery(SkillDTO skill) {
-        String categories = skill.categories() == null ? "" : skill.categories().stream()
-            .limit(MAX_QUERY_CATEGORIES)
-            .map(SkillCategoryDTO::label)
-            .collect(Collectors.joining(" "));
-        return (skill.name() + " " + categories + " 核心知识点 面试考点").trim();
+    Bundle bundle = retrieveEvidence(knowledgeBaseIds, buildQuery(skill));
+    if (bundle.promptEvidence().isEmpty()) {
+      return "";
     }
+    return "以下是岗位关联知识库中检索到的资料要点。规划时优先覆盖有证据支撑的核心知识点：\n"
+        + buildEvidencePrompt(bundle);
+  }
 
-    private String describeSource(TextSegment segment) {
-        if (segment.metadata() == null) {
-            return "知识库";
-        }
-        String fileName = segment.metadata().getString(MetadataKeyConstant.FILE_NAME);
-        if (fileName != null && !fileName.isBlank()) {
-            return fileName;
-        }
-        String docId = segment.metadata().getString(MetadataKeyConstant.DOC_ID);
-        return docId != null ? "doc-" + docId : "知识库";
+  /**
+   * 返回检索候选与送入 Interviewer 的证据子集。候选顺序沿用 RRF/rerank 最终顺序，
+   * promptEvidence 是候选的有界 Top-N；模型最终声明使用的 ID 会由编排器再次校验。
+   */
+  public Bundle retrieveEvidence(List<Long> knowledgeBaseIds, String query) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+        || query == null || query.isBlank()) {
+      return Bundle.empty(query);
     }
+    try {
+      List<Content> contents = knowledgeBaseQueryService
+          .retrieveContentsForInterviewEvidence(knowledgeBaseIds, query);
+      Map<String, InterviewEvidence> unique = new LinkedHashMap<>();
+      contents.stream()
+          .map(this::toEvidence)
+          .limit(MAX_CANDIDATES * 2L)
+          .forEach(evidence -> unique.putIfAbsent(evidence.id(), evidence));
+      List<InterviewEvidence> candidates = unique.values().stream()
+          .limit(MAX_CANDIDATES)
+          .toList();
+      List<InterviewEvidence> promptEvidence = candidates.stream()
+          .limit(MAX_PROMPT_EVIDENCE)
+          .toList();
+      log.info("面试证据检索完成: kbIds={}, query={}, candidates={}, selected={}",
+          knowledgeBaseIds, query, candidates.stream().map(InterviewEvidence::id).toList(),
+          promptEvidence.stream().map(InterviewEvidence::id).toList());
+      return new Bundle(query, candidates, promptEvidence);
+    } catch (Exception e) {
+      log.warn("面试证据检索失败，降级为无知识库证据: kbIds={}, query={}",
+          knowledgeBaseIds, query, e);
+      return Bundle.empty(query);
+    }
+  }
 
-    private String truncate(String text) {
-        if (text == null) {
-            return "";
-        }
-        String normalized = text.strip();
-        return normalized.length() <= MAX_CHARS_PER_CHUNK
-            ? normalized
-            : normalized.substring(0, MAX_CHARS_PER_CHUNK) + "…";
+  /** 将结构化证据渲染成带来源边界的 Interviewer 上下文。 */
+  public String buildEvidencePrompt(Bundle bundle) {
+    if (bundle == null || bundle.promptEvidence().isEmpty()) {
+      return "";
     }
+    String body = bundle.promptEvidence().stream()
+        .map(this::formatEvidence)
+        .collect(Collectors.joining("\n"));
+    return promptSanitizer.wrapWithDelimiters(
+        "interview_evidence", promptSanitizer.sanitize(body));
+  }
+
+  private InterviewEvidence toEvidence(Content content) {
+    TextSegment segment = content.textSegment();
+    var metadata = segment.metadata();
+    String chunkId = metadata.getString(MetadataKeyConstant.CHUNK_ID);
+    String embeddingId = metadata.getString(MetadataKeyConstant.EMBEDDING_ID);
+    Long knowledgeBaseId = parseLong(metadata.getString(MetadataKeyConstant.DOC_ID));
+    String source = firstNonBlank(
+        metadata.getString(MetadataKeyConstant.FILE_NAME),
+        knowledgeBaseId == null ? null : "doc-" + knowledgeBaseId,
+        "知识库");
+    String category = metadata.getString(MetadataKeyConstant.CATEGORY);
+    String snippet = truncate(segment.text());
+    String evidenceId = stableEvidenceId(chunkId, embeddingId, knowledgeBaseId, snippet);
+    return new InterviewEvidence(
+        evidenceId,
+        knowledgeBaseId,
+        chunkId,
+        embeddingId,
+        source,
+        category,
+        extractScore(content),
+        snippet);
+  }
+
+  private String formatEvidence(InterviewEvidence evidence) {
+    String score = evidence.score() == null
+        ? "n/a" : String.format(Locale.ROOT, "%.4f", evidence.score());
+    return "- [evidence_id=" + evidence.id()
+        + "; source=" + evidence.source()
+        + "; score=" + score + "] " + evidence.snippet();
+  }
+
+  private String buildQuery(SkillDTO skill) {
+    String categories = skill.categories() == null ? "" : skill.categories().stream()
+        .limit(MAX_QUERY_CATEGORIES)
+        .map(SkillCategoryDTO::label)
+        .collect(Collectors.joining(" "));
+    return (skill.name() + " " + categories + " 核心知识点 面试考点").strip();
+  }
+
+  private Double extractScore(Content content) {
+    Double reranked = finiteNumber(content.metadata().get(ContentMetadata.RERANKED_SCORE));
+    if (reranked != null) {
+      return reranked;
+    }
+    return finiteNumber(content.metadata().get(ContentMetadata.SCORE));
+  }
+
+  private Double finiteNumber(Object value) {
+    if (!(value instanceof Number number)) {
+      return null;
+    }
+    double score = number.doubleValue();
+    if (Double.isNaN(score) || Double.isInfinite(score)) {
+      return null;
+    }
+    return Math.round(score * 10000.0d) / 10000.0d;
+  }
+
+  private String stableEvidenceId(String chunkId, String embeddingId,
+                                  Long knowledgeBaseId, String snippet) {
+    if (chunkId != null && !chunkId.isBlank()) {
+      return "chunk:" + chunkId;
+    }
+    if (embeddingId != null && !embeddingId.isBlank()) {
+      return "embedding:" + embeddingId;
+    }
+    String scope = knowledgeBaseId == null ? "unknown" : String.valueOf(knowledgeBaseId);
+    return "content:" + scope + ":" + Integer.toUnsignedString(snippet.hashCode(), 36);
+  }
+
+  private Long parseLong(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return "";
+  }
+
+  private String truncate(String text) {
+    if (text == null) {
+      return "";
+    }
+    String normalized = text.strip();
+    return normalized.length() <= MAX_CHARS_PER_CHUNK
+        ? normalized
+        : normalized.substring(0, MAX_CHARS_PER_CHUNK) + "…";
+  }
 }

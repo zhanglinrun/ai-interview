@@ -15,13 +15,15 @@ class AgentQuestionOutputTest {
   @DisplayName("兼容大模型返回的 snake_case 与 camelCase 追问字段")
   void supportsFollowUpAliases() throws Exception {
     AgentQuestionOutput snakeCase = objectMapper.readValue("""
-        {"question":"Q1","rationale":"R1","is_follow_up":true}
+        {"question":"Q1","rationale":"R1","is_follow_up":true,"evidence_ids":["chunk:1"]}
         """, AgentQuestionOutput.class);
     AgentQuestionOutput camelCase = objectMapper.readValue("""
-        {"question":"Q2","rationale":"R2","isFollowUp":true,"extra":"ignored"}
+        {"question":"Q2","rationale":"R2","isFollowUp":true,"evidenceIds":["chunk:2"],"extra":"ignored"}
         """, AgentQuestionOutput.class);
 
     assertThat(snakeCase.isFollowUp()).isTrue();
     assertThat(camelCase.isFollowUp()).isTrue();
+    assertThat(snakeCase.evidenceIds()).containsExactly("chunk:1");
+    assertThat(camelCase.evidenceIds()).containsExactly("chunk:2");
   }
 }

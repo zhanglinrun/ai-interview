@@ -4,7 +4,9 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  Database,
   Gavel,
+  GitBranch,
   ListChecks,
   Search,
   Sparkles,
@@ -27,6 +29,25 @@ const ROLE_META: Record<string, { label: string; badge: string; icon: typeof Bot
   evaluator: {label: '评估', badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', icon: ListChecks},
   orchestrator: {label: '编排', badge: 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300', icon: Sparkles},
 };
+
+const ACTION_META: Record<string, {label: string; className: string}> = {
+  DEEPEN: {label: '继续深挖', className: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'},
+  CLARIFY: {label: '要求补充', className: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'},
+  REMEDIATE: {label: '基础复核', className: 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'},
+  SWITCH_TOPIC: {label: '切换能力', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'},
+};
+
+interface TurnDecisionObservation {
+  action: string;
+  targetCapability?: {
+    id: string;
+    label: string;
+    source: string;
+  };
+  rationale?: string;
+  candidateEvidenceIds?: string[];
+  promptEvidenceIds?: string[];
+}
 
 function roleMeta(role: string) {
   return ROLE_META[role?.toLowerCase()] ?? ROLE_META.orchestrator;
@@ -207,6 +228,13 @@ export default function AgentInsightPanel({sessionId, refreshKey = 0, className 
 }
 
 function TraceStepRow({step}: {step: AgentTraceStep}) {
+  if (step.action === 'turn_decision') {
+    const decision = parseObservation<TurnDecisionObservation>(step.observation);
+    if (decision) {
+      return <TurnDecisionRow decision={decision} />;
+    }
+  }
+
   const meta = roleMeta(step.role);
   const Icon = meta.icon;
   return (
@@ -225,4 +253,46 @@ function TraceStepRow({step}: {step: AgentTraceStep}) {
       )}
     </li>
   );
+}
+
+function TurnDecisionRow({decision}: {decision: TurnDecisionObservation}) {
+  const action = ACTION_META[decision.action] ?? {
+    label: decision.action,
+    className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  };
+  const candidateCount = decision.candidateEvidenceIds?.length ?? 0;
+  const selectedCount = decision.promptEvidenceIds?.length ?? 0;
+
+  return (
+    <li className="text-xs py-1">
+      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+        <span className="inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
+          <GitBranch className="w-3.5 h-3.5" /> 决策
+        </span>
+        <span className={`px-1.5 py-0.5 rounded font-medium ${action.className}`}>{action.label}</span>
+        {decision.targetCapability?.label && (
+          <span className="font-medium text-slate-700 dark:text-slate-200">
+            {decision.targetCapability.label}
+          </span>
+        )}
+      </div>
+      {decision.rationale && (
+        <p className="text-slate-500 dark:text-slate-400 leading-snug">{decision.rationale}</p>
+      )}
+      {candidateCount > 0 && (
+        <p className="mt-1 flex items-center gap-1 text-slate-400">
+          <Database className="w-3 h-3" /> 候选证据 {candidateCount} 条，送入出题 {selectedCount} 条
+        </p>
+      )}
+    </li>
+  );
+}
+
+function parseObservation<T>(value: string): T | null {
+  if (!value?.trim().startsWith('{')) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }

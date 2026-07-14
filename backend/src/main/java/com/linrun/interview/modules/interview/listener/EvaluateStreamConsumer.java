@@ -1,30 +1,30 @@
 package com.linrun.interview.modules.interview.listener;
 
-import com.linrun.interview.common.async.AbstractStreamConsumer;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
+import com.linrun.interview.common.async.AbstractStreamConsumer;
 import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.model.AsyncTaskStatus;
+import com.linrun.interview.common.mybatis.EntityQueries;
+import com.linrun.interview.common.mybatis.MapperUtils;
+import com.linrun.interview.infrastructure.redis.InterviewSessionCache;
 import com.linrun.interview.infrastructure.redis.RedisService;
+import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
+import com.linrun.interview.modules.interview.memory.CandidateMemoryService;
 import com.linrun.interview.modules.interview.model.InterviewAnswerEntity;
 import com.linrun.interview.modules.interview.model.InterviewQuestionDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
-import com.linrun.interview.modules.interview.service.InterviewPersistenceService;
-import com.linrun.interview.common.mybatis.EntityQueries;
-import com.linrun.interview.common.mybatis.MapperUtils;
-import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
-import com.linrun.interview.modules.resume.model.ResumeEntity;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
-import com.linrun.interview.modules.interview.memory.CandidateMemoryService;
+import com.linrun.interview.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import com.linrun.interview.modules.interview.service.AnswerEvaluationService;
-import com.linrun.interview.modules.interview.mapper.InterviewSessionMapper;
+import com.linrun.interview.modules.interview.service.InterviewPersistenceService;
+import dev.langchain4j.model.chat.ChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.StreamMessageId;
-import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Component;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -44,6 +44,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final ObjectMapper objectMapper;
     private final LlmProviderRegistry llmProviderRegistry;
     private final CandidateMemoryService candidateMemoryService;
+    private final InterviewSessionCache sessionCache;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -52,7 +53,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         InterviewPersistenceService persistenceService,
         ObjectMapper objectMapper,
         LlmProviderRegistry llmProviderRegistry,
-        CandidateMemoryService candidateMemoryService
+        CandidateMemoryService candidateMemoryService,
+        InterviewSessionCache sessionCache
     ) {
         super(redisService);
         this.sessionRepository = interviewSessionMapper;
@@ -61,6 +63,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.objectMapper = objectMapper;
         this.llmProviderRegistry = llmProviderRegistry;
         this.candidateMemoryService = candidateMemoryService;
+        this.sessionCache = sessionCache;
     }
 
     record EvaluatePayload(String sessionId) {}
@@ -105,12 +108,6 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         }
 
         InterviewSessionEntity session = sessionOpt.get();
-        // 幂等：已评估的会话直接跳过（补偿任务重派可能与已完成的评估重复）
-        if (session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED
-            || session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
-            log.info("会话已评估，跳过重复评估任务: sessionId={}", sessionId);
-            return;
-        }
         List<InterviewQuestionDTO> questions;
         try {
             questions = objectMapper.readValue(
@@ -121,6 +118,18 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             log.error("解析面试题目 JSON 失败: sessionId={}", sessionId, e);
             throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
                 "面试题目数据损坏，无法评估: " + e.getMessage(), e);
+        }
+
+        // 报告与能力观测跨两个本地事务：若进程在二者之间退出，broker 会重投。
+        // 此处从数据库报告重建观测，不重新调用 LLM；唯一键保证部分成功后的重复写入安全。
+        if (session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            InterviewReportDTO storedReport = persistenceService.loadStoredReportInternal(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                    "会话已标记评估完成，但持久化报告不完整"));
+            candidateMemoryService.extractAndSave(session, storedReport, questions);
+            sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+            log.info("已从持久化报告恢复能力观测: sessionId={}", sessionId);
+            return;
         }
 
         List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(sessionId);
@@ -138,9 +147,9 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
         persistenceService.saveReport(sessionId, report);
-        // 跨会话候选人画像：从评估报告 LLM 抽取薄弱点/掌握点入库（Planner 下次面试注入），
-        // 失败静默不阻断评估主链路；本消费者已幂等（EVALUATED 跳过），不会重复抽取
-        candidateMemoryService.extractAndSaveQuietly(session, report);
+        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+        // 能力观测是报告的确定性派生数据；失败触发 MQ 重试，重投时直接走上面的恢复分支。
+        candidateMemoryService.extractAndSave(session, report, questions);
     }
 
     @Override

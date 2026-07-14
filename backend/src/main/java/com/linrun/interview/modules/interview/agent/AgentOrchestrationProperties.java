@@ -33,7 +33,7 @@ public class AgentOrchestrationProperties {
   @Data
   public static class CandidateMemory {
 
-    /** 是否启用画像记忆（评估后抽取 + Planner 注入） */
+    /** 是否启用画像记忆（评估后沉淀能力观测 + Planner 注入） */
     private boolean enabled = true;
 
     /** Planner 大纲注入的最大记忆条数 */

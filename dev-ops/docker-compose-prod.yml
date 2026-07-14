@@ -3,7 +3,8 @@
 #   - 异步引擎 rabbitmq（去掉 RocketMQ 三容器，省 ~1.4G）
 #   - 不启 Neo4j（APP_AI_RAG_GRAPH_ENABLED=false，图谱优雅降级；4G 内存下不启）
 #   - 依赖服务（mysql/redis/es/minio/rabbitmq）不发布宿主机端口，仅走内网
-#   - 各容器 mem_limit 限制，app 靠 MaxRAMPercentage=75 + mem_limit=1g → 堆约 768m
+#   - 常驻容器硬上限合计约 3136 MiB，给 4G 宿主机/Docker 留出余量
+#   - app 显式限制 heap/direct/metaspace/code cache，避免只限制堆后被 native memory 顶穿
 #   - 新增 Caddy 终止 HTTPS（自动 Let's Encrypt），反代到 frontend:80
 #
 # 用法（在服务器上，dev-ops 目录）：
@@ -27,8 +28,13 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ../backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    mem_limit: 512m
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=60
+    mem_limit: 384m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
@@ -41,7 +47,8 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-    mem_limit: 256m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 128m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -55,10 +62,10 @@ services:
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      ES_JAVA_OPTS: "-Xms384m -Xmx384m"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
-    mem_limit: 1200m
+    mem_limit: 1024m
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
@@ -75,7 +82,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请在 .env 设置强密码}
     volumes:
       - minio_data:/data
-    mem_limit: 384m
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -95,15 +102,16 @@ services:
       "
 
   rabbitmq:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:3.13-alpine
     container_name: interview-rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 设置强密码}
+      RABBITMQ_VM_MEMORY_HIGH_WATERMARK: "0.6"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    mem_limit: 384m
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -131,6 +139,7 @@ services:
         condition: service_completed_successfully
     environment:
       SERVER_PORT: 8080
+      JAVA_OPTS: "-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -Xms192m -Xmx448m -XX:MaxDirectMemorySize=64m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
       APP_JWT_SECRET: ${APP_JWT_SECRET:?必填：≥32 字节强随机}
       APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:?必填：BYOK 加密密钥，启用后勿改}
       APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
@@ -166,12 +175,22 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       # CORS：域名阶段填 https 域名 origin（浏览器实际访问的 origin，否则跨域 403）
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://interview.xiaoxiong123.cloud}
-      # 4G 不启 Neo4j → 图谱优雅降级（Neo4jConfiguration 按此门控不建 Driver bean）
-      APP_AI_RAG_GRAPH_ENABLED: ${APP_AI_RAG_GRAPH_ENABLED:-false}
+      # 4C4G 只保留面试主线：hybrid + RRF + 云端 rerank + small-to-big。
+      APP_AI_RAG_RERANK_PROVIDER: cloud
+      APP_AI_RAG_GRAPH_ENABLED: "false"
+      APP_AI_RAG_GRAPH_AUTO_SYNC: "false"
+      APP_AI_RAG_GRAPH_SKILL_BOOTSTRAP: "false"
+      APP_AI_RAG_GRAPH_ENTITY_EXTRACTION_ENABLED: "false"
+      APP_AI_RAG_SQL_ENABLED: "false"
+      APP_AI_RAG_SQL_ROUTER_ENABLED: "false"
+      APP_AI_RAG_CRAG_ENABLED: "false"
+      APP_AI_AGENT_GITHUB_ENABLED: "false"
+      APP_MCP_ENABLED: "false"
+      SPRING_AI_MCP_SERVER_ENABLED: "false"
       # 不启 Neo4j：排除 langchain4j 社区 Neo4j 向量库自动配置（否则启动即连 localhost:7687 崩溃）；
       # 同时保留 Rabbit 自动配置排除（由 RabbitMqEngineConfig 在 rabbitmq 引擎时再条件装配）。
       SPRING_AUTOCONFIGURE_EXCLUDE: "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration,dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration,org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveDataAutoConfiguration"
-    mem_limit: 1024m
+    mem_limit: 896m
 
   frontend:
     build: ../frontend
@@ -179,7 +198,7 @@ services:
     restart: unless-stopped
     depends_on:
       - app
-    mem_limit: 128m
+    mem_limit: 96m
     # 不发布宿主机端口，由 Caddy 内网转发（frontend nginx 已内建 /api /ws 反代到 app:8080）
 
   caddy:
@@ -195,7 +214,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    mem_limit: 128m
+    mem_limit: 96m
 
 volumes:
   mysql_data:

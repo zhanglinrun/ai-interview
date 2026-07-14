@@ -1,117 +1,131 @@
 package com.linrun.interview.modules.interview.memory;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.linrun.interview.common.ai.LlmProviderRegistry;
-import com.linrun.interview.common.ai.PromptTemplate;
-import com.linrun.interview.common.ai.StructuredOutputInvoker;
-import com.linrun.interview.common.exception.ErrorCode;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.modules.interview.agent.AgentOrchestrationProperties;
 import com.linrun.interview.modules.interview.mapper.CandidateMemoryMapper;
+import com.linrun.interview.modules.interview.model.InterviewQuestionDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
+import com.linrun.interview.modules.interview.model.InterviewReportDTO.QuestionEvaluation;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
-import dev.langchain4j.model.chat.ChatModel;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ResourceLoader;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * 跨会话候选人画像记忆（语义记忆层）。
+ * 跨会话候选人能力画像。
  *
- * <p>面试评估完成后用 LLM 从评估报告抽取结构化记忆条目
- * {@code {topic, strength|weakness, evidence}} 落 candidate_memory 表；
- * Planner 生成大纲时注入该用户近 N 条画像（薄弱点加深追问、已掌握主题降低占比）。
- *
- * <p>抽取运行在评估消费者线程（无 UserContext），userId 从会话实体显式取；
- * 抽取失败只告警，不阻断评估主链路。
+ * <p>评估结果已经包含逐题分数和反馈，因此这里直接把每道已回答问题沉淀为能力观测，
+ * 不再额外调用一次 LLM 从报告中二次抽取自由文本。预设 Skill 的能力 ID 跨会话稳定，
+ * Agent 动态题沿用题目上的 capabilityAtomId；旧会话按 skillId + type 兼容映射。
  */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class CandidateMemoryService {
 
-  private static final Logger log = LoggerFactory.getLogger(CandidateMemoryService.class);
-
-  private static final int MAX_ENTRIES_PER_SESSION = 10;
+  private static final int MAX_OBSERVATIONS_PER_SESSION = 20;
+  private static final int MAX_TOPIC_LENGTH = 128;
   private static final int MAX_EVIDENCE_LENGTH = 500;
-  private static final int MAX_REPORT_DETAIL_ITEMS = 20;
+  private static final int STRENGTH_SCORE = 75;
+  private static final int WEAKNESS_SCORE = 60;
 
   private final CandidateMemoryMapper candidateMemoryMapper;
-  private final StructuredOutputInvoker structuredOutputInvoker;
-  private final LlmProviderRegistry llmProviderRegistry;
+  private final ObjectMapper objectMapper;
   private final AgentOrchestrationProperties properties;
-  private final PromptTemplate extractSystemPrompt;
-
-  private record MemoryEntryDTO(String topic, String kind, String evidence) {}
-
-  private record MemoryEntriesDTO(List<MemoryEntryDTO> entries) {}
-
-  public CandidateMemoryService(CandidateMemoryMapper candidateMemoryMapper,
-                                StructuredOutputInvoker structuredOutputInvoker,
-                                LlmProviderRegistry llmProviderRegistry,
-                                AgentOrchestrationProperties properties,
-                                ResourceLoader resourceLoader) throws IOException {
-    this.candidateMemoryMapper = candidateMemoryMapper;
-    this.structuredOutputInvoker = structuredOutputInvoker;
-    this.llmProviderRegistry = llmProviderRegistry;
-    this.properties = properties;
-    this.extractSystemPrompt = new PromptTemplate(resourceLoader
-        .getResource("classpath:prompts/agent/memory-extract-system.st")
-        .getContentAsString(StandardCharsets.UTF_8));
-  }
 
   /**
-   * 从评估报告抽取画像条目并入库（失败静默，不阻断评估主链路）。
+   * 将逐题评估沉淀为能力观测。
+   *
+   * <p>该方法故意不吞掉数据库异常：评估消费者会借助 MQ 重试，并从已落库报告重建输入。
+   * 每条观测由 {@code sessionId + questionIndex} 唯一约束保护，部分成功后重试也不会重复写入。
    */
-  public void extractAndSaveQuietly(InterviewSessionEntity session, InterviewReportDTO report) {
-    if (!properties.getCandidateMemory().isEnabled() || session == null || report == null) {
+  public void extractAndSave(InterviewSessionEntity session, InterviewReportDTO report,
+                             List<InterviewQuestionDTO> questions) {
+    if (!properties.getCandidateMemory().isEnabled() || session == null || report == null
+        || questions == null || questions.isEmpty()) {
       return;
     }
-    try {
-      // 异步抽取无 UserContext：从会话实体取 userId，走该用户的 BYOK「我的模型」
-      ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
-      MemoryEntriesDTO dto = structuredOutputInvoker.invoke(
-          chatModel, extractSystemPrompt.render(), buildExtractionInput(report),
-          MemoryEntriesDTO.class, ErrorCode.AI_SERVICE_ERROR,
-          "画像抽取失败：", "候选人画像抽取", log);
+    Map<Integer, QuestionEvaluation> evaluationByIndex = report.questionDetails() == null
+        ? Map.of()
+        : report.questionDetails().stream().collect(Collectors.toMap(
+            QuestionEvaluation::questionIndex, evaluation -> evaluation, (left, right) -> left));
+    Set<Integer> existingIndexes = candidateMemoryMapper.selectList(
+            Wrappers.<CandidateMemoryEntity>lambdaQuery()
+                .eq(CandidateMemoryEntity::getSessionId, session.getSessionId()))
+        .stream()
+        .map(CandidateMemoryEntity::getQuestionIndex)
+        .filter(java.util.Objects::nonNull)
+        .collect(Collectors.toCollection(HashSet::new));
 
-      List<MemoryEntryDTO> entries = dto == null || dto.entries() == null
-          ? List.of() : dto.entries();
-      LocalDateTime now = LocalDateTime.now();
-      int saved = 0;
-      for (MemoryEntryDTO entry : entries) {
-        if (entry == null || entry.topic() == null || entry.topic().isBlank()
-            || !isValidKind(entry.kind())) {
-          continue;
-        }
-        if (saved >= MAX_ENTRIES_PER_SESSION) {
-          break;
-        }
-        candidateMemoryMapper.insert(CandidateMemoryEntity.builder()
-            .userId(session.getUserId())
-            .skillId(session.getSkillId())
-            .topic(entry.topic().strip())
-            .kind(entry.kind().strip().toLowerCase())
-            .evidence(truncate(entry.evidence()))
-            .sessionId(session.getSessionId())
-            .createdAt(now)
-            .build());
-        saved++;
+    int saved = 0;
+    LocalDateTime now = LocalDateTime.now();
+    for (InterviewQuestionDTO question : questions) {
+      if (saved >= MAX_OBSERVATIONS_PER_SESSION
+          || existingIndexes.contains(question.questionIndex())) {
+        continue;
       }
-      log.info("候选人画像抽取完成: sessionId={}, userId={}, 入库 {} 条",
-          session.getSessionId(), session.getUserId(), saved);
+      QuestionEvaluation evaluation = evaluationByIndex.get(question.questionIndex());
+      if (evaluation == null || evaluation.userAnswer() == null
+          || evaluation.userAnswer().isBlank()) {
+        continue;
+      }
+      int score = Math.max(0, Math.min(100, evaluation.score()));
+      CandidateMemoryEntity entity = CandidateMemoryEntity.builder()
+          .userId(session.getUserId())
+          .skillId(session.getSkillId())
+          .capabilityAtomId(resolveCapabilityAtomId(session.getSkillId(), question))
+          .topic(resolveTopic(question))
+          .kind(kindForScore(score))
+          .questionIndex(question.questionIndex())
+          .masteryScore(score)
+          .evidence(truncate(evaluation.feedback(), MAX_EVIDENCE_LENGTH))
+          .evidenceIdsJson(toJsonQuietly(question.evidenceIds()))
+          .sessionId(session.getSessionId())
+          .createdAt(now)
+          .build();
+      try {
+        candidateMemoryMapper.insert(entity);
+        existingIndexes.add(question.questionIndex());
+        saved++;
+      } catch (DuplicateKeyException e) {
+        // 查询与插入之间可能有并发重投，唯一键冲突等价于该题已经完成。
+        existingIndexes.add(question.questionIndex());
+        log.debug("能力观测已存在，按幂等成功处理: sessionId={}, questionIndex={}",
+            session.getSessionId(), question.questionIndex());
+      }
+    }
+    log.info("能力观测沉淀完成: sessionId={}, userId={}, saved={}",
+        session.getSessionId(), session.getUserId(), saved);
+  }
+
+  /** 非关键调用方可选择静默降级；评估消费者必须调用严格版本以获得重试语义。 */
+  public void extractAndSaveQuietly(InterviewSessionEntity session, InterviewReportDTO report,
+                                    List<InterviewQuestionDTO> questions) {
+    try {
+      extractAndSave(session, report, questions);
     } catch (Exception e) {
-      log.warn("候选人画像抽取失败（不阻断评估）: sessionId={}", session.getSessionId(), e);
+      String sessionId = session == null ? null : session.getSessionId();
+      log.warn("能力观测沉淀失败（静默降级）: sessionId={}", sessionId, e);
     }
   }
 
   /**
-   * 组装 Planner 大纲注入的画像段落；无画像或功能关闭时返回空字符串。
+   * 组装 Planner 使用的跨会话画像。只有跨会话、足量观测的优势才标为“已验证”，
+   * 避免一次高分就让 Planner 永久跳过该能力。
    */
   public String buildMemorySection(Long userId, String skillId) {
     if (!properties.getCandidateMemory().isEnabled() || userId == null) {
@@ -119,33 +133,26 @@ public class CandidateMemoryService {
     }
     try {
       int maxEntries = Math.max(1, properties.getCandidateMemory().getMaxEntries());
-      List<CandidateMemoryEntity> entries = candidateMemoryMapper.selectList(
-          Wrappers.<CandidateMemoryEntity>lambdaQuery()
-              .eq(CandidateMemoryEntity::getUserId, userId)
-              .eq(skillId != null && !skillId.isBlank(),
-                  CandidateMemoryEntity::getSkillId, skillId)
-              .orderByDesc(CandidateMemoryEntity::getCreatedAt)
-              .last("LIMIT " + maxEntries * 3));
-      if (entries.isEmpty()) {
+      List<CandidateMemoryProfileDTO> profiles = getProfile(userId, skillId);
+      if (profiles.isEmpty()) {
         return "";
       }
-      // 薄弱点优先注入，其次是掌握项（去重同 topic 取最新一条）
-      Map<String, CandidateMemoryEntity> latestByTopic = new LinkedHashMap<>();
-      entries.stream()
-          .sorted((a, b) -> {
-            boolean aWeak = CandidateMemoryEntity.KIND_WEAKNESS.equals(a.getKind());
-            boolean bWeak = CandidateMemoryEntity.KIND_WEAKNESS.equals(b.getKind());
-            return aWeak == bWeak ? 0 : (aWeak ? -1 : 1);
-          })
-          .forEach(e -> latestByTopic.putIfAbsent(e.getTopic(), e));
-
-      StringBuilder sb = new StringBuilder("候选人历史画像（来自过往面试评估，供规划参考）：\n");
-      latestByTopic.values().stream().limit(maxEntries).forEach(e ->
-          sb.append("- [").append(CandidateMemoryEntity.KIND_WEAKNESS.equals(e.getKind())
-                  ? "薄弱" : "掌握").append("] ")
-              .append(e.getTopic()).append('：')
-              .append(e.getEvidence() == null ? "" : e.getEvidence())
-              .append('\n'));
+      StringBuilder sb = new StringBuilder(
+          "候选人历史能力画像（只有‘已验证·掌握’可降低题量，待复测项仍需抽样验证）：\n");
+      profiles.stream().limit(maxEntries).forEach(profile -> {
+        sb.append("- [").append(displayMastery(profile.masteryLevel()))
+            .append(" · ").append(displayVerification(profile.verificationState()))
+            .append("] ").append(profile.topic());
+        if (profile.averageScore() != null) {
+          sb.append("（均分 ").append(profile.averageScore())
+              .append("，").append(profile.sessionCount()).append(" 场/")
+              .append(profile.observationCount()).append(" 次观测）");
+        }
+        if (profile.latestEvidence() != null && !profile.latestEvidence().isBlank()) {
+          sb.append("：").append(profile.latestEvidence());
+        }
+        sb.append('\n');
+      });
       return sb.toString();
     } catch (Exception e) {
       log.warn("加载候选人画像失败，跳过注入: userId={}", userId, e);
@@ -153,91 +160,220 @@ public class CandidateMemoryService {
     }
   }
 
-  /**
-   * 画像查询（前端「我的薄弱点画像」）：按 topic 聚合。
-   */
+  /** 按稳定能力原子聚合画像；旧自由文本数据退回按 topic 聚合。 */
   public List<CandidateMemoryProfileDTO> getProfile(Long userId, String skillId) {
     List<CandidateMemoryEntity> entries = candidateMemoryMapper.selectList(
         Wrappers.<CandidateMemoryEntity>lambdaQuery()
             .eq(CandidateMemoryEntity::getUserId, userId)
             .eq(skillId != null && !skillId.isBlank(), CandidateMemoryEntity::getSkillId, skillId)
             .orderByDesc(CandidateMemoryEntity::getCreatedAt)
-            .last("LIMIT 200"));
+            .last("LIMIT 300"));
 
     Map<String, List<CandidateMemoryEntity>> grouped = new LinkedHashMap<>();
     for (CandidateMemoryEntity entry : entries) {
-      grouped.computeIfAbsent(entry.getTopic(), k -> new java.util.ArrayList<>()).add(entry);
+      String groupKey = entry.getCapabilityAtomId() != null
+              && !entry.getCapabilityAtomId().isBlank()
+          ? entry.getCapabilityAtomId()
+          : "legacy:" + normalizeTopic(entry.getTopic());
+      grouped.computeIfAbsent(groupKey, ignored -> new ArrayList<>()).add(entry);
     }
+
     return grouped.entrySet().stream()
-        .map(group -> {
-          List<CandidateMemoryEntity> topicEntries = group.getValue();
-          CandidateMemoryEntity latest = topicEntries.get(0);
-          long weakness = topicEntries.stream()
-              .filter(e -> CandidateMemoryEntity.KIND_WEAKNESS.equals(e.getKind())).count();
-          long strength = topicEntries.size() - weakness;
-          return new CandidateMemoryProfileDTO(
-              group.getKey(), (int) weakness, (int) strength,
-              latest.getKind(), latest.getEvidence(),
-              latest.getSessionId(), latest.getCreatedAt());
-        })
+        .map(group -> aggregateProfile(group.getKey(), group.getValue()))
+        .sorted(Comparator
+            .comparingInt((CandidateMemoryProfileDTO profile) ->
+                masteryRank(profile.masteryLevel()))
+            .thenComparing(CandidateMemoryProfileDTO::lastAt,
+                Comparator.nullsLast(Comparator.reverseOrder())))
         .toList();
   }
 
-  /**
-   * 画像聚合条目（按 topic 分组）。
-   */
+  private CandidateMemoryProfileDTO aggregateProfile(String groupKey,
+                                                      List<CandidateMemoryEntity> entries) {
+    CandidateMemoryEntity latest = entries.getFirst();
+    List<Integer> scores = entries.stream()
+        .map(CandidateMemoryEntity::getMasteryScore)
+        .filter(java.util.Objects::nonNull)
+        .toList();
+    Integer averageScore = scores.isEmpty() ? null
+        : (int) Math.round(scores.stream().mapToInt(Integer::intValue).average().orElse(0));
+    int weaknessCount = countKind(entries, CandidateMemoryEntity.KIND_WEAKNESS);
+    int developingCount = countKind(entries, CandidateMemoryEntity.KIND_DEVELOPING);
+    int strengthCount = countKind(entries, CandidateMemoryEntity.KIND_STRENGTH);
+    int sessionCount = (int) entries.stream()
+        .map(CandidateMemoryEntity::getSessionId)
+        .filter(sessionId -> sessionId != null && !sessionId.isBlank())
+        .distinct()
+        .count();
+    String masteryLevel = resolveMasteryLevel(averageScore, latest.getKind());
+    String verificationState = sessionCount >= 2 && scores.size() >= 3
+        ? "VERIFIED" : "PROVISIONAL";
+    String confidenceLevel = "VERIFIED".equals(verificationState)
+        ? "HIGH" : (scores.size() >= 2 ? "MEDIUM" : "LOW");
+    String capabilityAtomId = groupKey.startsWith("legacy:") ? null : groupKey;
+
+    return new CandidateMemoryProfileDTO(
+        capabilityAtomId,
+        latest.getTopic(),
+        averageScore,
+        entries.size(),
+        sessionCount,
+        masteryLevel,
+        verificationState,
+        confidenceLevel,
+        weaknessCount,
+        developingCount,
+        strengthCount,
+        latest.getKind(),
+        latest.getEvidence(),
+        parseEvidenceIds(latest.getEvidenceIdsJson()),
+        latest.getSessionId(),
+        latest.getCreatedAt());
+  }
+
+  private String resolveCapabilityAtomId(String skillId, InterviewQuestionDTO question) {
+    if (question.capabilityAtomId() != null && !question.capabilityAtomId().isBlank()) {
+      return question.capabilityAtomId();
+    }
+    String type = question.type() == null || question.type().isBlank()
+        ? question.category() : question.type();
+    if (type != null && type.startsWith("skill:")) {
+      return type;
+    }
+    return "skill:" + safeIdPart(skillId) + ":" + safeIdPart(type);
+  }
+
+  private String resolveTopic(InterviewQuestionDTO question) {
+    String topic = firstNonBlank(question.topicSummary(), question.category(), question.type(), "综合能力");
+    topic = topic.replace("（追问）", "").strip();
+    return truncate(topic, MAX_TOPIC_LENGTH);
+  }
+
+  private String kindForScore(int score) {
+    if (score >= STRENGTH_SCORE) {
+      return CandidateMemoryEntity.KIND_STRENGTH;
+    }
+    if (score < WEAKNESS_SCORE) {
+      return CandidateMemoryEntity.KIND_WEAKNESS;
+    }
+    return CandidateMemoryEntity.KIND_DEVELOPING;
+  }
+
+  private String resolveMasteryLevel(Integer averageScore, String latestKind) {
+    if (averageScore != null) {
+      if (averageScore >= STRENGTH_SCORE) {
+        return "STRENGTH";
+      }
+      if (averageScore < WEAKNESS_SCORE) {
+        return "WEAKNESS";
+      }
+      return "DEVELOPING";
+    }
+    if (CandidateMemoryEntity.KIND_STRENGTH.equals(latestKind)) {
+      return "STRENGTH";
+    }
+    if (CandidateMemoryEntity.KIND_DEVELOPING.equals(latestKind)) {
+      return "DEVELOPING";
+    }
+    return "WEAKNESS";
+  }
+
+  private int countKind(List<CandidateMemoryEntity> entries, String kind) {
+    return (int) entries.stream().filter(entry -> kind.equals(entry.getKind())).count();
+  }
+
+  private int masteryRank(String masteryLevel) {
+    return switch (masteryLevel) {
+      case "WEAKNESS" -> 0;
+      case "DEVELOPING" -> 1;
+      default -> 2;
+    };
+  }
+
+  private String displayMastery(String masteryLevel) {
+    return switch (masteryLevel) {
+      case "WEAKNESS" -> "薄弱";
+      case "DEVELOPING" -> "发展中";
+      default -> "掌握";
+    };
+  }
+
+  private String displayVerification(String state) {
+    return "VERIFIED".equals(state) ? "已验证" : "待复测";
+  }
+
+  private List<String> parseEvidenceIds(String json) {
+    if (json == null || json.isBlank()) {
+      return List.of();
+    }
+    try {
+      return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
+  private String toJsonQuietly(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return null;
+    }
+    try {
+      return objectMapper.writeValueAsString(values);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private String normalizeTopic(String topic) {
+    return topic == null ? "unknown" : topic.strip().toLowerCase(Locale.ROOT);
+  }
+
+  private String safeIdPart(String value) {
+    if (value == null || value.isBlank()) {
+      return "unknown";
+    }
+    String normalized = value.toLowerCase(Locale.ROOT)
+        .replaceAll("[^a-z0-9]+", "-")
+        .replaceAll("(^-+|-+$)", "");
+    return normalized.isBlank()
+        ? "topic-" + Integer.toUnsignedString(value.hashCode(), 36)
+        : normalized;
+  }
+
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return "";
+  }
+
+  private String truncate(String value, int maxLength) {
+    if (value == null) {
+      return "";
+    }
+    String normalized = value.strip();
+    return normalized.length() <= maxLength
+        ? normalized : normalized.substring(0, maxLength);
+  }
+
   public record CandidateMemoryProfileDTO(
+      String capabilityAtomId,
       String topic,
+      Integer averageScore,
+      int observationCount,
+      int sessionCount,
+      String masteryLevel,
+      String verificationState,
+      String confidenceLevel,
       int weaknessCount,
+      int developingCount,
       int strengthCount,
       String latestKind,
       String latestEvidence,
+      List<String> latestEvidenceIds,
       String lastSessionId,
       LocalDateTime lastAt
   ) {}
-
-  private String buildExtractionInput(InterviewReportDTO report) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("面试评估报告：\n");
-    sb.append("总分：").append(report.overallScore()).append("\n");
-    sb.append("总体评价：").append(nullSafe(report.overallFeedback())).append("\n");
-    if (report.strengths() != null && !report.strengths().isEmpty()) {
-      sb.append("优势：").append(String.join("；", report.strengths())).append("\n");
-    }
-    if (report.improvements() != null && !report.improvements().isEmpty()) {
-      sb.append("改进建议：").append(String.join("；", report.improvements())).append("\n");
-    }
-    if (report.questionDetails() != null) {
-      sb.append("逐题评估：\n");
-      report.questionDetails().stream()
-          .limit(MAX_REPORT_DETAIL_ITEMS)
-          .forEach(q -> sb.append("- [").append(nullSafe(q.category())).append("] ")
-              .append(nullSafe(q.question()))
-              .append("（得分 ").append(q.score()).append("）：")
-              .append(nullSafe(q.feedback())).append('\n'));
-    }
-    return sb.toString();
-  }
-
-  private boolean isValidKind(String kind) {
-    if (kind == null) {
-      return false;
-    }
-    String normalized = kind.strip().toLowerCase();
-    return CandidateMemoryEntity.KIND_STRENGTH.equals(normalized)
-        || CandidateMemoryEntity.KIND_WEAKNESS.equals(normalized);
-  }
-
-  private String truncate(String text) {
-    if (text == null) {
-      return "";
-    }
-    String normalized = text.strip();
-    return normalized.length() <= MAX_EVIDENCE_LENGTH
-        ? normalized : normalized.substring(0, MAX_EVIDENCE_LENGTH);
-  }
-
-  private String nullSafe(String text) {
-    return text == null ? "" : text;
-  }
 }

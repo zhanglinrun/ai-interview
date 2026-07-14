@@ -369,19 +369,25 @@ CREATE TABLE IF NOT EXISTS `agent_run_steps` (
     KEY `idx_agent_run_steps_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 跨会话候选人画像记忆（评估完成后 LLM 抽取的 strength/weakness 条目）
+-- 跨会话能力观测（逐题评估沉淀，按能力原子聚合为画像）
 CREATE TABLE IF NOT EXISTS `candidate_memory` (
-    `id`          BIGINT        NOT NULL AUTO_INCREMENT,
-    `user_id`     BIGINT        NOT NULL,
-    `skill_id`    VARCHAR(64)   NULL,
-    `topic`       VARCHAR(128)  NOT NULL,
-    `kind`        VARCHAR(16)   NOT NULL,
-    `evidence`    VARCHAR(500)  NULL,
-    `session_id`  VARCHAR(36)   NULL,
-    `created_at`  DATETIME(6)   NOT NULL,
+    `id`                 BIGINT        NOT NULL AUTO_INCREMENT,
+    `user_id`            BIGINT        NOT NULL,
+    `skill_id`           VARCHAR(64)   NULL,
+    `capability_atom_id` VARCHAR(191)  NULL,
+    `topic`              VARCHAR(128)  NOT NULL,
+    `kind`               VARCHAR(16)   NOT NULL,
+    `question_index`     INT           NULL,
+    `mastery_score`      INT           NULL,
+    `evidence`           VARCHAR(500)  NULL,
+    `evidence_ids_json`  TEXT          NULL,
+    `session_id`         VARCHAR(36)   NULL,
+    `created_at`         DATETIME(6)   NOT NULL,
     PRIMARY KEY (`id`),
     KEY `idx_candidate_memory_user_skill` (`user_id`, `skill_id`, `created_at` DESC),
-    KEY `idx_candidate_memory_user_topic` (`user_id`, `topic`)
+    KEY `idx_candidate_memory_user_topic` (`user_id`, `topic`),
+    KEY `idx_candidate_memory_user_atom` (`user_id`, `capability_atom_id`, `created_at` DESC),
+    UNIQUE KEY `uk_candidate_memory_session_question` (`session_id`, `question_index`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `interview_schedule` (

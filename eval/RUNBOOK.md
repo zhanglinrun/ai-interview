@@ -85,7 +85,7 @@ RAG 检索/RAGAS 评测集 `eval/rag-retrieval/eval-dataset.yaml` 按 `source`�
 | `rag-query.js` | RAG 非流式全链路延迟 | `k6 run -e AUTH_USER=.. -e AUTH_PASSWORD=.. -e KB_IDS=1 eval/loadtest/rag-query.js` | 端到端 P95/P99、失败率 |
 | `sse-ttft.js` | 流式首字延迟（TTFT 下界代理） | `k6 run -e AUTH_USER=.. -e AUTH_PASSWORD=.. -e KB_IDS=1 eval/loadtest/sse-ttft.js` | `ttft_proxy_ms p(95)` |
 | `interview-create.js` | 出题（Skill）延迟 | `k6 run -e AUTH_USER=.. -e AUTH_PASSWORD=.. -e SKILL_ID=java-backend eval/loadtest/interview-create.js` | P95/P99 |
-| `agent-ab.js` | Multi-Agent 出题（Critic 开/关 A/B） | 分别以 `APP_AI_AGENT_CRITIC_ENABLED=true/false` 重启后端各跑一次 | 两组延迟对比 |
+| `agent-ab.js` | Agent 工作流出题（Critic/Reflection 开关 A/B） | 分别以 `APP_AI_AGENT_CRITIC_ENABLED=true/false` 重启后端各跑一次 | 两组延迟与失败率对比 |
 
 提示：LLM 接口有 `@RateLimit`（如 query GLOBAL/IP=10、stream=5、出题=5）。压「系统极限」时临时调高限流或用低并发采样；压「真实带限流表现」时保留并把限流计入失败率。缓存穿透防护对照：`-e MODE=missing` 跑 `kb-list-throughput.js`。
 
