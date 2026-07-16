@@ -19,9 +19,13 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
+public class EvaluateStreamProducer
+    extends AbstractStreamProducer<EvaluateStreamProducer.EvaluateTaskPayload> {
 
     private final InterviewSessionMapper sessionRepository;
+
+    record EvaluateTaskPayload(String sessionId, Long userId) {
+    }
 
     public EvaluateStreamProducer(TaskQueueChannel taskQueueChannel,
                                   InterviewSessionMapper interviewSessionMapper) {
@@ -29,14 +33,13 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
         this.sessionRepository = interviewSessionMapper;
     }
 
-    /**
-     * 发送评估任务（事务消息语义：RocketMQ 引擎下 half 消息 + 本地事务确认，
-     * Redis Stream 引擎退化为普通入队，DB-first + 补偿任务兜底）。
-     *
-     * @param sessionId 面试会话ID
-     */
+    /** 发送评估任务；业务已采用 DB-first，并由补偿任务兜底投递失败。 */
     public void sendEvaluateTask(String sessionId) {
-        sendTaskInTransaction(sessionId);
+        InterviewSessionEntity session = EntityQueries.selectOne(
+            sessionRepository, InterviewSessionEntity::getSessionId, sessionId)
+            .orElseThrow(() -> new com.linrun.interview.common.exception.BusinessException(
+                com.linrun.interview.common.exception.ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+        sendTask(new EvaluateTaskPayload(sessionId, session.getUserId()));
     }
 
     @Override
@@ -50,31 +53,38 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
     }
 
     @Override
-    protected Map<String, String> buildMessage(String sessionId) {
+    protected Map<String, String> buildMessage(EvaluateTaskPayload payload) {
         return Map.of(
-            AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId,
+            AsyncTaskStreamConstants.FIELD_SESSION_ID, payload.sessionId(),
+            AsyncTaskStreamConstants.FIELD_USER_ID, payload.userId().toString(),
             AsyncTaskStreamConstants.FIELD_RETRY_COUNT, "0"
         );
     }
 
     @Override
-    protected String payloadIdentifier(String sessionId) {
-        return "sessionId=" + sessionId;
+    protected String payloadIdentifier(EvaluateTaskPayload payload) {
+        return "sessionId=" + payload.sessionId() + ", userId=" + payload.userId();
     }
 
     @Override
-    protected void onSendFailed(String sessionId, String error) {
+    protected void onSendFailed(EvaluateTaskPayload payload, String error) {
         // 入队失败标记 PENDING（非 FAILED）：由 InterviewEvaluationCompensationJob 定时重派
-        log.error("评估任务入队失败，标记 PENDING 留待补偿任务重派: sessionId={}, error={}", sessionId, error);
-        updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, truncateError(error));
+        log.error("评估任务入队失败，标记 PENDING 留待补偿任务重派: sessionId={}, error={}",
+            payload.sessionId(), error);
+        updateEvaluateStatus(payload, AsyncTaskStatus.PENDING, truncateError(error));
     }
 
     /**
      * 更新评估状态
      */
-    private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
-        EntityQueries.selectOne(sessionRepository, InterviewSessionEntity::getSessionId, sessionId)
+    private void updateEvaluateStatus(EvaluateTaskPayload payload, AsyncTaskStatus status, String error) {
+        EntityQueries.selectOne(sessionRepository, InterviewSessionEntity::getSessionId, payload.sessionId())
             .ifPresent(session -> {
+            if (!payload.userId().equals(session.getUserId())) {
+                log.warn("拒绝更新其他用户的面试评估状态: sessionId={}, messageUserId={}",
+                    payload.sessionId(), payload.userId());
+                return;
+            }
             session.setEvaluateStatus(status);
             if (error != null) {
                 session.setEvaluateError(error.length() > 500 ? error.substring(0, 500) : error);

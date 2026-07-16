@@ -1,0 +1,159 @@
+# Production observability overlay for docker-compose-prod.yml.
+# Prometheus and Grafana start by default. Add `--profile logs` to enable the
+# resource-capped Logstash + Kibana path. Logstash reuses the application's
+# Elasticsearch service and writes only to ai-interview-logs-* indices.
+
+name: ai-interview
+
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    volumes:
+      - app_logs:/app/logs
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: interview-prometheus
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./monitor/prometheus/prometheus-prod.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-512MB}
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    mem_limit: 256m
+    cpus: 0.30
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: interview-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?请在 .env 设置 Grafana 强密码}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_LOG_MODE: console
+    volumes:
+      - ./monitor/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitor/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3000}:3000"
+    mem_limit: 192m
+    cpus: 0.25
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  log-index-init:
+    image: curlimages/curl:8.11.1
+    container_name: interview-log-index-init
+    profiles: ["logs"]
+    restart: "no"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        curl --fail --silent --show-error -X PUT \
+          http://elasticsearch:9200/_ilm/policy/ai-interview-logs-short \
+          -H 'Content-Type: application/json' \
+          --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{}},\"delete\":{\"min_age\":\"${LOG_RETENTION_DAYS:-7}d\",\"actions\":{\"delete\":{}}}}}}"
+        curl --fail --silent --show-error -X PUT \
+          http://elasticsearch:9200/_index_template/ai-interview-logs \
+          -H 'Content-Type: application/json' \
+          --data-binary '{"index_patterns":["ai-interview-logs-*"],"priority":200,"template":{"settings":{"index.lifecycle.name":"ai-interview-logs-short","number_of_shards":1,"number_of_replicas":0,"index.refresh_interval":"30s"}}}'
+    mem_limit: 64m
+    cpus: 0.10
+    logging: *container-logging
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.17.0
+    container_name: interview-logstash
+    profiles: ["logs"]
+    restart: unless-stopped
+    depends_on:
+      log-index-init:
+        condition: service_completed_successfully
+    environment:
+      LS_JAVA_OPTS: "-Xms128m -Xmx256m"
+      XPACK_MONITORING_ENABLED: "false"
+      PIPELINE_WORKERS: "1"
+      PIPELINE_BATCH_SIZE: "50"
+    volumes:
+      - app_logs:/var/log/ai-interview:ro
+      - ./observability/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - logstash_state:/usr/share/logstash/data
+    mem_limit: 512m
+    cpus: 0.45
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/pipelines >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: interview-kibana
+    profiles: ["logs"]
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      logstash:
+        condition: service_healthy
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      SERVER_NAME: interview-kibana
+      TELEMETRY_ENABLED: "false"
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:?请在 .env 设置至少 32 字节随机值}
+      NODE_OPTIONS: "--max-old-space-size=320"
+    ports:
+      - "127.0.0.1:${KIBANA_HOST_PORT:-5601}:5601"
+    mem_limit: 512m
+    cpus: 0.45
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/api/status >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 90s
+
+volumes:
+  app_logs:
+  prometheus_data:
+  grafana_data:
+  logstash_state:

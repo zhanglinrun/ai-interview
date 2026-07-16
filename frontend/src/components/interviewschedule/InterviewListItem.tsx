@@ -1,7 +1,6 @@
 // frontend/src/components/interviewschedule/InterviewListItem.tsx
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import { Edit2, Trash2, ExternalLink } from 'lucide-react';
 import dayjs from 'dayjs';
 import type { InterviewSchedule, InterviewStatus } from '../../types/interviewSchedule';
@@ -27,107 +26,92 @@ export const InterviewListItem: React.FC<InterviewListItemProps> = ({
   onStatusChange,
 }) => {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.2 }}
-      className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 rounded-2xl p-6 hover:shadow-2xl hover:shadow-slate-200/50 dark:hover:shadow-slate-900/50 hover:-translate-y-0.5 transition-all"
-    >
-      <div className="flex items-start justify-between gap-4">
+    <article className="surface-card p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-3">
-            <span className={`status-badge backdrop-blur-sm ${scheduleStatusBadgeConfig[interview.status].className}`}>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className={`status-badge ${scheduleStatusBadgeConfig[interview.status].className}`}>
               {scheduleStatusBadgeConfig[interview.status].label}
             </span>
-            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+            <time className="text-sm font-medium text-stone-600 dark:text-stone-400">
               {dayjs(interview.interviewTime).format('YYYY-MM-DD HH:mm')}
-            </span>
+            </time>
           </div>
 
-          <h3 className="font-display font-bold text-xl mb-2 text-slate-900 dark:text-white tracking-tight">
+          <h3 className="mb-1 text-lg font-semibold text-stone-900 dark:text-stone-50">
             {interview.companyName}
           </h3>
-          <p className="text-slate-600 dark:text-slate-300 mb-3 font-medium">{interview.position}</p>
+          <p className="mb-3 text-sm font-medium text-stone-600 dark:text-stone-300">{interview.position}</p>
 
-          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-            <span className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg font-medium">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+            <span className="rounded-md bg-stone-100 px-2 py-1 font-medium dark:bg-stone-800">
               第 {interview.roundNumber} 轮
             </span>
-            <span className="text-slate-300 dark:text-slate-600">•</span>
+            <span aria-hidden="true">·</span>
             <span className="font-medium">{typeLabels[interview.interviewType] || interview.interviewType}</span>
             {interview.interviewer && (
               <>
-                <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span className="font-medium">{interview.interviewer}</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-medium">面试官：{interview.interviewer}</span>
               </>
             )}
           </div>
 
           {interview.meetingLink && (
-            <motion.a
-              whileHover={{ x: 2 }}
+            <a
               href={interview.meetingLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mt-3 transition-colors"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300"
             >
               <ExternalLink className="w-4 h-4" />
               进入会议
-            </motion.a>
+            </a>
           )}
 
           {interview.notes && (
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 italic">{interview.notes}</p>
+            <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">{interview.notes}</p>
           )}
         </div>
 
-        <div className="flex gap-2">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+        <div className="flex gap-1">
+          <button
+            type="button"
             onClick={onEdit}
-            className="p-2.5 text-slate-400 dark:text-slate-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-500/10 dark:hover:bg-primary-500/20 rounded-xl hover:shadow-lg hover:shadow-primary-500/20 transition-all"
-            title="编辑"
+            className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-primary-700 dark:text-stone-500 dark:hover:bg-stone-800 dark:hover:text-primary-400"
+            aria-label="编辑日程"
           >
-            <Edit2 className="w-5 h-5" />
-          </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+            <Edit2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
             onClick={onDelete}
-            className="p-2.5 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 dark:hover:bg-red-500/20 rounded-xl hover:shadow-lg hover:shadow-red-500/20 transition-all"
-            title="删除"
+            className="rounded-lg p-2 text-stone-400 hover:bg-red-50 hover:text-red-600 dark:text-stone-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+            aria-label="删除日程"
           >
-            <Trash2 className="w-5 h-5" />
-          </motion.button>
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
       {isPendingScheduleStatus(interview.status) && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex gap-3"
-        >
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-stone-200 pt-3 dark:border-stone-800">
+          <button
+            type="button"
             onClick={() => onStatusChange('COMPLETED')}
-            className="px-4 py-2 text-sm font-medium rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 border border-emerald-300/30 dark:border-emerald-400/30 transition-all"
+            className="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
           >
-            标记为已完成
-          </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            标记已完成
+          </button>
+          <button
+            type="button"
             onClick={() => onStatusChange('CANCELLED')}
-            className="px-4 py-2 text-sm font-medium rounded-xl bg-slate-500/10 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 hover:bg-slate-500/20 dark:hover:bg-slate-500/30 border border-slate-300/30 dark:border-slate-400/30 transition-all"
+            className="btn-secondary px-3 py-1.5 text-sm"
           >
             取消面试
-          </motion.button>
-        </motion.div>
+          </button>
+        </div>
       )}
-    </motion.div>
+    </article>
   );
 };

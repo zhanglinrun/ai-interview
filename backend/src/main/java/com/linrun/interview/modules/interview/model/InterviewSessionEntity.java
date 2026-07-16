@@ -91,11 +91,27 @@ public class InterviewSessionEntity {
     // Multi-Agent 编排的面试大纲（JSON，null 表示旧批量出题会话）
     private String interviewPlanJson;
 
+    // 岗位实战增量字段；旧模拟面试为 null。
+    private String preparationRunId;
+
+    private Long jobDescriptionId;
+
+    private String capabilityTemplateCode;
+
+    private String currentStage;
+
+    private Long sessionVersion;
+
     public enum SessionStatus {
         CREATED,      // 会话已创建
+        READY,        // 岗位实战已准备
         IN_PROGRESS,  // 面试进行中
+        PAUSED,       // 岗位实战断点续面
+        COMPLETING,   // 正在收尾
         COMPLETED,    // 面试已完成
-        EVALUATED     // 已生成评估报告
+        EVALUATED,    // 旧模拟面试已生成评估报告
+        ABORTED,      // 岗位实战已中止，不更新画像
+        FAILED        // 岗位实战运行失败
     }
     
     
@@ -275,6 +291,46 @@ public class InterviewSessionEntity {
 
     public void setInterviewPlanJson(String interviewPlanJson) {
         this.interviewPlanJson = interviewPlanJson;
+    }
+
+    public String getPreparationRunId() {
+        return preparationRunId;
+    }
+
+    public void setPreparationRunId(String preparationRunId) {
+        this.preparationRunId = preparationRunId;
+    }
+
+    public Long getJobDescriptionId() {
+        return jobDescriptionId;
+    }
+
+    public void setJobDescriptionId(Long jobDescriptionId) {
+        this.jobDescriptionId = jobDescriptionId;
+    }
+
+    public String getCapabilityTemplateCode() {
+        return capabilityTemplateCode;
+    }
+
+    public void setCapabilityTemplateCode(String capabilityTemplateCode) {
+        this.capabilityTemplateCode = capabilityTemplateCode;
+    }
+
+    public String getCurrentStage() {
+        return currentStage;
+    }
+
+    public void setCurrentStage(String currentStage) {
+        this.currentStage = currentStage;
+    }
+
+    public Long getSessionVersion() {
+        return sessionVersion;
+    }
+
+    public void setSessionVersion(Long sessionVersion) {
+        this.sessionVersion = sessionVersion;
     }
 
     public String getSkillId() {

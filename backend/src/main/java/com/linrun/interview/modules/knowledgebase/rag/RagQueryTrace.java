@@ -1,5 +1,9 @@
 package com.linrun.interview.modules.knowledgebase.rag;
 
+import com.linrun.interview.common.evidence.EvidencePacket;
+import com.linrun.interview.common.evidence.EvidenceRef;
+import com.linrun.interview.common.evidence.EvidenceScope;
+import com.linrun.interview.common.evidence.EvidenceStatus;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.ContentMetadata;
 
@@ -9,16 +13,15 @@ import java.util.List;
 public class RagQueryTrace {
 
     private String rewrittenQuestion;
-    private String routeStrategy;
-    private String routeReasoning;
     private final List<String> decomposedQueries = new ArrayList<>();
     private String cragGrade;
     private String cragAction;
-    private boolean graphAttempted;
-    private boolean graphHit;
-    private String graphResult;
     private final List<TraceContent> retrieved = new ArrayList<>();
     private final List<TraceContent> reranked = new ArrayList<>();
+    private EvidenceScope evidenceScope;
+    private EvidenceStatus evidenceStatus;
+    private List<EvidenceRef> evidenceRefs = List.of();
+    private List<String> degradedReasons = List.of();
 
     public String rewrittenQuestion() {
         return rewrittenQuestion;
@@ -53,44 +56,6 @@ public class RagQueryTrace {
         this.cragAction = action;
     }
 
-    public boolean graphAttempted() {
-        return graphAttempted;
-    }
-
-    public boolean graphHit() {
-        return graphHit;
-    }
-
-    public String graphResult() {
-        return graphResult;
-    }
-
-    /**
-     * 记录图谱（Neo4j Text2Cypher）参与情况。
-     *
-     * @param attempted 是否尝试了图谱检索
-     * @param hit       图谱是否命中（false 表示为空或异常，已降级向量检索）
-     * @param result    命中时的 Cypher 结果原文（会截断成片段）
-     */
-    public void graph(boolean attempted, boolean hit, String result) {
-        this.graphAttempted = attempted;
-        this.graphHit = hit;
-        this.graphResult = result == null ? null : snippet(result);
-    }
-
-    public String routeStrategy() {
-        return routeStrategy;
-    }
-
-    public String routeReasoning() {
-        return routeReasoning;
-    }
-
-    public void route(String strategy, String reasoning) {
-        this.routeStrategy = strategy;
-        this.routeReasoning = reasoning;
-    }
-
     public List<TraceContent> retrieved() {
         return List.copyOf(retrieved);
     }
@@ -109,6 +74,29 @@ public class RagQueryTrace {
         this.reranked.addAll(toTraceContents(contents));
     }
 
+    public void recordEvidencePacket(EvidenceScope scope, EvidencePacket packet) {
+        this.evidenceScope = scope;
+        this.evidenceStatus = packet != null ? packet.status() : EvidenceStatus.NONE;
+        this.evidenceRefs = packet != null ? packet.evidenceRefs() : List.of();
+        this.degradedReasons = packet != null ? packet.degradedReasons() : List.of();
+    }
+
+    public EvidenceScope evidenceScope() {
+        return evidenceScope;
+    }
+
+    public EvidenceStatus evidenceStatus() {
+        return evidenceStatus;
+    }
+
+    public List<EvidenceRef> evidenceRefs() {
+        return List.copyOf(evidenceRefs);
+    }
+
+    public List<String> degradedReasons() {
+        return List.copyOf(degradedReasons);
+    }
+
     private List<TraceContent> toTraceContents(List<Content> contents) {
         if (contents == null || contents.isEmpty()) {
             return List.of();
@@ -121,6 +109,12 @@ public class RagQueryTrace {
                 i + 1,
                 meta.getString("docId"),
                 meta.getString("chunkId"),
+                meta.getString("dataDomain"),
+                meta.getString("resourceId"),
+                meta.getString("resourceVersion"),
+                meta.getString("evidenceId"),
+                meta.getString("contentHash"),
+                meta.getString("sourceLocator"),
                 score(content),
                 rerankScore(content),
                 snippet(content.textSegment().text())));
@@ -157,6 +151,12 @@ public class RagQueryTrace {
         int rank,
         String docId,
         String chunkId,
+        String dataDomain,
+        String resourceId,
+        String resourceVersion,
+        String evidenceId,
+        String contentHash,
+        String sourceLocator,
         Double score,
         Double rerankScore,
         String snippet

@@ -29,8 +29,8 @@ import java.util.stream.Collectors;
  * 跨会话候选人能力画像。
  *
  * <p>评估结果已经包含逐题分数和反馈，因此这里直接把每道已回答问题沉淀为能力观测，
- * 不再额外调用一次 LLM 从报告中二次抽取自由文本。预设 Skill 的能力 ID 跨会话稳定，
- * Agent 动态题沿用题目上的 capabilityAtomId；旧会话按 skillId + type 兼容映射。
+ * 不再额外调用一次 LLM 从报告中二次抽取自由文本。版本化能力模板的原子 ID 跨会话稳定，
+ * Agent 动态题沿用题目上的 capabilityAtomId；旧会话按历史主题字段 + type 兼容映射。
  */
 @Slf4j
 @Service
@@ -237,10 +237,10 @@ public class CandidateMemoryService {
     }
     String type = question.type() == null || question.type().isBlank()
         ? question.category() : question.type();
-    if (type != null && type.startsWith("skill:")) {
+    if (type != null && (type.startsWith("template:") || type.startsWith("skill:"))) {
       return type;
     }
-    return "skill:" + safeIdPart(skillId) + ":" + safeIdPart(type);
+    return "topic:" + safeIdPart(skillId) + ":" + safeIdPart(type);
   }
 
   private String resolveTopic(InterviewQuestionDTO question) {

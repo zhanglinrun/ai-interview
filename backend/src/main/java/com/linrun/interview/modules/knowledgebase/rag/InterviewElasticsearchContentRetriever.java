@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
+import com.linrun.interview.common.evidence.DataDomain;
+import com.linrun.interview.common.evidence.EvidenceScope;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -27,6 +30,7 @@ import com.linrun.interview.modules.knowledgebase.util.DocumentPermissionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.ResponseException;
 
 import java.io.InputStream;
 import java.time.LocalDate;
@@ -79,6 +83,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final String forcedSearchMode;
     private final Long accessibleUserId;
     private final SegmentTextCacheService segmentTextCache;
+    private final EvidenceScope evidenceScope;
     /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
     private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
 
@@ -166,11 +171,38 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    String forcedSearchMode,
                                                    Long accessibleUserId,
                                                    SegmentTextCacheService segmentTextCache) {
+        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
+            parentExpand, hybrid, progressCallback, trace, restClient, indexName, objectMapper,
+            forcedSearchMode, accessibleUserId, segmentTextCache, null);
+    }
+
+    /**
+     * 分域证据检索构造器。EvidenceScope 会同时下推到向量与 BM25 查询，并在结果层再次校验。
+     */
+    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
+                                                   EmbeddingModel embeddingModel,
+                                                   int maxResults,
+                                                   double minScore,
+                                                   List<Long> knowledgeBaseIds,
+                                                   KnowledgeSegmentService segmentService,
+                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
+                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
+                                                   Consumer<String> progressCallback,
+                                                   RagQueryTrace trace,
+                                                   RestClient restClient,
+                                                   String indexName,
+                                                   ObjectMapper objectMapper,
+                                                   String forcedSearchMode,
+                                                   Long accessibleUserId,
+                                                   SegmentTextCacheService segmentTextCache,
+                                                   EvidenceScope evidenceScope) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
         this.minScore = minScore;
-        this.filter = buildKbFilter(knowledgeBaseIds, accessibleUserId);
+        this.filter = evidenceScope != null
+            ? buildEvidenceFilter(evidenceScope)
+            : buildKbFilter(knowledgeBaseIds, accessibleUserId);
         this.knowledgeBaseIdSet = knowledgeBaseIds == null ? Set.of() : knowledgeBaseIds.stream()
             .filter(Objects::nonNull)
             .map(String::valueOf)
@@ -186,6 +218,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         this.forcedSearchMode = forcedSearchMode;
         this.accessibleUserId = accessibleUserId;
         this.segmentTextCache = segmentTextCache;
+        this.evidenceScope = evidenceScope;
     }
 
     @Override
@@ -237,6 +270,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                     : embeddingStore.search(request);
             };
         } catch (Exception e) {
+            if (isMissingIndex(e)) {
+                log.debug("[InterviewElasticsearchContentRetriever] 向量索引尚未创建，返回空结果");
+                return new EmbeddingSearchResult<>(List.of());
+            }
             log.warn("[InterviewElasticsearchContentRetriever] {} 检索失败，降级全文检索: {}",
                 mode, e.getMessage(), e);
             try {
@@ -276,9 +313,18 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             try {
                 return filteredFullTextSearch(queryText);
             } catch (Exception e) {
+                if (evidenceScope != null) {
+                    log.warn("[InterviewElasticsearchContentRetriever] 分域全文检索失败，按安全边界返回空结果: {}",
+                        e.getMessage(), e);
+                    return new EmbeddingSearchResult<>(List.of());
+                }
                 log.warn("[InterviewElasticsearchContentRetriever] 带过滤全文检索失败，退回默认全文检索: {}",
                     e.getMessage(), e);
             }
+        }
+        if (evidenceScope != null) {
+            log.warn("[InterviewElasticsearchContentRetriever] 分域全文检索缺少原生 ES Client，按安全边界返回空结果");
+            return new EmbeddingSearchResult<>(List.of());
         }
         return langChainFullTextSearch(queryText);
     }
@@ -364,7 +410,28 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                 matches.add(new EmbeddingMatch<>(score, hit.path("_id").asText(null), null, segment));
             }
             return new EmbeddingSearchResult<>(matches);
+        } catch (ResponseException e) {
+            if (isMissingIndex(e)) {
+                return new EmbeddingSearchResult<>(List.of());
+            }
+            throw e;
         }
+    }
+
+    private boolean isMissingIndex(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ResponseException responseException
+                && responseException.getResponse().getStatusLine().getStatusCode() == 404) {
+                return true;
+            }
+            if (current instanceof ElasticsearchException elasticsearchException
+                && elasticsearchException.status() == 404
+                && elasticsearchException.error() != null
+                && "index_not_found_exception".equals(elasticsearchException.error().type())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isFullTextMode() {
@@ -380,7 +447,10 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
 
     private boolean matchesKnowledgeBaseFilter(Content content) {
         Metadata metadata = content.textSegment().metadata();
-        if (accessibleUserId != null) {
+        if (evidenceScope != null && !matchesEvidenceScope(metadata)) {
+            return false;
+        }
+        if (evidenceScope == null && accessibleUserId != null) {
             String accessibleBy = metadata.getString(MetadataKeyConstant.ACCESSIBLE_BY);
             if (!DocumentPermissionUtils.canAccess(accessibleBy, accessibleUserId)) {
                 return false;
@@ -436,6 +506,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         if (!brotherChunkIds.isEmpty()) {
             List<KnowledgeBaseSegmentEntity> brothers =
                 segmentService.findByBrotherChunkIdIn(new ArrayList<>(brotherChunkIds));
+            brothers = brothers.stream().filter(this::matchesSegmentScope).toList();
             if (segmentTextCache != null) {
                 segmentTextCache.warmChunkTexts(brothers);
             }
@@ -476,6 +547,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         List<KnowledgeBaseSegmentEntity> segments =
             segmentService.findByChunkIdIn(new ArrayList<>(parentChunkIds));
         for (KnowledgeBaseSegmentEntity segment : segments) {
+            if (!matchesSegmentScope(segment)) {
+                continue;
+            }
             if (segment.getText() == null || segment.getText().isBlank()) {
                 continue;
             }
@@ -492,6 +566,9 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private ObjectNode buildNativeMetadataFilter() {
         if (objectMapper == null) {
             return null;
+        }
+        if (evidenceScope != null) {
+            return buildNativeEvidenceFilter();
         }
         ArrayNode must = objectMapper.createArrayNode();
         if (accessibleUserId != null) {
@@ -521,6 +598,41 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         ObjectNode filter = objectMapper.createObjectNode();
         filter.set("bool", bool);
         return filter;
+    }
+
+    private ObjectNode buildNativeEvidenceFilter() {
+        ArrayNode domains = objectMapper.createArrayNode();
+        for (EvidenceScope.DomainScope domainScope : evidenceScope.domains()) {
+            ArrayNode must = objectMapper.createArrayNode();
+            addTerm(must, MetadataKeyConstant.OWNER_USER_ID,
+                String.valueOf(evidenceScope.ownerFor(domainScope.domain())));
+            addTerm(must, MetadataKeyConstant.DATA_DOMAIN, domainScope.domain().name());
+            addTerms(must, MetadataKeyConstant.RESOURCE_ID, domainScope.resourceIds());
+            if (!domainScope.resourceVersions().isEmpty()) {
+                addTerms(must, MetadataKeyConstant.RESOURCE_VERSION,
+                    domainScope.resourceVersions());
+            }
+            ObjectNode domainBool = objectMapper.createObjectNode();
+            domainBool.putObject("bool").set("must", must);
+            domains.add(domainBool);
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        ObjectNode bool = root.putObject("bool");
+        bool.set("should", domains);
+        bool.put("minimum_should_match", 1);
+        return root;
+    }
+
+    private void addTerm(ArrayNode clauses, String key, String value) {
+        clauses.addObject().putObject("term")
+            .putObject("metadata." + key + ".keyword")
+            .put("value", value);
+    }
+
+    private void addTerms(ArrayNode clauses, String key, Set<String> values) {
+        ArrayNode terms = clauses.addObject().putObject("terms")
+            .putArray("metadata." + key + ".keyword");
+        values.forEach(terms::add);
     }
 
     private Content toContent(EmbeddingMatch<TextSegment> match) {
@@ -557,6 +669,65 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             return accessFilter;
         }
         return accessFilter.and(docFilter);
+    }
+
+    private Filter buildEvidenceFilter(EvidenceScope scope) {
+        return scope.domains().stream()
+            .map(domain -> buildEvidenceDomainFilter(scope, domain))
+            .reduce((left, right) -> left.or(right))
+            .orElseThrow(() -> new IllegalArgumentException("证据域不能为空"));
+    }
+
+    private Filter buildEvidenceDomainFilter(
+        EvidenceScope scope,
+        EvidenceScope.DomainScope domain
+    ) {
+        Filter result = metadataKey(MetadataKeyConstant.OWNER_USER_ID)
+            .isEqualTo(String.valueOf(scope.ownerFor(domain.domain())))
+            .and(metadataKey(MetadataKeyConstant.DATA_DOMAIN).isEqualTo(domain.domain().name()))
+            .and(orEquals(MetadataKeyConstant.RESOURCE_ID, domain.resourceIds()));
+        if (!domain.resourceVersions().isEmpty()) {
+            result = result.and(orEquals(
+                MetadataKeyConstant.RESOURCE_VERSION, domain.resourceVersions()));
+        }
+        return result;
+    }
+
+    private Filter orEquals(String key, Set<String> values) {
+        return values.stream()
+            .map(value -> metadataKey(key).isEqualTo(value))
+            .reduce((left, right) -> left.or(right))
+            .orElseThrow(() -> new IllegalArgumentException(key + " 不能为空"));
+    }
+
+    private boolean matchesEvidenceScope(Metadata metadata) {
+        String ownerRaw = metadata.getString(MetadataKeyConstant.OWNER_USER_ID);
+        String domainRaw = metadata.getString(MetadataKeyConstant.DATA_DOMAIN);
+        String resourceId = metadata.getString(MetadataKeyConstant.RESOURCE_ID);
+        String resourceVersion = metadata.getString(MetadataKeyConstant.RESOURCE_VERSION);
+        if (ownerRaw == null || domainRaw == null || resourceId == null) {
+            return false;
+        }
+        try {
+            return evidenceScope.contains(
+                DataDomain.valueOf(domainRaw),
+                resourceId,
+                resourceVersion,
+                Long.parseLong(ownerRaw));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private boolean matchesSegmentScope(KnowledgeBaseSegmentEntity segment) {
+        if (evidenceScope == null) {
+            return true;
+        }
+        return evidenceScope.contains(
+            segment.getDataDomain(),
+            segment.getResourceId(),
+            segment.getResourceVersion(),
+            segment.getUserId());
     }
 
     private Filter buildDocIdFilter(List<Long> knowledgeBaseIds) {

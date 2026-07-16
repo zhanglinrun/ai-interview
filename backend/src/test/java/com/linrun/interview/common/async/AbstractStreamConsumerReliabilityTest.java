@@ -83,6 +83,20 @@ class AbstractStreamConsumerReliabilityTest {
             verify(redisService).markIdempotencyDone(eq(dedupKey(taskId)),
                 eq(Duration.ofMillis(AsyncTaskStreamConstants.DEDUP_DONE_TTL_MS)));
         }
+
+        @Test
+        @DisplayName("业务租约仍被占用时不写 DONE，也不执行完成回调")
+        void deferredBusinessDoesNotMarkDone() {
+            String taskId = "task-deferred";
+            when(redisService.getIdempotencyState(dedupKey(taskId))).thenReturn(null);
+            consumer.deferCompletion = true;
+
+            consumer.consumeFromBroker(message(taskId), 0);
+
+            assertThat(consumer.businessRuns.get()).isEqualTo(1);
+            assertThat(consumer.completedMarked).isFalse();
+            verify(redisService, never()).markIdempotencyDone(anyString(), any());
+        }
     }
 
     @Nested
@@ -141,6 +155,7 @@ class AbstractStreamConsumerReliabilityTest {
 
         final AtomicInteger businessRuns = new AtomicInteger(0);
         boolean failBusiness = false;
+        boolean deferCompletion = false;
         boolean failedMarked = false;
         boolean completedMarked = false;
 
@@ -179,6 +194,12 @@ class AbstractStreamConsumerReliabilityTest {
             if (failBusiness) {
                 throw new IllegalStateException("模拟业务失败");
             }
+        }
+
+        @Override
+        protected boolean processBusinessToCompletion(String payload) {
+            processBusiness(payload);
+            return !deferCompletion;
         }
 
         @Override

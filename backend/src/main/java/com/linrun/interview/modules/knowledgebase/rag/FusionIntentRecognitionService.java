@@ -40,8 +40,6 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
           "讲讲 JVM 垃圾回收原理", "Spring 事务为什么会失效", "解释 Redis 缓存穿透和雪崩", "系统设计如何做限流"),
       InterviewIntent.CODE_REVIEW, List.of(
           "帮我分析这段代码的复杂度", "这道 LeetCode 怎么优化", "代码为什么空指针", "帮我做代码审查"),
-      InterviewIntent.DATA_QUERY, List.of(
-          "我最近面试了多少次", "我的平均分是多少", "历史面试最高分是哪次", "统计我的简历评分趋势"),
       InterviewIntent.RESUME_STATS, List.of(
           "分析我的简历匹配度", "根据简历挖项目问题", "简历有哪些技术短板", "对比两份简历的优劣"),
       InterviewIntent.INTERVIEW_PREP, List.of(
@@ -58,8 +56,6 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
           "原理", "知识点", "八股", "jvm", "spring", "redis", "mysql", "mq", "系统设计", "分布式"),
       InterviewIntent.CODE_REVIEW, List.of(
           "代码", "bug", "报错", "复杂度", "leetcode", "算法", "优化", "空指针", "审查"),
-      InterviewIntent.DATA_QUERY, List.of(
-          "多少次", "平均分", "最高分", "最低分", "统计", "历史记录", "趋势", "排名"),
       InterviewIntent.RESUME_STATS, List.of(
           "简历", "项目经历", "匹配度", "技能匹配", "经历", "亮点", "短板"),
       InterviewIntent.INTERVIEW_PREP, List.of(
@@ -72,8 +68,8 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
           "天气", "旅游", "电影", "音乐", "笑话", "菜谱", "星座", "游戏"));
 
   private static final List<String> KNOWN_SKILLS = List.of(
-      "java", "spring", "spring boot", "redis", "mysql", "jvm", "mq", "rocketmq",
-      "elasticsearch", "neo4j", "react", "vue", "前端", "后端", "算法", "go", "python");
+      "java", "spring", "spring boot", "redis", "mysql", "jvm", "mq", "rabbitmq",
+      "elasticsearch", "react", "vue", "前端", "后端", "算法", "go", "python");
 
   private static final List<String> KNOWN_COMPANIES = List.of(
       "字节", "阿里", "腾讯", "美团", "百度", "快手", "小米", "华为", "京东", "拼多多",

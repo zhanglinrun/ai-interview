@@ -6,7 +6,8 @@ import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
 import com.linrun.interview.modules.interview.model.SessionListItemDTO;
 import com.linrun.interview.modules.interview.service.InterviewPersistenceService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import com.linrun.interview.modules.interviewschedule.model.InterviewScheduleDTO;
 import com.linrun.interview.modules.interviewschedule.service.InterviewScheduleService;
 import com.linrun.interview.modules.knowledgebase.model.RagCardChoiceDTO;
@@ -37,19 +38,19 @@ public class RagCardService {
   private final ResumeHistoryService resumeHistoryService;
   private final InterviewScheduleService interviewScheduleService;
   private final InterviewPersistenceService interviewPersistenceService;
-  private final InterviewSkillService interviewSkillService;
+  private final InterviewTopicCatalog interviewTopicCatalog;
   private final ObjectMapper objectMapper;
 
   /**
    * 按意图推送交互卡片（简历 / 日程 / 面试报告 / 方向选择等）。
    */
-  public Optional<Flux<String>> maybeInteractionCards(IntentRecognitionResult intent) {
+  public Optional<Flux<String>> maybeInteractionCards(IntentRecognitionResult intent, String question) {
     return maybeResumeSelectionCards(intent)
         .or(() -> maybeResumeDetailCard(intent))
         .or(() -> maybeScheduleSelectionCards(intent))
-        .or(() -> maybeInterviewSessionSelectionCards(intent))
+        .or(() -> maybeInterviewSessionSelectionCards(intent, question))
         .or(() -> maybeInterviewReportHintCard(intent))
-        .or(() -> maybeSkillSelectionCards(intent));
+        .or(() -> maybeTopicSelectionCards(intent, question));
   }
 
   public Optional<Flux<String>> maybeResumeSelectionCards(IntentRecognitionResult intent) {
@@ -125,12 +126,18 @@ public class RagCardService {
     return buildChoiceCard("请选择要查询的面试安排", choices);
   }
 
-  public Optional<Flux<String>> maybeInterviewSessionSelectionCards(IntentRecognitionResult intent) {
+  public Optional<Flux<String>> maybeInterviewSessionSelectionCards(
+      IntentRecognitionResult intent,
+      String question
+  ) {
     if (intent == null || !intent.related()
         || intent.resolvedIntent() != InterviewIntent.INTERVIEW_PREP) {
       return Optional.empty();
     }
     if (intent.entities() != null && intent.entities().sessionId() != null) {
+      return Optional.empty();
+    }
+    if (!asksForInterviewReport(question)) {
       return Optional.empty();
     }
     if (UserContext.getUserId() == null) {
@@ -167,7 +174,7 @@ public class RagCardService {
         + "，可在「模拟面试 → 面试记录」查看完整报告。"));
   }
 
-  public Optional<Flux<String>> maybeSkillSelectionCards(IntentRecognitionResult intent) {
+  public Optional<Flux<String>> maybeTopicSelectionCards(IntentRecognitionResult intent, String question) {
     if (intent == null || !intent.related()) {
       return Optional.empty();
     }
@@ -179,15 +186,50 @@ public class RagCardService {
         && !intent.entities().skill().isBlank()) {
       return Optional.empty();
     }
-    List<InterviewSkillService.SkillDTO> skills = interviewSkillService.getAllSkills();
-    if (skills.size() <= 1) {
+    if (!asksForTopicSelection(question)) {
       return Optional.empty();
     }
-    List<RagCardChoiceDTO> choices = skills.stream()
+    List<InterviewTopic> topics = interviewTopicCatalog.listTopics();
+    if (topics.size() <= 1) {
+      return Optional.empty();
+    }
+    List<RagCardChoiceDTO> choices = topics.stream()
         .limit(8)
-        .map(skill -> new RagCardChoiceDTO(skill.id(), skill.name(), "skill"))
+        .map(topic -> new RagCardChoiceDTO(topic.id(), topic.name(), "jobTrack"))
         .toList();
-    return buildChoiceCard("请选择面试/职业方向", choices);
+    return buildChoiceCard("请选择目标岗位方向", choices);
+  }
+
+  private boolean asksForTopicSelection(String question) {
+    if (question == null || question.isBlank()) {
+      return false;
+    }
+    String normalized = question.strip().toLowerCase();
+    boolean selectionRequest = normalized.contains("选择")
+        || normalized.contains("哪个")
+        || normalized.contains("哪些")
+        || normalized.contains("有什么")
+        || normalized.contains("推荐");
+    boolean topicRequest = normalized.contains("岗位")
+        || normalized.contains("方向")
+        || normalized.contains("主题");
+    boolean interviewStartRequest = normalized.contains("模拟面试")
+        || ((normalized.contains("开始") || normalized.contains("来一场"))
+            && normalized.contains("面试"));
+    return selectionRequest && topicRequest || interviewStartRequest;
+  }
+
+  private boolean asksForInterviewReport(String question) {
+    if (question == null || question.isBlank()) {
+      return false;
+    }
+    String normalized = question.strip().toLowerCase();
+    boolean reportRequest = normalized.contains("报告")
+        || normalized.contains("复盘")
+        || normalized.contains("总结")
+        || normalized.contains("成绩")
+        || normalized.contains("评分");
+    return reportRequest;
   }
 
   private Optional<Flux<String>> buildChoiceCard(String prompt, List<RagCardChoiceDTO> choices) {

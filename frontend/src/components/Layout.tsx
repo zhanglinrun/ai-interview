@@ -1,9 +1,22 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
-import {motion} from 'framer-motion';
-import {Calendar, ChevronRight, Database, FileStack, FlaskConical, LogIn, LogOut, Menu, MessageSquare, Mic2, Moon, Network, Settings, Sun, Users, X,} from 'lucide-react';
+import {
+  BookOpen,
+  BriefcaseBusiness,
+  ChevronRight,
+  Dumbbell,
+  History,
+  Home,
+  LogIn,
+  LogOut,
+  Menu,
+  Radar,
+  Moon,
+  Sun,
+  UserRound,
+  X,
+} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
-import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
 import MyModelOnboarding from './MyModelOnboarding';
 import {authApi} from '../api/auth';
 import {AUTH_CHANGED_EVENT, getStoredUser, StoredUser} from '../api/authStorage';
@@ -22,24 +35,28 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const APP_NAME = 'AI面试平台';
+const APP_NAME = 'AI 面试平台';
 
-function resolveDocumentTitle(pathname: string): string {
+export function resolveDocumentTitle(pathname: string): string {
+  if (pathname === '/dashboard' || pathname === '/') return `工作台 · ${APP_NAME}`;
+  if (pathname.startsWith('/job-practice')) return `岗位实战 · ${APP_NAME}`;
+  if (pathname.startsWith('/training')) return `专项训练 · ${APP_NAME}`;
+  if (pathname === '/recruitment') return `招聘雷达 · ${APP_NAME}`;
+  if (pathname === '/resources') return `求职资源 · ${APP_NAME}`;
+  if (pathname === '/profile') return `我的资料 · ${APP_NAME}`;
   if (pathname === '/login') return `登录 · ${APP_NAME}`;
   if (pathname === '/upload') return `上传简历 · ${APP_NAME}`;
   if (pathname.startsWith('/history/')) return `简历详情 · ${APP_NAME}`;
-  if (pathname === '/history' || pathname === '/') return `简历管理 · ${APP_NAME}`;
+  if (pathname === '/history') return `简历管理 · ${APP_NAME}`;
   if (pathname === '/interview-hub') return `模拟面试 · ${APP_NAME}`;
   if (pathname.startsWith('/interviews/')) return `面试报告 · ${APP_NAME}`;
   if (pathname === '/interviews') return `面试记录 · ${APP_NAME}`;
-  if (pathname.startsWith('/voice-interview')) return `语音面试 · ${APP_NAME}`;
-  if (pathname.startsWith('/interview')) return `模拟面试 · ${APP_NAME}`;
   if (pathname === '/interview-schedule') return `面试日程 · ${APP_NAME}`;
+  if (pathname.startsWith('/interview')) return `模拟面试 · ${APP_NAME}`;
   if (pathname === '/knowledgebase/upload') return `上传文档 · ${APP_NAME}`;
   if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
   if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
-  if (pathname === '/knowledge-graph') return `知识图谱 · ${APP_NAME}`;
-  if (pathname === '/eval') return `统一评测 · ${APP_NAME}`;
+  if (pathname === '/eval') return `RAG 效果评测 · ${APP_NAME}`;
   if (pathname === '/settings') return `设置 · ${APP_NAME}`;
   return APP_NAME;
 }
@@ -51,13 +68,6 @@ export default function Layout() {
   const navigate = useNavigate();
   const [user, setUser] = useState<StoredUser | null>(() => getStoredUser());
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [interviewModalPreset, setInterviewModalPreset] = useState<{
-    defaultMode: 'text' | 'voice';
-    defaultResumeId?: number;
-    title: string;
-    subtitle: string;
-    startButtonText: string;
-  } | null>(null);
 
   useEffect(() => {
     document.title = resolveDocumentTitle(currentPath);
@@ -91,82 +101,22 @@ export default function Layout() {
   };
 
   const openInterviewModalWithResume = (resumeId: number) => {
-    setInterviewModalPreset({
-      defaultMode: 'text',
-      defaultResumeId: resumeId,
-      title: '开始模拟面试',
-      subtitle: '配置面试参数，开始练习',
-      startButtonText: '开始面试',
-    });
+    navigate(`/job-practice?resume=${resumeId}`);
   };
 
-  const handleInterviewStart = (config: UnifiedInterviewConfig) => {
-    setInterviewModalPreset(null);
-    if (config.mode === 'text') {
-      navigate('/interview', {
-        state: {
-          resumeId: config.resumeId,
-          interviewConfig: {
-            skillId: config.skillId,
-            difficulty: config.difficulty,
-            questionCount: config.questionCount,
-            llmProvider: config.llmProvider,
-            customCategories: config.customCategories,
-            jdText: config.customJdText,
-            knowledgeBaseIds: config.knowledgeBaseIds,
-          },
-        },
-      });
-      return;
-    }
-
-    const params = new URLSearchParams({
-      skillId: config.skillId,
-      difficulty: config.difficulty,
-    });
-    navigate(`/voice-interview?${params.toString()}`, {
-      state: {
-        voiceConfig: {
-          skillId: config.skillId,
-          difficulty: config.difficulty,
-          techEnabled: true,
-          projectEnabled: true,
-          hrEnabled: true,
-          plannedDuration: config.plannedDuration,
-          resumeId: config.resumeId,
-          llmProvider: config.llmProvider,
-        },
-      },
-    });
-  };
-
-  // 按业务模块组织的导航项
+  // 一级导航只呈现求职者真正会反复使用的七个入口；旧工具页保留为二级能力。
   const navGroups: NavGroup[] = [
     {
-      id: 'interview',
-      title: '面试准备',
+      id: 'primary',
+      title: '主要功能',
       items: [
-        { id: 'resumes', path: '/history', label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' },
-        { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Mic2, description: '文字/语音面试练习' },
-        { id: 'interviews', path: '/interviews', label: '面试记录', icon: Users, description: '查看面试历史' },
-        { id: 'interview-schedule', path: '/interview-schedule', label: '面试日程', icon: Calendar, description: '管理面试安排' },
-      ],
-    },
-    {
-      id: 'knowledge',
-      title: '知识库',
-      items: [
-        { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database, description: '管理知识文档' },
-        { id: 'chat', path: '/knowledgebase/chat', label: '问答助手', icon: MessageSquare, description: '基于知识库问答' },
-        { id: 'knowledge-graph', path: '/knowledge-graph', label: '知识图谱', icon: Network, description: '技能/知识点关系图谱' },
-        { id: 'eval', path: '/eval', label: '统一评测', icon: FlaskConical, description: '意图/RAG/裁判评测与回归' },
-      ],
-    },
-    {
-      id: 'system',
-      title: '系统',
-      items: [
-        { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
+        { id: 'dashboard', path: '/dashboard', label: '工作台', icon: Home },
+        { id: 'job-practice', path: '/job-practice', label: '岗位实战', icon: BriefcaseBusiness },
+        { id: 'training', path: '/training', label: '专项训练', icon: Dumbbell },
+        { id: 'records', path: '/interviews', label: '面试记录', icon: History },
+        { id: 'recruitment', path: '/recruitment', label: '招聘雷达', icon: Radar },
+        { id: 'resources', path: '/resources', label: '求职资源', icon: BookOpen },
+        { id: 'profile', path: '/profile', label: '我的资料', icon: UserRound },
       ],
     },
   ];
@@ -174,34 +124,38 @@ export default function Layout() {
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {
     if (path.startsWith('#')) return false;
-    if (path === '/history') {
-      return currentPath === '/history'
-        || currentPath === '/'
-        || currentPath.startsWith('/history/')
-        || currentPath === '/upload';
+    if (path === '/dashboard') {
+      return currentPath === '/' || currentPath === '/dashboard';
     }
-    if (path === '/interview-hub') {
-      return currentPath === '/interview-hub'
+    if (path === '/job-practice') {
+      return currentPath.startsWith('/job-practice')
+        || currentPath === '/interview-hub'
         || currentPath === '/interview'
-        || currentPath.startsWith('/interview/')
-        || currentPath.startsWith('/voice-interview');
+        || currentPath.startsWith('/interview/');
     }
-    if (path === '/knowledgebase') {
-      return currentPath === '/knowledgebase' || currentPath === '/knowledgebase/upload';
+    if (path === '/profile') {
+      return currentPath === '/profile'
+        || currentPath === '/history'
+        || currentPath.startsWith('/history/')
+        || currentPath === '/upload'
+        || currentPath === '/knowledgebase'
+        || currentPath === '/knowledgebase/upload'
+        || currentPath === '/settings'
+        || currentPath === '/interview-schedule';
     }
     return currentPath.startsWith(path);
   };
 
   return (
-    <div className="flex min-h-screen">
-      <header className="fixed inset-x-0 top-0 z-30 h-16 px-4 flex items-center justify-between border-b border-stone-200/80 bg-white/90 backdrop-blur-xl dark:border-stone-800 dark:bg-stone-950/90 md:hidden">
-        <Link to="/history" className="flex items-center gap-2.5 min-w-0">
+    <div className="flex min-h-screen bg-stone-100 dark:bg-stone-950">
+      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-950 md:hidden">
+        <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0">
           <img
             src="/bear-doctor-logo.png"
             alt=""
             className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
           />
-          <span className="truncate text-sm font-semibold text-stone-900 dark:text-stone-50">AI面试平台</span>
+          <span className="truncate text-sm font-semibold text-stone-900 dark:text-stone-50">AI 面试平台</span>
         </Link>
         <button
           type="button"
@@ -220,26 +174,26 @@ export default function Layout() {
           type="button"
           aria-label="关闭导航菜单"
           onClick={() => setMobileNavOpen(false)}
-          className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[1px] md:hidden"
+          className="fixed inset-0 z-40 bg-black/35 md:hidden"
         />
       )}
 
       {/* 左侧边栏 */}
       <aside
         id="app-sidebar"
-        className={`w-64 bg-white/95 dark:bg-stone-950/95 md:bg-white/60 md:dark:bg-stone-950/60 backdrop-blur-2xl border-r border-white/40 dark:border-white/10 fixed h-dvh md:h-screen left-0 top-0 z-50 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.08)] md:shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 md:translate-x-0 ${
+        className={`fixed left-0 top-0 z-50 flex h-dvh w-60 flex-col border-r border-stone-200 bg-white transition-transform duration-200 dark:border-stone-800 dark:bg-stone-950 md:h-screen md:translate-x-0 ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Logo */}
-        <div className="p-5 border-b border-stone-200/80 dark:border-stone-800 flex items-center gap-3">
-          <Link to="/history" className="flex flex-1 min-w-0 items-center gap-3 group">
+        <div className="flex h-16 items-center gap-3 border-b border-stone-200 px-5 dark:border-stone-800">
+          <Link to="/dashboard" className="flex flex-1 min-w-0 items-center gap-3 group">
             <img
               src="/bear-doctor-logo.png"
-              alt="AI面试平台"
+              alt="AI 面试平台"
               className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-stone-200/80 dark:ring-stone-700"
             />
-            <span className="truncate text-base font-semibold text-stone-900 dark:text-stone-50 tracking-tight">AI面试平台</span>
+            <span className="truncate text-base font-semibold text-stone-900 dark:text-stone-50 tracking-tight">AI 面试平台</span>
           </Link>
           <button
             type="button"
@@ -252,10 +206,10 @@ export default function Layout() {
         </div>
 
         {/* 主题切换按钮 */}
-        <div className="px-4 pt-3 pb-1">
+        <div className="px-3 pb-1 pt-3">
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 transition-colors text-sm"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-900 dark:hover:text-stone-200"
           >
             {theme === 'dark' ? (
               <>
@@ -272,7 +226,7 @@ export default function Layout() {
         </div>
 
         {/* 导航菜单 */}
-        <nav className="flex-1 p-3 overflow-y-auto">
+        <nav className="flex-1 overflow-y-auto p-3">
           <div className="space-y-5">
             {navGroups.map((group) => (
               <div key={group.id}>
@@ -290,10 +244,10 @@ export default function Layout() {
                         key={item.id}
                         to={item.path}
                         onClick={() => setMobileNavOpen(false)}
-                        className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-300
+                        className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 transition-colors duration-150
                           ${active
-                            ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300 shadow-sm border border-primary-500/20'
-                            : 'text-stone-600 dark:text-stone-400 hover:bg-white/60 dark:hover:bg-stone-900/50 hover:text-stone-900 dark:hover:text-stone-100 hover:shadow-sm'
+                            ? 'bg-primary-50 text-primary-800 dark:bg-primary-950/50 dark:text-primary-300'
+                            : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-900 dark:hover:text-stone-100'
                           }`}
                       >
                         <item.icon className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} />
@@ -313,16 +267,18 @@ export default function Layout() {
         </nav>
 
         {/* 底部信息 */}
-        <div className="p-4 border-t border-stone-200/80 dark:border-stone-800">
+        <div className="border-t border-stone-200 p-3 dark:border-stone-800">
           {user ? (
-            <div className="mb-2 rounded-xl bg-stone-50 dark:bg-stone-900 p-3">
+            <div className="mb-2 rounded-lg bg-stone-50 p-3 dark:bg-stone-900">
               <div className="mb-2">
-                <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate">
-                  {user.displayName || user.username}
-                </p>
-                <p className="text-xs text-stone-400 dark:text-stone-500 truncate">
-                  @{user.username}
-                </p>
+                <Link to="/profile" className="block rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 px-1 py-1 -mx-1">
+                  <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate">
+                    {user.displayName || user.username}
+                  </p>
+                  <p className="text-xs text-stone-400 dark:text-stone-500 truncate">
+                    @{user.username}
+                  </p>
+                </Link>
               </div>
               <button
                 type="button"
@@ -351,30 +307,11 @@ export default function Layout() {
       </aside>
 
       {/* 主内容区 */}
-      <main className="flex-1 min-w-0 w-full p-4 pt-20 md:ml-64 md:p-10 min-h-screen overflow-y-auto">
-        <motion.div
-          key={currentPath}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.25 }}
-        >
+      <main className="min-h-screen w-full min-w-0 flex-1 overflow-y-auto px-4 pb-8 pt-18 md:ml-60 md:px-7 md:pb-10 md:pt-7 lg:px-9">
+        <div>
           <Outlet context={{ openInterviewModalWithResume }} />
-        </motion.div>
+        </div>
       </main>
-
-      {/* 统一面试弹窗 */}
-      <UnifiedInterviewModal
-        isOpen={interviewModalPreset !== null}
-        onClose={() => setInterviewModalPreset(null)}
-        onStart={handleInterviewStart}
-        defaultMode={interviewModalPreset?.defaultMode || 'text'}
-        defaultResumeId={interviewModalPreset?.defaultResumeId}
-        hideModeSwitch={interviewModalPreset?.defaultResumeId == null}
-        title={interviewModalPreset?.title || '开始模拟面试'}
-        subtitle={interviewModalPreset?.subtitle || '选择面试模式和主题，快速开始'}
-        startButtonText={interviewModalPreset?.startButtonText || '开始面试'}
-      />
 
       {/* BYOK 全局引导：首登两步向导 + 未配置 Key 的全局提示 */}
       <MyModelOnboarding user={user} />

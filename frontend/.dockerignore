@@ -6,6 +6,9 @@ dist
 build
 
 # Development files
+.env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 *.log

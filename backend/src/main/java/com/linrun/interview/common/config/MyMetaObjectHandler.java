@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 public class MyMetaObjectHandler implements MetaObjectHandler {
 
   // 实体未标注 @TableField(fill=...)，strict* 变体会整体跳过填充；这里按属性存在性 + 空值判断
-  // 直接填充，保证 createdAt/updatedAt 在无 DB 默认值的表（如 voice_interview_sessions）也能写入。
+  // 直接填充，保证 createdAt/updatedAt 在无 DB 默认值的表也能写入。
   @Override
   public void insertFill(MetaObject metaObject) {
     LocalDateTime now = LocalDateTime.now();

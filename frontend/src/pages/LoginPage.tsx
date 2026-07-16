@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LogIn, UserPlus } from 'lucide-react';
 import { authApi } from '../api/auth';
-import { getStoredUser } from '../api/authStorage';
+import { getAccessToken } from '../api/authStorage';
+import { resolveSafeReturnTo } from '../api/authNavigation';
 import { getErrorMessage } from '../api/request';
 import LoadingButtonContent from '../components/LoadingButtonContent';
 
@@ -20,11 +21,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const from = searchParams.get('from') || '/history';
+  const from = resolveSafeReturnTo(searchParams.get('from'));
   const isRegister = mode === 'register';
 
   useEffect(() => {
-    if (getStoredUser()) {
+    document.title = `${isRegister ? '注册' : '登录'} · AI 面试平台`;
+  }, [isRegister]);
+
+  useEffect(() => {
+    if (getAccessToken()?.trim()) {
       navigate(from, { replace: true });
     }
   }, [from, navigate]);
@@ -54,8 +59,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center">
-      <div className="w-full max-w-sm surface-card p-7 md:p-8">
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <div className="surface-card w-full max-w-sm p-6 md:p-7">
         <div className="mb-6 flex items-center gap-3">
           <img
             src="/bear-doctor-logo.png"
@@ -67,7 +72,7 @@ export default function LoginPage() {
               {isRegister ? '创建账号' : '欢迎回来'}
             </h1>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
-              {isRegister ? '注册后即可使用面试练习与知识库' : '登录 AI面试平台'}
+              {isRegister ? '保存你的面试记录和学习资料' : '登录后继续准备面试'}
             </p>
           </div>
         </div>
@@ -99,7 +104,7 @@ export default function LoginPage() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
-              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              className="dark-input mt-1 w-full px-3 py-2"
               placeholder="请输入用户名"
               required
             />
@@ -114,7 +119,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   autoComplete="email"
-                  className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                  className="dark-input mt-1 w-full px-3 py-2"
                   placeholder="请输入邮箱"
                   required
                 />
@@ -126,7 +131,7 @@ export default function LoginPage() {
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
                   autoComplete="name"
-                  className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                  className="dark-input mt-1 w-full px-3 py-2"
                   placeholder="可留空"
                 />
               </label>
@@ -140,7 +145,8 @@ export default function LoginPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
-              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              minLength={6}
+              className="dark-input mt-1 w-full px-3 py-2"
               placeholder={isRegister ? '至少 6 位' : '请输入密码'}
               required
             />

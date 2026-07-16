@@ -1,7 +1,6 @@
 // frontend/src/components/interviewschedule/ScheduleHeader.tsx
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import { Plus, ChevronLeft, ChevronRight, Calendar, List, LayoutGrid } from 'lucide-react';
 import dayjs from 'dayjs';
 
@@ -69,86 +68,70 @@ export const ScheduleHeader: React.FC<ScheduleHeaderProps> = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-6 mb-6 shadow-xl shadow-slate-200/50 dark:shadow-slate-900/50"
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <motion.h2
-            key={getTitle()}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight"
-          >
-            {getTitle()}
-          </motion.h2>
+    <div className="surface-card flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="min-w-36 text-lg font-semibold text-stone-900 dark:text-stone-50">
+          {getTitle()}
+        </h2>
 
-          {view !== 'list' && (
-            <div className="flex items-center gap-2">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handlePrevious}
-                className="p-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                title="上一页"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleToday}
-                className="px-4 py-2 text-sm font-medium rounded-xl bg-primary-100/80 dark:bg-primary-500/20 text-primary-700 dark:text-primary-300 hover:bg-primary-200/90 dark:hover:bg-primary-500/30 border border-primary-200/50 dark:border-primary-400/30 backdrop-blur-sm transition-all"
-              >
-                今天
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleNext}
-                className="p-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                title="下一页"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </motion.button>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex bg-slate-100/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl p-1.5 gap-1">
-            {VIEW_OPTIONS.map(({ key, icon: Icon, label }) => (
-              <motion.button
-                key={key}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onViewChange(key)}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium text-sm transition-all ${
-                  view === key
-                    ? 'bg-white/95 dark:bg-slate-700/80 backdrop-blur-sm shadow-md text-primary-700 dark:text-primary-200 border border-slate-200/50 dark:border-slate-600/50'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/50 dark:hover:bg-slate-700/50'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
-              </motion.button>
-            ))}
+        {view !== 'list' && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handlePrevious}
+              className="btn-secondary p-2"
+              aria-label="上一页"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleToday}
+              className="btn-secondary px-3 py-2 text-sm"
+            >
+              今天
+            </button>
+            <button
+              type="button"
+              onClick={handleNext}
+              className="btn-secondary p-2"
+              aria-label="下一页"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
-
-          <motion.button
-            whileHover={{ scale: 1.05, y: -1 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={onAddClick}
-            className="px-5 py-2.5 bg-gradient-to-r from-primary-600 to-primary-500 dark:from-primary-500 dark:to-primary-400 text-white rounded-xl font-medium shadow-lg shadow-primary-500/20 hover:shadow-xl hover:shadow-primary-500/30 hover:-translate-y-0.5 flex items-center gap-2 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            添加面试
-          </motion.button>
-        </div>
+        )}
       </div>
-    </motion.div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
+          {VIEW_OPTIONS.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onViewChange(key)}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                view === key
+                  ? 'bg-white text-primary-700 shadow-sm dark:bg-stone-700 dark:text-primary-200'
+                  : 'text-stone-600 hover:bg-white/70 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-white'
+              }`}
+              aria-pressed={view === key}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onAddClick}
+          className="btn-primary flex items-center gap-2 px-3.5 py-2 text-sm"
+        >
+          <Plus className="h-4 w-4" />
+          新建日程
+        </button>
+      </div>
+    </div>
   );
 };

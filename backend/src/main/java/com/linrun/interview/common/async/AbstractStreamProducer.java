@@ -9,8 +9,7 @@ import java.util.UUID;
 
 /**
  * 异步任务生产者模板基类。
- * 统一消息发送骨架与失败处理逻辑；底层引擎（Redis Stream / RocketMQ）
- * 由 {@link TaskQueueChannel} 屏蔽，{@code app.async.engine} 一行配置切换。
+ * 统一 RabbitMQ 消息发送骨架与失败处理逻辑。
  */
 @Slf4j
 public abstract class AbstractStreamProducer<T> {
@@ -22,28 +21,18 @@ public abstract class AbstractStreamProducer<T> {
     }
 
     protected void sendTask(T payload) {
-        doSend(payload, false);
+        doSend(payload);
     }
 
-    /**
-     * 以事务消息语义投递（RocketMQ 引擎下为 half 消息 → 本地事务 → commit；
-     * Redis Stream 引擎无事务消息，退化为普通入队，由补偿任务兜底）。
-     */
-    protected void sendTaskInTransaction(T payload) {
-        doSend(payload, true);
-    }
-
-    private void doSend(T payload, boolean transactional) {
+    private void doSend(T payload) {
         // 为每条任务生成稳定的 taskId 作为幂等去重键：消费侧据此保证"同一任务只真正执行一次"，
         // 重新入队重试、被认领接管时该 ID 都保持不变。子类的 buildMessage 返回不可变 Map，
         // 这里复制为可变 Map 后注入，子类无需感知。
         Map<String, String> message = new HashMap<>(buildMessage(payload));
         message.putIfAbsent(AsyncTaskStreamConstants.FIELD_TASK_ID, UUID.randomUUID().toString());
         try {
-            String messageId = transactional
-                ? taskQueueChannel.sendInTransaction(streamKey(), message)
-                : taskQueueChannel.send(streamKey(), message);
-            log.info("{}任务已发送到Stream: {}, messageId={}, taskId={}",
+            String messageId = taskQueueChannel.send(streamKey(), message);
+            log.info("{}任务已发送到 RabbitMQ: {}, messageId={}, taskId={}",
                 taskDisplayName(), payloadIdentifier(payload), messageId,
                 message.get(AsyncTaskStreamConstants.FIELD_TASK_ID));
         } catch (Exception e) {

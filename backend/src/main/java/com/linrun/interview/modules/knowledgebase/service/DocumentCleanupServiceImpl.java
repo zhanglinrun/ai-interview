@@ -1,9 +1,13 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
+import com.linrun.interview.common.evidence.DataDomain;
+import com.linrun.interview.infrastructure.file.FileStorageService;
+import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
+import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
+import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 文档版本清理服务实现（对齐业界实践 DocumentCleanupServiceImpl）。
@@ -19,17 +23,33 @@ public class DocumentCleanupServiceImpl implements DocumentCleanupService {
     private final VectorStoreService vectorStoreService;
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeDocumentVersionService versionService;
+    private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
+    private final FileStorageService fileStorageService;
+    private final SegmentTextCacheService segmentTextCacheService;
+    private final EvidenceSnapshotService evidenceSnapshotService;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public boolean cleanupOldVersionData(Long docId, Long versionId) {
         log.info("清理旧版本数据: docId={}, versionId={}", docId, versionId);
+        KnowledgeBaseVersionEntity version = versionService.getById(versionId).orElse(null);
+        KnowledgeBaseEntity document = knowledgeBaseEntityMapper.selectById(docId);
         // 1. 删 ES 向量
         vectorStoreService.removeByDocIdAndVersion(docId, versionId);
         // 2. 物理删该版本 segment
         segmentService.physicalDeleteByDocumentVersion(versionId);
         // 3. 物理删该版本记录
         versionService.physicalDeleteByVersionId(versionId);
+        segmentTextCacheService.evictAll();
+        segmentService.evictExpansionCache();
+        if (document != null) {
+            evidenceSnapshotService.markSourceUnavailable(
+                document.getUserId(), DataDomain.CANDIDATE,
+                String.valueOf(docId), String.valueOf(versionId));
+        }
+        if (version != null && version.getStorageKey() != null
+            && !version.getStorageKey().isBlank()) {
+            fileStorageService.deleteKnowledgeBase(version.getStorageKey());
+        }
         log.info("清理旧版本数据完成: docId={}, versionId={}", docId, versionId);
         return true;
     }

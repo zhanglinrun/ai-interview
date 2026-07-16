@@ -51,7 +51,7 @@ public class LlmProviderRegistry {
     private final LlmGlobalSettingMapper llmGlobalSettingMapper;
     private final UserLlmProviderMapper userLlmProviderMapper;
     private final ApiKeyEncryptionService encryptionService;
-    /** 全局 ChatModel 监听器（如 Langfuse generation 采集）；无则空列表。 */
+    /** 全局 ChatModel 监听器；无则空列表。 */
     private final List<ChatModelListener> chatModelListeners;
 
     private static final Map<String, String> RECOMMENDED_EMBEDDING_MODELS = Map.of(
@@ -117,7 +117,7 @@ public class LlmProviderRegistry {
     }
 
     /**
-     * 获取流式 {@link StreamingChatModel}，用于 SSE 场景（知识库问答、语音面试实时字幕）。
+     * 获取流式 {@link StreamingChatModel}，用于知识库问答、面试交互等 SSE 场景。
      */
     public StreamingChatModel getStreamingChatModel(String providerId) {
         String id = resolveProviderId(providerId);
@@ -169,21 +169,23 @@ public class LlmProviderRegistry {
             ProviderSnapshot config = loadUserProviderOrThrow(userId);
             log.info("[LlmProviderRegistry] Creating new user ChatModel: userId={}, model={}",
                 userId, config.model());
-            return createChatModel(config, config.model());
+            return new UserScopedUsageChatModel(
+                createChatModel(config, config.model()), userId);
         });
     }
 
     /**
      * 获取指定用户的 BYOK {@link StreamingChatModel}（缓存 key 含 userId，用户间互不串用）。
      *
-     * <p>语义同 {@link #getUserChatModel(Long)}，用于 SSE / 语音实时对话等流式场景。
+     * <p>语义同 {@link #getUserChatModel(Long)}，用于 RAG 问答和面试交互等流式场景。
      */
     public StreamingChatModel getUserStreamingChatModel(Long userId) {
         return streamingChatModelCache.computeIfAbsent(userStreamCacheKey(userId), key -> {
             ProviderSnapshot config = loadUserProviderOrThrow(userId);
             log.info("[LlmProviderRegistry] Creating new user StreamingChatModel: userId={}, model={}",
                 userId, config.model());
-            return createStreamingChatModel(config, config.model());
+            return new UserScopedUsageStreamingChatModel(
+                createStreamingChatModel(config, config.model()), userId);
         });
     }
 

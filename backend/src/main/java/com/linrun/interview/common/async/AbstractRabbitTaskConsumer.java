@@ -9,10 +9,10 @@ import org.springframework.retry.support.RetrySynchronizationManager;
 import java.util.Map;
 
 /**
- * RabbitMQ 消费者模板基类（{@code app.async.engine=rabbitmq} 时子类装配）。
+ * RabbitMQ 消费者模板基类。
  *
  * <p>只负责「解析 JSON 消息体 → 委托 {@link AbstractStreamConsumer#consumeFromBroker}」，
- * 业务处理、幂等去重与 RocketMQ 路径完全复用同一实现（{@link #delegate()} 返回的消费者 Bean）。
+ * 业务处理和幂等去重复用 {@link #delegate()} 返回的消费者 Bean。
  *
  * <p>重试次数取自监听容器重试建议链的 {@link RetryContext}：无状态重试期间 {@code getRetryCount()}
  * 返回当前已重试次数（首次为 0）。达到 {@link com.linrun.interview.common.constant.AsyncTaskStreamConstants#MAX_RETRY_COUNT}
@@ -39,7 +39,8 @@ public abstract class AbstractRabbitTaskConsumer {
         try {
             data = objectMapper.readValue(body, new TypeReference<Map<String, String>>() {});
         } catch (Exception e) {
-            log.error("RabbitMQ 消息体解析失败，丢弃: body={}", body, e);
+            log.error("RabbitMQ 消息体解析失败，丢弃: bodyLength={}",
+                body == null ? 0 : body.length(), e);
             return;
         }
         delegate().consumeFromBroker(data, currentRetryCount());

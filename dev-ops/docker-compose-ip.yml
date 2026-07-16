@@ -1,4 +1,4 @@
-# 生产部署 · 第一阶段（IP:端口 直连，无域名/无 HTTPS）
+# 临时引导模式（IP:端口，无 HTTPS；不作为 BYOK/MinerU 正式生产入口）
 # 与 docker-compose-prod.yml 的唯一差异：去掉 Caddy，改为把 frontend 直接发布到宿主机端口。
 # 访问：http://<服务器公网IP>:${WEB_HOST_PORT:-8080}
 #
@@ -6,18 +6,22 @@
 #   cp .env.prod.example .env   # 填好必填项（域名阶段同一个 .env 可复用）
 #   docker compose --env-file .env -f docker-compose-ip.yml up -d --build
 #
-# ⚠️ 纯 HTTP + IP 访问的两个限制（迁到域名+HTTPS 后解除）：
-#   1) 语音面试用不了：浏览器 getUserMedia 需要安全上下文(HTTPS)，http://IP 不算安全上下文。
-#      文字问答/出题/简历/BYOK 均正常。
-#   2) BYOK 填 Key 走明文传输：自己测试无妨，但别在此阶段让外人输入真实 Key（落库仍是 AES-GCM 加密，
+# ⚠️ 纯 HTTP + IP 访问的限制（迁到域名+HTTPS 后解除）：
+#   1) BYOK 填 Key 走明文传输：自己测试无妨，但别在此阶段让外人输入真实 Key（落库仍是 AES-GCM 加密，
 #      仅浏览器→服务器这段是明文）。
-#   3) 端口默认用 8080（非 80），规避大陆 80 端口对未备案域名的策略；纯 IP:8080 一般无需备案。
+#   2) 端口默认用 8080（非 80），规避大陆 80 端口对未备案域名的策略；纯 IP:8080 一般无需备案。
 #
 # 迁移到域名：备案通过后，改用 docker-compose-prod.yml（同一 .env、同一批 volume，数据不丢）：
 #   docker compose --env-file .env -f docker-compose-ip.yml down
 #   docker compose --env-file .env -f docker-compose-prod.yml up -d --build
 
 name: ai-interview
+
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   mysql:
@@ -39,11 +43,14 @@ services:
       - --innodb-buffer-pool-size=128M
       - --max-connections=60
     mem_limit: 384m
+    cpus: 0.60
+    logging: *container-logging
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping --protocol=TCP -h 127.0.0.1 -u root --silent"]
       interval: 5s
       timeout: 5s
       retries: 15
+      start_period: 20s
 
   redis:
     image: redis:7
@@ -53,11 +60,14 @@ services:
       - redis_data:/data
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
     mem_limit: 128m
+    cpus: 0.20
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 5s
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
@@ -70,11 +80,14 @@ services:
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     mem_limit: 1024m
+    cpus: 1.00
+    logging: *container-logging
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30
+      start_period: 30s
 
   minio:
     image: minio/minio:latest
@@ -87,14 +100,18 @@ services:
     volumes:
       - minio_data:/data
     mem_limit: 256m
+    cpus: 0.35
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 10s
 
   createbuckets:
     image: minio/mc
+    restart: "no"
     depends_on:
       minio:
         condition: service_healthy
@@ -103,23 +120,30 @@ services:
       /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} &&
       /usr/bin/mc mb --ignore-existing myminio/${MINIO_BUCKET:-ai-interview}
       "
+    mem_limit: 64m
+    cpus: 0.10
+    logging: *container-logging
 
   rabbitmq:
     image: rabbitmq:3.13-alpine
     container_name: interview-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ai_interview}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 设置强密码}
-      RABBITMQ_VM_MEMORY_HIGH_WATERMARK: "0.6"
+      # RabbitMQ 3.13 已拒绝旧的 RABBITMQ_VM_MEMORY_HIGH_WATERMARK 环境变量；
+      # 低并发 4C6G 部署保留镜像默认的保守内存水位。
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     mem_limit: 256m
+    cpus: 0.35
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
 
   app:
     build:
@@ -146,6 +170,8 @@ services:
       APP_JWT_SECRET: ${APP_JWT_SECRET:?必填：≥32 字节强随机}
       APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:?必填：BYOK 加密密钥，启用后勿改}
       APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DB: ${MYSQL_DB:-ai_interview}
@@ -165,45 +191,80 @@ services:
       # 否则回退 localhost:9000 → 上传报"文件读取失败"(STORAGE 4001)。
       MINIO_URL: http://minio:9000
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET:-ai-interview}
       AI_BAILIAN_API_KEY: ${AI_BAILIAN_API_KEY:?必填：全局 embedding 用的 DashScope Key}
       AI_MODEL: ${AI_MODEL:-qwen3.5-flash}
-      APP_ASYNC_ENGINE: rabbitmq
+      MINERU_ENABLED: ${MINERU_ENABLED:-true}
+      MINERU_BASE_URL: ${MINERU_BASE_URL:-https://mineru.net}
+      MINERU_API_TOKEN: ${MINERU_API_TOKEN:-}
+      MINERU_MODEL_VERSION: ${MINERU_MODEL_VERSION:-vlm}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_USER: ${RABBITMQ_USER:-ai_interview}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
-      # CORS：必须包含浏览器实际访问的 origin，否则跨域校验返回 403（前端显示"请求失败"）
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://49.233.155.18:8080,https://interview.xiaoxiong123.cloud}
-      # 4C4G 只保留面试主线：hybrid + RRF + 云端 rerank + small-to-big。
+      # CORS：必须包含浏览器实际访问的 origin，否则跨域校验返回 403。
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?必填：填写浏览器实际访问的 origin}
+      # 临时引导模式仍与 4C6G 生产基线保持相同 RAG 能力开关。
       APP_AI_RAG_RERANK_PROVIDER: cloud
-      APP_AI_RAG_GRAPH_ENABLED: "false"
-      APP_AI_RAG_GRAPH_AUTO_SYNC: "false"
-      APP_AI_RAG_GRAPH_SKILL_BOOTSTRAP: "false"
-      APP_AI_RAG_GRAPH_ENTITY_EXTRACTION_ENABLED: "false"
-      APP_AI_RAG_SQL_ENABLED: "false"
-      APP_AI_RAG_SQL_ROUTER_ENABLED: "false"
       APP_AI_RAG_CRAG_ENABLED: "false"
-      APP_AI_AGENT_GITHUB_ENABLED: "false"
-      APP_MCP_ENABLED: "false"
-      SPRING_AI_MCP_SERVER_ENABLED: "false"
-      # 不启 Neo4j：排除 langchain4j 社区 Neo4j 向量库自动配置（否则启动即连 localhost:7687 崩溃）；
-      # 同时保留 Rabbit 自动配置排除（由 RabbitMqEngineConfig 在 rabbitmq 引擎时再条件装配）。
-      SPRING_AUTOCONFIGURE_EXCLUDE: "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration,dev.langchain4j.community.neo4j.spring.Neo4jEmbeddingStoreAutoConfiguration,org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration,org.springframework.boot.autoconfigure.data.neo4j.Neo4jReactiveDataAutoConfiguration"
+      GITHUB_ENABLED: ${GITHUB_ENABLED:-true}
+      GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
+      GITHUB_PUBLIC_TOKEN: ${GITHUB_PUBLIC_TOKEN:-}
+      GITHUB_SYNC_MAX_FILES: ${GITHUB_SYNC_MAX_FILES:-120}
+      GITHUB_SYNC_MAX_BYTES: ${GITHUB_SYNC_MAX_BYTES:-10485760}
+      GITHUB_MCP_ENABLED: ${GITHUB_MCP_ENABLED:-false}
+      GITHUB_MCP_ENDPOINT: ${GITHUB_MCP_ENDPOINT:-https://api.githubcopilot.com/mcp/}
+      GITHUB_MCP_ACCESS_TOKEN: ${GITHUB_MCP_ACCESS_TOKEN:-}
+      GITHUB_MCP_MAX_RESPONSE_BYTES: ${GITHUB_MCP_MAX_RESPONSE_BYTES:-1048576}
+      JUDGE0_ENABLED: ${JUDGE0_ENABLED:-false}
+      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
+      JUDGE0_API_KEY: ${JUDGE0_API_KEY:-}
+      JUDGE0_API_HOST: ${JUDGE0_API_HOST:-}
+      JUDGE0_CONNECT_TIMEOUT_MS: ${JUDGE0_CONNECT_TIMEOUT_MS:-5000}
+      JUDGE0_REQUEST_TIMEOUT_MS: ${JUDGE0_REQUEST_TIMEOUT_MS:-10000}
+      JUDGE0_JAVA_LANGUAGE_ID: ${JUDGE0_JAVA_LANGUAGE_ID:-}
+      JUDGE0_PYTHON3_LANGUAGE_ID: ${JUDGE0_PYTHON3_LANGUAGE_ID:-}
+      JUDGE0_POLL_INTERVAL_MS: ${JUDGE0_POLL_INTERVAL_MS:-1000}
+      JUDGE0_TIMEOUT_SECONDS: ${JUDGE0_TIMEOUT_SECONDS:-30}
+      JUDGE0_CPU_TIME_LIMIT_SECONDS: ${JUDGE0_CPU_TIME_LIMIT_SECONDS:-3}
+      JUDGE0_MEMORY_LIMIT_KB: ${JUDGE0_MEMORY_LIMIT_KB:-262144}
+      LOGGING_FILE_NAME: /app/logs/app.json
+    volumes:
+      - app_logs:/app/logs
     mem_limit: 896m
+    cpus: 1.50
+    logging: *container-logging
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   frontend:
     build: ../frontend
     container_name: interview-frontend
     restart: unless-stopped
     depends_on:
-      - app
-    # 第一阶段：直接把前端(含内建 /api /ws 反代)发布到宿主机端口，IP 直连访问
+      app:
+        condition: service_healthy
+    # 第一阶段：直接把前端（含内建 /api 反代）发布到宿主机端口，IP 直连访问
     ports:
       - "${WEB_HOST_PORT:-8080}:80"
     mem_limit: 96m
+    cpus: 0.20
+    logging: *container-logging
+    healthcheck:
+      # 自定义 nginx.conf 只声明 IPv4 listen；避免 Alpine wget 将 localhost 解析到 ::1。
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mysql_data:
@@ -211,3 +272,4 @@ volumes:
   redis_data:
   minio_data:
   rabbitmq_data:
+  app_logs:

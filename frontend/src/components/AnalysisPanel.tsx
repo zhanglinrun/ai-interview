@@ -1,5 +1,4 @@
 import {useMemo} from 'react';
-import {motion} from 'framer-motion';
 import RadarChart from './RadarChart';
 import ScoreProgressBar from './ScoreProgressBar';
 import LoadingButtonContent from './LoadingButtonContent';
@@ -150,19 +149,6 @@ export default function AnalysisPanel({
     };
   }, [analysis]);
 
-  // 检测分析结果是否有效
-  const hasErrorKeywords = analysis?.summary && (
-    analysis.summary.includes('I/O error') ||
-    analysis.summary.includes('分析过程中出现错误') ||
-    analysis.summary.includes('简历分析失败') ||
-    analysis.summary.includes('Remote host terminated') ||
-    analysis.summary.includes('handshake')
-  );
-  const isAnalysisValid = analysis &&
-    analysis.overallScore >= 10 &&
-    analysis.summary &&
-    !hasErrorKeywords;
-
   // 判断是否为"分析中"状态
   const isProcessing = shouldPollAnalyzeResult(analyzeStatus, Boolean(analysis));
 
@@ -172,7 +158,7 @@ export default function AnalysisPanel({
     return (
       <EmptyState
         iconNode={
-          <div className="w-16 h-16 mx-auto mb-6 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
+          <div className="w-12 h-12 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/50 rounded-lg flex items-center justify-center">
             {isExplicitProcessing ? (
               <Loader2 className="w-8 h-8 text-blue-500 dark:text-blue-400 animate-spin" />
             ) : (
@@ -180,11 +166,11 @@ export default function AnalysisPanel({
             )}
           </div>
         }
-        title={isExplicitProcessing ? 'AI 正在分析中...' : '等待分析'}
+        title={isExplicitProcessing ? '正在分析简历' : '等待分析'}
         description={isExplicitProcessing
-          ? '请稍候，AI 正在对您的简历进行深度分析'
-          : '简历已上传成功，即将开始 AI 分析'}
-        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+          ? '分析完成后，页面会自动显示结果。'
+          : '简历已上传，正在等待处理。'}
+        className="surface-card p-10 text-center"
         descriptionClassName="text-slate-500 dark:text-slate-400 mb-4"
         action={<p className="text-sm text-slate-400 dark:text-slate-500">页面将自动刷新显示分析结果</p>}
       />
@@ -192,32 +178,30 @@ export default function AnalysisPanel({
   }
 
   // 处理分析失败状态
-  if (isAnalyzeStatusFailed(analyzeStatus) || !isAnalysisValid) {
+  if (isAnalyzeStatusFailed(analyzeStatus) || !analysis) {
     return (
       <EmptyState
         iconNode={
-          <div className="w-16 h-16 mx-auto mb-6 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center">
+          <div className="w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/50 rounded-lg flex items-center justify-center">
             <AlertCircle className="w-8 h-8 text-red-500 dark:text-red-400" />
           </div>
         }
         title="分析失败"
-        description="AI 服务暂时不可用，请稍后重试"
-        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+        description="暂时无法完成分析，请稍后重试。"
+        className="surface-card p-10 text-center"
         descriptionClassName="text-slate-500 dark:text-slate-400 mb-4"
         action={
           <>
-            {(analyzeError || analysis?.summary) && (
+            {analyzeError && (
               <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-left mb-4">
-                <p className="text-sm text-red-600 dark:text-red-400">{analyzeError || analysis?.summary}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">{analyzeError}</p>
               </div>
             )}
             {onReanalyze && (
-              <motion.button
+              <button
                 onClick={onReanalyze}
                 disabled={reanalyzing}
-                className="px-6 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-50 flex items-center gap-2 mx-auto"
               >
                 <LoadingButtonContent
                   loading={Boolean(reanalyzing)}
@@ -229,7 +213,7 @@ export default function AnalysisPanel({
                     重新分析
                   </span>
                 </LoadingButtonContent>
-              </motion.button>
+              </button>
             )}
           </>
         }
@@ -244,27 +228,20 @@ export default function AnalysisPanel({
   const expressionScore = analysis.expressionScore || 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* 核心评价和雷达图 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* 核心评价 */}
-        <motion.div
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
+        <div className="surface-card p-5">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
               <TrendingUp className="w-5 h-5" />
               <span className="font-semibold">核心评价</span>
             </div>
-            <motion.button
+            <button
               onClick={onExport}
               disabled={exporting}
-              className="px-4 py-2 border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-600 transition-all disabled:opacity-50 flex items-center gap-2"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              className="btn-secondary flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50"
             >
               <LoadingButtonContent
                 loading={exporting}
@@ -275,22 +252,22 @@ export default function AnalysisPanel({
                   导出分析报告
                 </span>
               </LoadingButtonContent>
-            </motion.button>
+            </button>
           </div>
 
           <div
-              className="bg-gradient-to-br from-emerald-50 dark:from-emerald-900/30 to-green-50 dark:to-slate-800 rounded-xl p-6">
+              className="rounded-lg border border-stone-200 bg-stone-50 p-5 dark:border-stone-700 dark:bg-stone-900/40">
             <p className="text-lg text-slate-800 dark:text-white leading-relaxed mb-6">
-              {analysis.summary || '候选人具备扎实的技术基础，有大型项目架构经验。'}
+              {analysis.summary || '暂无总结'}
             </p>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-5">
+              <div className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-slate-800">
                 <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 block mb-2">总分</span>
                 <span className="text-4xl font-bold text-slate-900 dark:text-white">{analysis.overallScore || 0}</span>
                 <span className="text-sm text-slate-500 dark:text-slate-400">/ 100</span>
               </div>
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-5">
+              <div className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-slate-800">
                 <span
                     className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 block mb-2">分析时间</span>
                 <span className="text-sm text-slate-700 dark:text-slate-300">
@@ -301,13 +278,13 @@ export default function AnalysisPanel({
 
             {/* 优势标签 */}
             {analysis.strengths && analysis.strengths.length > 0 && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl p-4">
+                <div className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-slate-800">
                   <span
                       className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 block mb-3">优势亮点</span>
                 <div className="flex flex-wrap gap-2">
                   {analysis.strengths.map((s: string, i: number) => (
                       <span key={i}
-                            className="px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm font-medium">
+                            className="px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm font-medium">
                       {s}
                     </span>
                   ))}
@@ -315,15 +292,10 @@ export default function AnalysisPanel({
               </div>
             )}
           </div>
-        </motion.div>
+        </div>
 
         {/* 多维度评分雷达图 */}
-        <motion.div
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
+        <div className="surface-card p-5">
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-6">
             <Target className="w-5 h-5" />
             <span className="font-semibold">多维度评分</span>
@@ -338,7 +310,6 @@ export default function AnalysisPanel({
               score={projectScore}
               maxScore={40}
               color="bg-purple-500"
-              delay={0.3}
               className="col-span-2"
             />
             <ScoreProgressBar
@@ -346,40 +317,31 @@ export default function AnalysisPanel({
               score={skillMatchScore}
               maxScore={20}
               color="bg-blue-500"
-              delay={0.4}
             />
             <ScoreProgressBar
               label="内容完整性"
               score={contentScore}
               maxScore={15}
               color="bg-emerald-500"
-              delay={0.5}
             />
             <ScoreProgressBar
               label="结构清晰度"
               score={structureScore}
               maxScore={15}
               color="bg-cyan-500"
-              delay={0.6}
             />
             <ScoreProgressBar
               label="表达专业性"
               score={expressionScore}
               maxScore={10}
               color="bg-orange-500"
-              delay={0.7}
             />
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* 改进建议 - 按优先级分类 */}
-      <motion.div
-          className="bg-white dark:bg-slate-800 rounded-2xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
+      <div className="surface-card p-5">
         <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-6">
           <CheckCircle2 className="w-5 h-5" />
           <span className="font-semibold">改进建议</span>
@@ -394,7 +356,6 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="高"
               suggestions={suggestionsByPriority.high}
-              delay={0.4}
             />
           )}
 
@@ -403,7 +364,6 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="中"
               suggestions={suggestionsByPriority.medium}
-              delay={0.5}
             />
           )}
 
@@ -412,7 +372,6 @@ export default function AnalysisPanel({
             <SuggestionSection
               priority="低"
               suggestions={suggestionsByPriority.low}
-              delay={0.6}
             />
           )}
 
@@ -424,7 +383,7 @@ export default function AnalysisPanel({
             />
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -432,31 +391,26 @@ export default function AnalysisPanel({
 // 建议分组组件
 function SuggestionSection({
   priority,
-  suggestions,
-  delay
+  suggestions
 }: {
   priority: SuggestionPriority;
   suggestions: Suggestion[];
-  delay: number;
 }) {
   const styles = PRIORITY_STYLES[priority];
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
-        <span className={`px-3 py-1 ${styles.headerBgClassName} ${styles.headerTextClassName} rounded-full text-sm font-semibold`}>
+        <span className={`px-3 py-1 ${styles.headerBgClassName} ${styles.headerTextClassName} rounded-md text-sm font-semibold`}>
           {priority}优先级 ({suggestions.length})
         </span>
         <div className={`flex-1 h-px ${styles.dividerClassName}`}></div>
       </div>
       <div className="space-y-3">
         {suggestions.map((s, i) => (
-            <motion.div
+          <div
             key={`${priority}-${i}`}
-            className={`p-4 rounded-xl border-2 ${styles.cardClassName}`}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: delay + i * 0.1 }}
+            className={`p-4 rounded-lg border ${styles.cardClassName}`}
           >
             <div className="flex items-start gap-3 mb-2">
               <span className={`px-2 py-0.5 rounded text-xs font-semibold ${styles.badgeClassName}`}>
@@ -470,7 +424,7 @@ function SuggestionSection({
               <p className="font-semibold text-slate-900 dark:text-white mb-1">{s.issue || '问题描述'}</p>
               <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{s.recommendation || '暂无具体建议'}</p>
             </div>
-          </motion.div>
+          </div>
         ))}
       </div>
     </div>

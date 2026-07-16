@@ -64,17 +64,8 @@ public class KnowledgeBaseEntity extends BaseEntity {
     // 文档描述（对齐业界实践 KnowledgeDocument.description）
     private String description;
 
-    private String dataTableName;
-
-    private String dataSchemaJson;
-
-    private Integer dataRowCount;
-
     // 文档状态机（对齐业界实践 DocumentStatus）
     private DocumentStatus docStatus;
-
-    /** 知识库类型：语义检索 / 数据查询。 */
-    private String knowledgeBaseType;
 
     /** 可见范围：PRIVATE / PUBLIC（对齐业界实践 accessibleBy）。 */
     private String accessibleBy;
@@ -220,44 +211,12 @@ public class KnowledgeBaseEntity extends BaseEntity {
         this.description = description;
     }
 
-    public String getDataTableName() {
-        return dataTableName;
-    }
-
-    public void setDataTableName(String dataTableName) {
-        this.dataTableName = dataTableName;
-    }
-
-    public String getDataSchemaJson() {
-        return dataSchemaJson;
-    }
-
-    public void setDataSchemaJson(String dataSchemaJson) {
-        this.dataSchemaJson = dataSchemaJson;
-    }
-
-    public Integer getDataRowCount() {
-        return dataRowCount;
-    }
-
-    public void setDataRowCount(Integer dataRowCount) {
-        this.dataRowCount = dataRowCount;
-    }
-
     public DocumentStatus getDocStatus() {
         return docStatus;
     }
 
     public void setDocStatus(DocumentStatus docStatus) {
         this.docStatus = docStatus;
-    }
-
-    public String getKnowledgeBaseType() {
-        return knowledgeBaseType;
-    }
-
-    public void setKnowledgeBaseType(String knowledgeBaseType) {
-        this.knowledgeBaseType = knowledgeBaseType;
     }
 
     public String getAccessibleBy() {

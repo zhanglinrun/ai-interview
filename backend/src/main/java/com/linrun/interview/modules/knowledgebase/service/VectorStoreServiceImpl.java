@@ -41,8 +41,6 @@ public class VectorStoreServiceImpl implements VectorStoreService {
 
     private static final String DOC_ID_KEY = "docId";
     private static final String VERSION_KEY = "version";
-    private static final int EMBEDDING_BATCH_SIZE = 10;
-
     private final ElasticsearchEmbeddingStore embeddingStore;
     private final LlmProviderRegistry llmProviderRegistry;
     private final ObjectMapper objectMapper;
@@ -59,11 +57,21 @@ public class VectorStoreServiceImpl implements VectorStoreService {
         EmbeddingModel model = embeddingModel();
         List<TextSegment> textSegments = segments.stream().map(this::toTextSegment).toList();
         List<String> embeddingIds = new ArrayList<>(segments.size());
-        for (int from = 0; from < textSegments.size(); from += EMBEDDING_BATCH_SIZE) {
-            int to = Math.min(from + EMBEDDING_BATCH_SIZE, textSegments.size());
+        for (int from = 0; from < textSegments.size(); from += EmbeddingBatchPolicy.MAX_BATCH_SIZE) {
+            int to = Math.min(from + EmbeddingBatchPolicy.MAX_BATCH_SIZE, textSegments.size());
             List<TextSegment> batch = textSegments.subList(from, to);
             Response<List<Embedding>> embeddingResponse = model.embedAll(batch);
-            embeddingIds.addAll(embeddingStore.addAll(embeddingResponse.content(), batch));
+            List<Embedding> content = embeddingResponse == null ? null : embeddingResponse.content();
+            if (content == null || content.size() != batch.size()) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                    "Embedding 返回数量与请求分段数量不一致");
+            }
+            List<String> batchIds = embeddingStore.addAll(content, batch);
+            if (batchIds == null || batchIds.size() != batch.size()) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                    "向量索引返回数量与请求分段数量不一致");
+            }
+            embeddingIds.addAll(batchIds);
         }
         if (embeddingIds.size() != segments.size()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
@@ -116,7 +124,7 @@ public class VectorStoreServiceImpl implements VectorStoreService {
     @Override
     public void removeByDocId(Long docId) {
         try {
-            Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(docId);
+            Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(String.valueOf(docId));
             embeddingStore.removeAll(filter);
             log.info("按docId删除向量成功: docId={}", docId);
         } catch (Exception e) {
@@ -130,7 +138,8 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             return;
         }
         try {
-            Filter filter = metadataKey(DOC_ID_KEY).isIn(docIds);
+            Filter filter = metadataKey(DOC_ID_KEY).isIn(
+                docIds.stream().map(String::valueOf).toList());
             embeddingStore.removeAll(filter);
             log.info("按docIds批量删除向量成功: count={}", docIds.size());
         } catch (Exception e) {
@@ -143,8 +152,8 @@ public class VectorStoreServiceImpl implements VectorStoreService {
         // 删除失败必须阻断调用方的状态推进（否则 ES 残留孤儿向量、检索命中旧内容），
         // 由调用方决定回滚或对账兜底
         try {
-            Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(docId)
-                .and(metadataKey(VERSION_KEY).isEqualTo(versionId));
+            Filter filter = metadataKey(DOC_ID_KEY).isEqualTo(String.valueOf(docId))
+                .and(metadataKey(VERSION_KEY).isEqualTo(String.valueOf(versionId)));
             embeddingStore.removeAll(filter);
             log.info("按docId+versionId删除向量成功: docId={}, versionId={}", docId, versionId);
         } catch (Exception e) {

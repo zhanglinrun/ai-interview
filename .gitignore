@@ -61,17 +61,15 @@ qodana.yaml
 .playwright-mcp/
 CLAUDE.md
 GEMINI.md
-SETUP_API_KEYS.md
-
-# Upstream local documentation
-docs/
 
 # Markdown documentation (local notes — do not commit)
-# 保留根目录 README、面试 Skill 资源与测试夹具中的 .md
+# 保留正式公开文档、部署文档与测试夹具中的 .md
 **/*.md
 !/README.md
-!/dev-ops/DEPLOY.md
-!backend/src/main/resources/skills/**/*.md
+!/SETUP_API_KEYS.md
+!/docs/
+!/docs/**/*.md
+!/dev-ops/**/*.md
 !backend/src/test/resources/test-files/sample-resume.md
 
 # OS files

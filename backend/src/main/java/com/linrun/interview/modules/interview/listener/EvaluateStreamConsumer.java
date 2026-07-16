@@ -66,7 +66,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.sessionCache = sessionCache;
     }
 
-    record EvaluatePayload(String sessionId) {}
+    record EvaluatePayload(String sessionId, Long userId) {}
 
     @Override
     protected String taskDisplayName() {
@@ -81,28 +81,43 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected EvaluatePayload parsePayload(StreamMessageId messageId, Map<String, String> data) {
         String sessionId = data.get(AsyncTaskStreamConstants.FIELD_SESSION_ID);
-        if (sessionId == null) {
+        String userId = data.get(AsyncTaskStreamConstants.FIELD_USER_ID);
+        if (sessionId == null || userId == null) {
             log.warn("消息格式错误，跳过: messageId={}", messageId);
             return null;
         }
-        return new EvaluatePayload(sessionId);
+        try {
+            return new EvaluatePayload(sessionId, Long.parseLong(userId));
+        } catch (NumberFormatException e) {
+            log.warn("消息用户 ID 格式错误，跳过: messageId={}", messageId);
+            return null;
+        }
     }
 
     @Override
     protected String payloadIdentifier(EvaluatePayload payload) {
-        return "sessionId=" + payload.sessionId();
+        return "sessionId=" + payload.sessionId() + ", userId=" + payload.userId();
+    }
+
+    @Override
+    protected boolean shouldSkip(EvaluatePayload payload) {
+        Optional<InterviewSessionEntity> session = persistenceService.findBySessionIdInternal(
+            payload.sessionId());
+        return session.isEmpty()
+            || !payload.userId().equals(session.get().getUserId())
+            || session.get().getEvaluateStatus() == AsyncTaskStatus.COMPLETED;
     }
 
     @Override
     protected void markProcessing(EvaluatePayload payload) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.PROCESSING, null);
+        updateEvaluateStatus(payload, AsyncTaskStatus.PROCESSING, null);
     }
 
     @Override
     protected void processBusiness(EvaluatePayload payload) {
         String sessionId = payload.sessionId();
         Optional<InterviewSessionEntity> sessionOpt = persistenceService.findBySessionIdInternal(sessionId);
-        if (sessionOpt.isEmpty()) {
+        if (sessionOpt.isEmpty() || !payload.userId().equals(sessionOpt.get().getUserId())) {
             log.warn("会话已被删除，跳过评估任务: sessionId={}", sessionId);
             return;
         }
@@ -141,8 +156,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             }
         }
 
-        // 异步评估无 UserContext：从会话实体恢复 userId，走该用户的 BYOK「我的模型」
-        ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
+        // userId 来自持久化消息并与实体交叉校验，异步线程不读取 UserContext。
+        ChatModel chatModel = llmProviderRegistry.getUserChatModel(payload.userId());
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
@@ -154,21 +169,27 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
     @Override
     protected void markCompleted(EvaluatePayload payload) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.COMPLETED, null);
+        updateEvaluateStatus(payload, AsyncTaskStatus.COMPLETED, null);
     }
 
     @Override
     protected void markFailed(EvaluatePayload payload, String error) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.FAILED, error);
+        updateEvaluateStatus(payload, AsyncTaskStatus.FAILED, error);
     }
 
     /**
      * 更新评估状态
      */
-    private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
+    private void updateEvaluateStatus(EvaluatePayload payload, AsyncTaskStatus status, String error) {
+        String sessionId = payload.sessionId();
         try {
             EntityQueries.selectOne(sessionRepository, InterviewSessionEntity::getSessionId, sessionId)
                 .ifPresent(session -> {
+                if (!payload.userId().equals(session.getUserId())) {
+                    log.warn("拒绝更新其他用户的面试评估状态: sessionId={}, messageUserId={}",
+                        sessionId, payload.userId());
+                    return;
+                }
                 session.setEvaluateStatus(status);
                 session.setEvaluateError(error);
                 MapperUtils.save(sessionRepository, session);

@@ -6,7 +6,6 @@ import com.linrun.interview.common.result.Result;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewIntent;
 import com.linrun.interview.modules.knowledgebase.service.RagPromptService;
@@ -80,13 +79,6 @@ public class RagModuleController {
       sb.append(String.format(Locale.ROOT, "[score=%.4f] %s%n", scores.get(i), docs.get(i).text()));
     }
     return Result.success(sb.toString().trim());
-  }
-
-  @GetMapping("/router-strategy")
-  @RateLimit(dimension = RateLimit.Dimension.USER, count = 10)
-  public Result<String> testRouterStrategy(@RequestParam String question) {
-    return Result.success(InterviewQueryRouter.class.getSimpleName()
-        + " 已接入 KnowledgeBaseQueryService 编排（本端点仅作连通性探测）");
   }
 
   private String loadClasspathPrompt(String location) {

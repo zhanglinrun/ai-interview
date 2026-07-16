@@ -15,8 +15,6 @@ public class ProgressAwareContentRetriever implements ContentRetriever {
 
   public enum Kind {
     ES("正在检索知识库..."),
-    SQL("正在检索数据库..."),
-    NEO4J("正在检索知识图谱..."),
     GENERIC("正在检索文档...");
 
     private final String message;

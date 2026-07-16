@@ -16,7 +16,10 @@ RUN mvn -B -ntp -pl backend -am package -Dmaven.test.skip=true && \
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system app && useradd --system --gid app --home-dir /app app
 
 ENV JAVA_OPTS="-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
 

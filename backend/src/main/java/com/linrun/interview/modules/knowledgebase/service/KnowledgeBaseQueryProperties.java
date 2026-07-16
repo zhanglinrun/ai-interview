@@ -19,9 +19,6 @@ public class KnowledgeBaseQueryProperties {
     private Fusion fusion = new Fusion();
     private ParentExpand parentExpand = new ParentExpand();
     private IntentRecognition intentRecognition = new IntentRecognition();
-    private Sql sql = new Sql();
-    private Routing routing = new Routing();
-    private Graph graph = new Graph();
     private Generation generation = new Generation();
     private TitleSummary titleSummary = new TitleSummary();
     private Decompose decompose = new Decompose();
@@ -210,54 +207,6 @@ public class KnowledgeBaseQueryProperties {
     }
 
     /**
-     * 查询路由 / Text2SQL / Text2Cypher 专用模型（对齐业界实践）。
-     */
-    @Data
-    public static class Routing {
-        private String model = "";
-    }
-
-    /**
-     * Neo4j Text2Cypher 图检索配置。
-     */
-    @Data
-    public static class Graph {
-        private boolean enabled = true;
-        private String cypherPromptPath = "classpath:prompts/text-to-cypher-prompt.txt";
-        /** 向量化完成后自动从分段抽取概念节点写入 Neo4j */
-        private boolean autoSyncOnVectorize = true;
-        /** 启动时从 skills 目录各子目录 SKILL.md 预置 Skill 图谱 */
-        private boolean skillBootstrapEnabled = true;
-        /** 实体级图谱（P2 加深）：LLM 实体抽取同步 + 实体锚点检索 */
-        private Entity entity = new Entity();
-
-        /**
-         * 实体级图谱配置：向量化完成后 LLM 从 chunk 抽取技术实体与关系，写
-         * {@code (:Entity)-[:RELATES{type}]->(:Entity)} 与 {@code (:Entity)-[:MENTIONED_IN]->(:Chunk)}；
-         * 检索期以问题命中的实体为锚点做 2 跳遍历回捞关联 chunk（带关系路径说明）。
-         */
-        @Data
-        public static class Entity {
-            /** 是否在向量化完成后追加 LLM 实体抽取同步（失败不阻断主链路） */
-            private boolean extractionEnabled = true;
-            /** 实体抽取专用模型（建议最便宜模型）；空则复用路由模型 */
-            private String model = "";
-            /** 每次 LLM 调用携带的 chunk 数 */
-            private int batchSize = 8;
-            /** 实体抽取批次并发上限（虚拟线程） */
-            private int maxConcurrency = 4;
-            /** 实体抽取 prompt 模板路径 */
-            private String promptPath = "classpath:prompts/rag/graph-entity-extract.st";
-            /** 检索期问题实体锚点上限 */
-            private int maxAnchors = 5;
-            /** 检索期图谱遍历路径条数上限 */
-            private int maxPaths = 20;
-            /** 检索期回捞关联 chunk 上限 */
-            private int maxChunks = 6;
-        }
-    }
-
-    /**
      * RAG 流式生成模型配置（对齐业界实践 ragChatModel）。
      */
     @Data
@@ -265,20 +214,6 @@ public class KnowledgeBaseQueryProperties {
         /** 流式回答专用模型；空则复用默认 StreamingChatModel */
         private String streamingModel = "qwen3.6-plus";
         private double temperature = 0.2;
-    }
-
-    /**
-     * Text2SQL 结构化检索：查询当前用户的简历、面试记录、评分和日程。
-     */
-    @Data
-    public static class Sql {
-        /** 默认关闭：面试备考知识库无结构化数据问答场景，保留实现按需开启 */
-        private boolean enabled = false;
-        private boolean routerEnabled = false;
-        private int queryTimeoutSeconds = 8;
-        private int maxRows = 100;
-        /** Text2SQL Prompt 模板（对齐业界实践 text-to-sql-prompt.txt） */
-        private String promptPath = "classpath:prompts/text-to-sql-prompt.txt";
     }
 
     /**

@@ -115,7 +115,7 @@ public class RagEvaluationService {
                 chunkId,
                 parseLong(segment.metadata().getString(MetadataKeyConstant.DOC_ID)),
                 snippet(segment.text()),
-                parseDouble(segment.metadata().getString("SCORE"))));
+                parseScore(segment.metadata().toMap().get("SCORE"))));
             if (matches(segment, expectedChunkIds, expectedKeywords)) {
                 int rank = i + 1;
                 if (firstHitRank == 0) {
@@ -176,12 +176,20 @@ public class RagEvaluationService {
         }
     }
 
-    private Double parseDouble(String value) {
-        try {
-            return value == null || value.isBlank() ? null : round(Double.parseDouble(value));
-        } catch (NumberFormatException e) {
+    private Double parseScore(Object value) {
+        double score;
+        if (value instanceof Number number) {
+            score = number.doubleValue();
+        } else if (value instanceof String text) {
+            try {
+                score = Double.parseDouble(text);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        } else {
             return null;
         }
+        return Double.isFinite(score) ? round(score) : null;
     }
 
     private double log2(double value) {

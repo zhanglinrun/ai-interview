@@ -84,7 +84,11 @@ export default function RadarChart({ data, height = 320, className = '' }: Radar
 
   return (
     <div className={className} style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        initialDimension={{ width: 640, height }}
+      >
         <RechartsRadarChart data={normalizedData}>
             <PolarGrid stroke={gridColor}/>
           <PolarAngleAxis

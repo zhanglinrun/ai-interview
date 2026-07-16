@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useMemo, useRef, useState, useTransition} from 'react';
-import {AnimatePresence, motion} from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
@@ -19,7 +18,9 @@ import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import CodeBlock from '../components/CodeBlock';
 import {EmptyState, LoadingState} from '../components/PageState';
+import PageHeader from '../components/ui/PageHeader';
 import {BarChart3, Bug, ChevronLeft, ChevronRight, Edit, MessageSquare, Pin, Plus, Trash2, X,} from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 
 interface KnowledgeBaseQueryPageProps {
   onBack: () => void;
@@ -39,7 +40,28 @@ interface CategoryGroup {
   isExpanded: boolean;
 }
 
+export function buildRagCardFollowUp(choice: RagCardChoice): string {
+  switch (choice.type) {
+    case 'schedule':
+      return `请查询「${choice.label}」的面试安排`;
+    case 'session':
+      return `请总结这场面试：「${choice.label}」`;
+    case 'jobTrack':
+    case 'skill':
+      return `请针对「${choice.label}」方向给出面试准备建议`;
+    default:
+      return `请分析简历「${choice.label}」`;
+  }
+}
+
+export function removeQuestionSearchParam(searchParams: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  next.delete('question');
+  return next;
+}
+
 export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBaseQueryPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   // 知识库状态
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([]);
   const [selectedKbIds, setSelectedKbIds] = useState<Set<number>>(new Set());
@@ -63,13 +85,12 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [newSessionTitle, setNewSessionTitle] = useState('');
 
   // 消息状态
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState(() => searchParams.get('question')?.slice(0, 2000) ?? '');
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   // 当前流式回答的阶段进度（来自 progress: 前缀事件），显示在助手气泡上方
   const [progressText, setProgressText] = useState('');
   const [rewrittenQuestion, setRewrittenQuestion] = useState('');
-  const [routeInfo, setRouteInfo] = useState<{ strategy: string; reasoning: string } | null>(null);
   // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
   const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
   const [cardMessage, setCardMessage] = useState('');
@@ -313,7 +334,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setLoading(true);
     setProgressText('');
     setRewrittenQuestion('');
-    setRouteInfo(null);
     setActiveSources(null);
     setCardMessage('');
     setCardChoices([]);
@@ -331,6 +351,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         setLoading(false);
         return;
       }
+    }
+
+    if (searchParams.has('question')) {
+      setSearchParams(removeQuestionSearchParam(searchParams), { replace: true });
     }
 
     const userMessage: Message = {
@@ -362,6 +386,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       });
     };
 
+    let cardContent = '';
     try {
       await ragChatApi.sendMessageStream(
         sessionId,
@@ -378,10 +403,12 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           });
         },
         () => {
+          if (!fullContent.trim()) {
+            updateAssistantMessage(cardContent || '本次回答未生成有效内容，请重新提问。');
+          }
           setLoading(false);
           setProgressText('');
           setRewrittenQuestion('');
-          setRouteInfo(null);
           setActiveSources(null);
           loadSessions();
         },
@@ -391,7 +418,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setLoading(false);
           setProgressText('');
           setRewrittenQuestion('');
-          setRouteInfo(null);
           setActiveSources(null);
         },
         (text: string) => {
@@ -401,6 +427,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setActiveSources(sources);
         },
         (text: string) => {
+          cardContent = text;
           setCardMessage(text);
         },
         (choices: RagCardChoice[]) => {
@@ -408,9 +435,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         (text: string) => {
           setRewrittenQuestion(text);
-        },
-        (route) => {
-          setRouteInfo(route);
         }
       );
     } catch (err) {
@@ -431,7 +455,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         throw new Error('请输入至少一条评测用例');
       }
       const k = Array.isArray(parsed) ? 5 : parsed.k;
-      const title = Array.isArray(parsed) ? '手动 RAG 评测' : parsed.title;
+      const title = Array.isArray(parsed) ? '手动检索评测' : parsed.title;
       setEvalResult(await knowledgeBaseApi.evaluateRetrieval({
         knowledgeBaseIds: Array.from(selectedKbIds),
         items,
@@ -484,7 +508,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     }
   };
 
-  const handleRunDebug = async (mode: 'intent' | 'prompt' | 'rewrite' | 'rerank' | 'router') => {
+  const handleRunDebug = async (mode: 'intent' | 'prompt' | 'rewrite' | 'rerank') => {
     if (!debugQuestion.trim()) return;
     setDebugLoading(true);
     setDebugOutput('');
@@ -497,10 +521,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       } else if (mode === 'rewrite') {
         const result = await ragModuleApi.testRewrite(debugQuestion.trim());
         setDebugOutput(result.join('\n---\n'));
-      } else if (mode === 'rerank') {
-        setDebugOutput(await ragModuleApi.testRerank(debugQuestion.trim()));
       } else {
-        setDebugOutput(await ragModuleApi.testRouterStrategy(debugQuestion.trim()));
+        setDebugOutput(await ragModuleApi.testRerank(debugQuestion.trim()));
       }
     } catch (err) {
       setDebugOutput(getErrorMessage(err, '调试请求失败'));
@@ -510,75 +532,53 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   };
 
   return (
-    <div className="max-w-7xl mx-auto pt-8 pb-10 px-4">
-      {/* 头部 */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">问答助手</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm">选择知识库，向 AI 提问</p>
-        </div>
-        <div className="flex gap-3">
-          <motion.button
-            onClick={onUpload}
-            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            上传知识库
-          </motion.button>
-          <motion.button
-            onClick={() => setDebugOpen((v) => !v)}
-            title="开发者工具：单独调试意图识别 / Query 改写 / Rerank / 路由等 RAG 模块，观察每个环节的中间结果"
-            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <span className="inline-flex items-center gap-1.5">
+    <div className="max-w-7xl mx-auto pb-6">
+      <PageHeader
+        eyebrow="知识库"
+        title="知识问答"
+        description="选择资料后提问，回答会标注引用来源。"
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <button onClick={onUpload} className="btn-secondary px-3 py-2 text-sm">上传资料</button>
+            <button
+              onClick={() => setDebugOpen((v) => !v)}
+              title="查看意图识别、问题改写和重排结果"
+              className="btn-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm"
+            >
               <Bug className="w-4 h-4" />
-              RAG 调试
-            </span>
-          </motion.button>
-          <motion.button
-            onClick={() => setEvalOpen(true)}
-            disabled={selectedKbIds.size === 0}
-            title="开发者工具：对勾选的知识库批量跑检索质量评测（Hit@K / MRR / NDCG），需先在右侧勾选知识库"
-            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm disabled:opacity-50"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <span className="inline-flex items-center gap-1.5">
+              链路调试
+            </button>
+            <button
+              onClick={() => setEvalOpen(true)}
+              disabled={selectedKbIds.size === 0}
+              title="先在右侧选择需要评测的资料"
+              className="btn-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+            >
               <BarChart3 className="w-4 h-4" />
-              RAG 评测
-            </span>
-          </motion.button>
-          <motion.button
-            onClick={onBack}
-            className="px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-sm"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            返回
-          </motion.button>
-        </div>
-      </div>
+              检索评测
+            </button>
+            <button onClick={onBack} className="btn-secondary px-3 py-2 text-sm">返回</button>
+          </div>
+        )}
+      />
 
-      <div className="flex gap-4 h-[calc(100vh-10rem)]">
+      <div className={`grid gap-4 lg:h-[calc(100vh-10rem)] ${rightPanelOpen
+        ? 'lg:grid-cols-[16rem_minmax(0,1fr)_17.5rem]'
+        : 'lg:grid-cols-[16rem_minmax(0,1fr)_2.5rem]'}`}>
         {/* 左侧：对话历史 */}
-        <div className="w-64 flex-shrink-0">
+        <div className="min-h-0 w-full lg:h-full">
           <div
-              className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm h-full flex flex-col border border-slate-100 dark:border-slate-700">
+              className="surface-card flex max-h-72 flex-col p-3 lg:h-full lg:max-h-none">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold text-slate-800 dark:text-white">对话历史</h2>
-              <motion.button
+              <button
                 onClick={handleNewSession}
                 disabled={selectedKbIds.size === 0}
                 className="p-1.5 text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
                 title="新建对话"
               >
                 <Plus className="w-5 h-5" />
-              </motion.button>
+              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
@@ -596,13 +596,20 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                     <div
                       key={session.id}
                       onClick={() => handleLoadSession(session.id)}
-                      className={`p-3 rounded-lg cursor-pointer transition-all group ${currentSessionId === session.id
+                      className={`group cursor-pointer rounded-lg p-3 transition-colors focus-within:ring-2 focus-within:ring-primary-500 ${currentSessionId === session.id
                           ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-500'
                           : 'bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 border border-transparent'
                         } ${session.isPinned ? 'border-l-4 border-l-primary-500' : ''}`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleLoadSession(session.id);
+                          }}
+                          className="min-w-0 flex-1 text-left focus-visible:outline-none"
+                        >
                           <div className="flex items-center gap-1.5">
                             {session.isPinned && (
                               <Pin className="w-3.5 h-3.5 text-primary-500 fill-primary-500 flex-shrink-0" />
@@ -612,8 +619,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                             {session.messageCount} 条消息 · {formatTimeAgo(session.updatedAt)}
                           </p>
-                        </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        </button>
+                        <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 lg:opacity-0">
                           <button
                             onClick={(e) => handleTogglePin(session.id, e)}
                             className={`p-1 rounded transition-colors ${session.isPinned
@@ -655,9 +662,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         </div>
 
         {/* 中间：聊天区域 */}
-        <div className="flex-1 min-w-0">
+        <div className="min-h-[34rem] min-w-0 lg:h-full">
           <div
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm flex flex-col h-full border border-slate-100 dark:border-slate-700">
+              className="surface-card flex flex-col h-full">
             {selectedKbIds.size > 0 ? (
               <>
                 {/* 会话信息 */}
@@ -680,14 +687,14 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   </div>
                   {kbNeedsSync && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-                      <p className="text-xs text-amber-800 dark:text-amber-200">知识库选择已变更</p>
+                      <p className="text-xs text-amber-800 dark:text-amber-200">本次对话使用的资料已更改</p>
                       <button
                         type="button"
                         disabled={syncingKb}
                         onClick={() => void handleSyncKnowledgeBases()}
                         className="text-xs px-2.5 py-1 rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
                       >
-                        {syncingKb ? '同步中...' : '同步到当前会话'}
+                        {syncingKb ? '更新中...' : '更新本次对话'}
                       </button>
                     </div>
                   )}
@@ -699,7 +706,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                       <div
                           className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
                       <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                      <p className="text-sm">开始提问吧！</p>
+                      <p className="text-sm">输入一个问题开始对话</p>
                     </div>
                   ) : (
                     <Virtuoso
@@ -710,13 +717,11 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                       className="h-full w-full"
                       itemContent={(index, msg) => (
                           <div className="pb-4 px-4 first:pt-4 dark:bg-slate-800">
-                          <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
+                          <div
                             className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`max-w-[85%] rounded-2xl p-4 shadow-sm ${msg.type === 'user'
+                              className={`max-w-[85%] rounded-lg p-4 ${msg.type === 'user'
                                 ? 'bg-primary-600 text-white'
                                   : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-600 text-slate-800 dark:text-slate-100'
                               }`}
@@ -764,7 +769,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                       {cardMessage}
                                     </div>
                                   )}
-                                  {loading && index === messages.length - 1 && cardChoices.length > 0 && (
+                                  {index === messages.length - 1 && cardChoices.length > 0 && (
                                     <div className="mt-2 flex flex-wrap gap-2">
                                       {cardChoices.map(choice => (
                                         <button
@@ -772,19 +777,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                           type="button"
                                           className="text-xs px-3 py-1.5 rounded-full border border-primary-200 text-primary-700 hover:bg-primary-50 dark:border-primary-700 dark:text-primary-300"
                                           onClick={() => {
-                                            const followUp = (() => {
-                                              switch (choice.type) {
-                                                case 'schedule':
-                                                  return `请查询面试安排「${choice.label}」（scheduleId=${choice.id}）`;
-                                                case 'session':
-                                                  return `请总结面试报告「${choice.label}」（sessionId=${choice.id}）`;
-                                                case 'skill':
-                                                  return `请针对「${choice.label}」方向（skillId=${choice.id}）给出面试准备建议`;
-                                                default:
-                                                  return `请分析简历「${choice.label}」（resumeId=${choice.id}）`;
-                                              }
-                                            })();
-                                            setQuestion(followUp);
+                                            setQuestion(buildRagCardFollowUp(choice));
                                           }}
                                         >
                                           {choice.label}
@@ -801,12 +794,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                   {loading && index === messages.length - 1 && rewrittenQuestion && (
                                     <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2">
                                       检索优化：{rewrittenQuestion}
-                                    </div>
-                                  )}
-                                  {loading && index === messages.length - 1 && routeInfo && (
-                                    <div className="mt-2 text-xs text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2">
-                                      数据源：{routeInfo.strategy}
-                                      {routeInfo.reasoning ? ` · ${routeInfo.reasoning}` : ''}
                                     </div>
                                   )}
                                   {/* 引用来源（来自 reference: 前缀事件，流式期间显示在助手气泡内） */}
@@ -829,7 +816,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                 </div>
                               )}
                             </div>
-                          </motion.div>
+                          </div>
                         </div>
                       )}
                     />
@@ -844,19 +831,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                       value={question}
                       onChange={(e) => setQuestion(e.target.value)}
                       onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmitQuestion()}
-                      placeholder="输入您的问题..."
-                      className="flex-1 px-4 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
+                      placeholder="输入问题，按 Enter 发送"
+                      className="dark-input flex-1 px-3 py-2.5 text-sm"
                       disabled={loading}
                     />
-                    <motion.button
+                    <button
                       onClick={handleSubmitQuestion}
                       disabled={!question.trim() || selectedKbIds.size === 0 || loading}
-                      className="px-5 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      whileHover={{ scale: loading ? 1 : 1.02 }}
-                      whileTap={{ scale: loading ? 1 : 0.98 }}
+                      className="btn-primary px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     >
                       发送
-                    </motion.button>
+                    </button>
                   </div>
                 </div>
               </>
@@ -864,7 +849,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                 <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-slate-500">
                 <div className="text-center">
                   <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">请先在右侧选择知识库</p>
+                  <p className="text-sm">请先在右侧选择资料</p>
                 </div>
               </div>
             )}
@@ -872,22 +857,16 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         </div>
 
         {/* 右侧：知识库选择（简化版） */}
-        <AnimatePresence>
-          {rightPanelOpen && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 280, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="flex-shrink-0 overflow-hidden"
-            >
+        {rightPanelOpen && (
+            <div className="min-w-0">
               <div
-                  className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm h-full flex flex-col w-[280px] border border-slate-100 dark:border-slate-700">
+                  className="surface-card flex max-h-[32rem] w-full flex-col p-3 lg:h-full lg:max-h-none">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-base font-semibold text-slate-800 dark:text-white">选择知识库</h2>
+                  <h2 className="text-base font-semibold text-slate-800 dark:text-white">选择资料</h2>
                   <button
                     onClick={() => setRightPanelOpen(false)}
                     className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded"
+                    aria-label="收起资料面板"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
@@ -948,6 +927,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                className="border border-slate-100 dark:border-slate-700 rounded-lg overflow-hidden">
                           <button
                             onClick={() => toggleCategory(group.name)}
+                            aria-expanded={group.isExpanded}
                             className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                           >
                             <div className="flex items-center gap-2">
@@ -960,21 +940,13 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                             <span className="text-xs text-slate-400">{group.items.length}</span>
                           </button>
 
-                          <AnimatePresence>
-                            {group.isExpanded && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="overflow-hidden"
-                              >
+                          {group.isExpanded && (
+                              <div className="overflow-hidden">
                                 <div className="p-2 space-y-1">
                                   {group.items.map((kb) => (
-                                    <div
+                                    <label
                                       key={kb.id}
-                                      onClick={() => handleToggleKb(kb.id)}
-                                      className={`p-2 rounded-lg cursor-pointer transition-all ${selectedKbIds.has(kb.id)
+                                      className={`block cursor-pointer rounded-lg p-2 transition-colors focus-within:ring-2 focus-within:ring-primary-500 ${selectedKbIds.has(kb.id)
                                           ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-500'
                                           : 'bg-white dark:bg-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700 border border-transparent'
                                         }`}
@@ -984,35 +956,32 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                           type="checkbox"
                                           checked={selectedKbIds.has(kb.id)}
                                           onChange={() => handleToggleKb(kb.id)}
-                                          onClick={(e) => e.stopPropagation()}
                                           className="w-3.5 h-3.5 text-primary-500 rounded focus:ring-primary-500"
                                         />
                                         <span
                                             className="font-medium text-slate-800 dark:text-white text-xs truncate flex-1">{kb.name}</span>
                                       </div>
                                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 ml-5">{formatFileSize(kb.fileSize)}</p>
-                                    </div>
+                                    </label>
                                   ))}
                                 </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                              </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+        )}
 
         {/* 收起状态下的展开按钮 */}
         {!rightPanelOpen && (
           <button
             onClick={() => setRightPanelOpen(true)}
-            className="flex-shrink-0 w-10 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            title="展开知识库面板"
+            className="surface-card flex-shrink-0 w-10 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            title="展开资料面板"
           >
             <ChevronRight className="w-5 h-5 text-slate-400" />
           </button>
@@ -1029,26 +998,19 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       />
 
       {/* 编辑会话标题弹窗 */}
-      <AnimatePresence>
-        {editingSessionTitle && (
+      {editingSessionTitle && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+            <div
               onClick={() => {
                 setEditingSessionTitle(null);
                 setNewSessionTitle('');
               }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+              className="fixed inset-0 bg-black/50 z-50"
             />
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              <div
                 onClick={(e) => e.stopPropagation()}
-                className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100 dark:border-slate-700"
+                className="surface-card max-w-md w-full p-5"
               >
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">编辑标题</h3>
                 <input
@@ -1057,7 +1019,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   onChange={(e) => setNewSessionTitle(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSaveSessionTitle()}
                   placeholder="请输入新标题"
-                  className="w-full px-4 py-3 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 mb-4 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
+                  className="dark-input w-full px-3 py-2.5 text-sm mb-4"
                   autoFocus
                 />
                 <div className="flex justify-end gap-3">
@@ -1078,49 +1040,41 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                     保存
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           </>
-        )}
-      </AnimatePresence>
+      )}
 
-      <AnimatePresence>
-        {evalOpen && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      {evalOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={() => setEvalOpen(false)}
           >
-            <motion.div
-              initial={{opacity: 0, scale: 0.95, y: 20}}
-              animate={{opacity: 1, scale: 1, y: 0}}
-              exit={{opacity: 0, scale: 0.95, y: 20}}
+            <div
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
+              className="surface-card max-w-2xl w-full p-5"
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-primary-500" />
-                  RAG 评测
+                  检索评测
                 </h3>
                 <button
                   onClick={() => setEvalOpen(false)}
                   className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  aria-label="关闭检索评测"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 leading-relaxed">
-                开发者工具：用 JSON 评测集对已勾选知识库跑检索质量回归，输出 Hit@K / MRR / NDCG
-                等指标，用于验证「换切块 / 换检索策略后效果有没有变差」。日常问答不需要用到。
+                 用 JSON 用例检查所选资料的检索质量，并对比 Hit@K、MRR 和 NDCG 等指标。
               </p>
               <textarea
                 value={evalInput}
                 onChange={(e) => setEvalInput(e.target.value)}
                 placeholder='[{"question":"JVM GC 是什么？","expectedKeywords":["垃圾回收"],"expectedChunkIds":[]}]'
-                className="w-full h-44 px-4 py-3 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-mono"
+                className="dark-input w-full h-44 px-3 py-2.5 text-sm font-mono"
               />
               {evalError && (
                 <p className="mt-2 text-sm text-red-500">{evalError}</p>
@@ -1201,7 +1155,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                     type="text"
                     value={datasetQuestion}
                     onChange={(e) => setDatasetQuestion(e.target.value)}
-                    placeholder="输入一个问题，走完整 RAG 生成链路"
+                    placeholder="输入一个问题生成评测样本"
                     className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700"
                   />
                   <button
@@ -1219,49 +1173,41 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   </div>
                 )}
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+      )}
 
-      <AnimatePresence>
-        {debugOpen && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      {debugOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={() => setDebugOpen(false)}
           >
-            <motion.div
-              initial={{opacity: 0, scale: 0.95, y: 20}}
-              animate={{opacity: 1, scale: 1, y: 0}}
-              exit={{opacity: 0, scale: 0.95, y: 20}}
+            <div
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-100 dark:border-slate-700"
+              className="surface-card max-w-2xl w-full p-5"
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Bug className="w-5 h-5 text-primary-500" />
-                  RAG 模块调试
+                  检索链路调试
                 </h3>
                 <button
                   onClick={() => setDebugOpen(false)}
                   className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  aria-label="关闭链路调试"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 leading-relaxed">
-                开发者工具：输入一个问题，单独运行 RAG 链路中的某个模块（意图识别 / Prompt 组装 /
-                Query 改写 / Rerank / 路由），查看中间结果，定位「答得不好是哪个环节的问题」。
+                 输入一个问题，分别查看意图识别、提示词组装、问题改写和重排结果。
               </p>
               <input
                 type="text"
                 value={debugQuestion}
                 onChange={(e) => setDebugQuestion(e.target.value)}
                 placeholder="输入测试问题"
-                className="w-full px-4 py-3 text-sm border border-slate-200 dark:border-slate-600 rounded-xl mb-3 bg-white dark:bg-slate-700"
+                className="dark-input w-full px-3 py-2.5 text-sm mb-3"
               />
               <div className="flex flex-wrap gap-2 mb-4">
                 {([
@@ -1269,7 +1215,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                   ['prompt', 'Prompt'],
                   ['rewrite', 'Query 改写'],
                   ['rerank', 'Rerank'],
-                  ['router', '路由探测'],
                 ] as const).map(([mode, label]) => (
                   <button
                     key={mode}
@@ -1285,10 +1230,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
               <pre className="max-h-64 overflow-y-auto rounded-lg bg-slate-50 dark:bg-slate-900/40 p-3 text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
                 {debugLoading ? '请求中...' : (debugOutput || '选择上方模块运行调试')}
               </pre>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+      )}
     </div>
   );
 }

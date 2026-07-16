@@ -1,10 +1,8 @@
-import {motion} from 'framer-motion';
 import {getScoreProgressColor} from '../utils/score';
 
 interface ScoreProgressProps {
   score: number;
   maxScore?: number;
-  delay?: number;
   colorClassName?: string;
   displayValue?: string | number;
   trackColorClassName?: string;
@@ -16,7 +14,6 @@ interface ScoreProgressProps {
 export default function ScoreProgress({
   score,
   maxScore = 100,
-  delay = 0,
   colorClassName,
   displayValue = score,
   trackColorClassName,
@@ -33,11 +30,9 @@ export default function ScoreProgress({
   return (
     <div className="flex items-center gap-3">
       <div className={trackClassName}>
-        <motion.div
+        <div
           className={`h-full ${progressColor} rounded-full`}
-          initial={{width: 0}}
-          animate={{width: `${progress}%`}}
-          transition={{duration: 0.8, delay}}
+          style={{width: `${progress}%`}}
         />
       </div>
       <span className={valueClassName}>{displayValue}</span>

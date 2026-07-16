@@ -1,163 +1,235 @@
-# 部署上线 Runbook（大陆 4C4G）
+# 4C6G 单机部署、回滚与恢复 Runbook
 
-配套文件（本目录）：`docker-compose-ip.yml`（阶段一）、`docker-compose-prod.yml` + `Caddyfile`（阶段二）、`.env.prod.example`。
+本 Runbook 面向 5 人以内使用。核心业务、Prometheus/Grafana 与可选轻量 ELK 共用一台
+4C6G 主机；ELK 复用业务 Elasticsearch，只写 `ai-interview-logs-*` 独立索引，不启动第二个
+Elasticsearch。这里给出的是可复现操作，不代表已经在目标服务器完成 24 小时观察。
 
-生产配置常驻容器硬上限约为 3.1 GiB（IP 模式约 3.0 GiB），主线保留 Hybrid Search、RRF、
-云端 Rerank 和 small-to-big 上下文扩展。Graph/MCP/Text2SQL/CRAG/GitHub 工具在 4C4G 配置中
-显式关闭；它们是可选实验能力，不参与普通用户面试链路。
+## 1. 拓扑与公网边界
 
-> 说明：Agent 无法登录你的服务器，以下命令都在**你的大陆服务器 SSH 里**执行；遇报错把输出贴回来。
-> **不要在聊天里发服务器密码。**
+- 公网仅开放 `80/443` 和受控 SSH。
+- `APP_DOMAIN` 由 Caddy 转发到 frontend nginx，再由 nginx 转发 REST/SSE 到 app。
+- `FILES_DOMAIN` 只转发 MinIO API 的 `GET/HEAD/OPTIONS`；桶保持私有，只有短时预签名 URL
+  可以读取对象。MinIO 控制台不公开。
+- MySQL、Redis、Elasticsearch、RabbitMQ 不发布宿主机端口。
+- Prometheus、Grafana、Kibana 仅绑定 `127.0.0.1`，通过 SSH 隧道访问。
 
-## 两阶段上线
+生产资源上限是设计预算：核心常驻容器合计 3136 MiB，启用 Prometheus/Grafana 和 `logs`
+profile 后合计 4608 MiB。必须以目标机的 `docker stats`、磁盘使用和至少 24 小时观察为准，不能把该预算
+写成实测结论。
 
-- **阶段一（现在）· IP 直连**：`http://<服务器IP>:8080`，**无需备案、无需 DNS**，当天可上。
-  用 `docker-compose-ip.yml`。跳过下面的 Step 0（备案）和 Step 4（DNS）。
-  - 限制：① 语音用不了（`getUserMedia` 需 HTTPS）；② BYOK 填 Key 走明文传输（自测无妨，别让外人此时输真实 Key）。文字问答/出题/简历全可用。
-- **阶段二（备案通过后）· 域名 + HTTPS**：切到 `docker-compose-prod.yml` + `Caddyfile`，走完 Step 0/4。
-  同一 `.env`、同一批 volume，切换零丢数据：
-  ```bash
-  docker compose --env-file .env -f docker-compose-ip.yml down
-  docker compose --env-file .env -f docker-compose-prod.yml up -d --build
-  ```
+## 2. 首次准备
 
-下面 Step 1/2/3/6 两阶段通用；**阶段一在 Step 5 用 `docker-compose-ip.yml`**。
-
----
-
-## Step 0 —【硬门槛】确认备案（先做，别跳）
-
-大陆服务器上未备案的域名，80/443 会被管局/ISP 拦截，Caddy 也签不到证书。
-
-1. 腾讯云「备案控制台」或工信部 https://beian.miit.gov.cn 查 `xiaoxiong123.cloud`：
-   - **有备案号 + 主体是你 + 接入商腾讯云** → 若这台 4C4G 也是腾讯云同账号，做「**新增接入**」把这台 IP 挂上（比新备案快）。
-   - **查不到 / 没备过** → 必须先备案（1-3 周），期间无法用该域名在大陆机上线。
-2. 备案通过后再继续。（api 现在跑海外不代表大陆能用同域名——以备案控制台为准。）
-
----
-
-## Step 1 — 服务器准备
+在 Ubuntu/Debian 服务器安装 Docker Engine 与 Compose 插件，并设置 Elasticsearch 所需内核参数：
 
 ```bash
-# 1) 装 Docker + compose 插件（Ubuntu/Debian 示例）
 curl -fsSL https://get.docker.com | sh
 sudo systemctl enable --now docker
-
-# 2) ES 必需：加大 mmap 计数（否则 ES 起不来）
-sudo sysctl -w vm.max_map_count=262144
-echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
-
-# 3) 4G 偏紧，加 2G swap 兜底（构建/峰值更稳）
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-
-# 4) 安全组/防火墙放行端口（腾讯云控制台「安全组」入站规则）
-#    阶段一(IP)：放行 8080（WEB_HOST_PORT）
-#    阶段二(域名)：放行 80 + 443
+echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-elasticsearch.conf
+sudo sysctl --system
 ```
 
----
+建议配置 2 GiB swap 只作为构建与瞬时峰值兜底；swap 不能替代内存健康检查。安全组只允许
+`80/443`、限定来源的 SSH。两个域名都需要解析到服务器，并满足服务器所在地区的备案要求。
 
-## Step 2 — 把代码放到服务器
-
-二选一：
-
-```bash
-# A) git（仓库已推到服务器可访问的 remote）
-git clone <你的仓库地址> ai-interview && cd ai-interview
-
-# B) 本地 scp 源码上去（无 remote 时）
-#   本地执行： scp -r e:/javaproject/ai-interview user@server:/home/user/ai-interview
-```
-
----
-
-## Step 3 — 配置 .env
+复制并填写配置：
 
 ```bash
 cd ai-interview/dev-ops
 cp .env.prod.example .env
-# 生成强随机值填进去（每条命令跑一次，结果分别填 JWT/加密key/各密码）
-openssl rand -base64 48
-# 用 vim/nano 编辑 .env，务必填全 APP_JWT_SECRET、APP_AI_CONFIG_ENCRYPTION_KEY、
-# AI_BAILIAN_API_KEY（平台全局 embedding key）、MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、
-# MINIO_ACCESS_KEY、MINIO_SECRET_KEY、RABBITMQ_PASSWORD
-nano .env
+chmod 600 .env
 ```
 
-同时把 `Caddyfile` 里的 `email admin@xiaoxiong123.cloud` 改成你的真实邮箱。
+至少填写安全密钥、MySQL/MinIO/RabbitMQ 密码、百炼、MinerU、应用域名、文件域名、ACME 邮箱、
+`CORS_ALLOWED_ORIGINS`、Grafana 密码与 Kibana 加密密钥。`CORS_ALLOWED_ORIGINS` 必须等于浏览器
+实际访问的 origin（只含协议、主机和可选端口，不带路径）；`RABBITMQ_USER` 使用非 `guest` 用户。
+Judge0 与 GitHub MCP Token 尚未提供时保持空值/关闭；不得把真实 `.env` 提交到 Git。
+`APP_AI_CONFIG_ENCRYPTION_KEY` 在存入用户 BYOK 后不可更换。
 
----
+## 3. 发布前门禁与 MySQL 最近三份事务快照
 
-## Step 4 — DNS 解析
-
-腾讯云 DNS 控制台给 `xiaoxiong123.cloud` 加一条：
-
-```
-类型 A   主机记录 interview   记录值 <服务器公网 IP>
-```
-
-等生效（`ping interview.xiaoxiong123.cloud` 解析到你的 IP 即可）。
-
----
-
-## Step 5 — 构建并启动
-
-> 你选了「服务器上构建」。4G 机构建 Maven 峰值 1-2G，**此时其它容器还没起，OK**；已加 swap 更稳。
-
-```bash
-cd ai-interview/dev-ops
-
-# 阶段一（IP 直连）：
-docker compose --env-file .env -f docker-compose-ip.yml up -d --build
-docker compose --env-file .env -f docker-compose-ip.yml ps         # 看健康状态
-docker logs -f interview-app                                        # 等 "Started App in ..."
-# 安全组放行 ${WEB_HOST_PORT:-8080} 后，浏览器开 http://<服务器公网IP>:8080
-
-# 阶段二（域名+HTTPS，备案通过后）：
-# docker compose --env-file .env -f docker-compose-ip.yml down
-# docker compose --env-file .env -f docker-compose-prod.yml up -d --build
-# docker logs -f interview-caddy   # 看 Let's Encrypt 证书签发（需 Step 0 备案 + Step 4 DNS + 80/443）
-```
-
-首次构建较慢（拉基础镜像 + Maven/Vite 构建），耐心等。
-
----
-
-## Step 6 — 首次配置 + 验证
-
-1. 浏览器开：阶段一 `http://<服务器公网IP>:8080`；阶段二 `https://interview.xiaoxiong123.cloud`（带锁）。
-2. 注册第一个账号（即管理员/你自己），登录。
-3. **全局 Embedding**：默认走 `.env` 的 `AI_BAILIAN_API_KEY`（dashscope provider），开箱即用；
-   如问答/向量化报 embedding 相关错，进「设置」确认默认 Embedding Provider 为 dashscope。
-4. **BYOK 验证**：首次登录弹「配置你的模型 Key」向导 → 填任意 OpenAI 兼容 chat（如 DashScope
-   `https://dashscope.aliyuncs.com/compatible-mode/v1` + qwen3.5-flash + 你的 key）→ 测试连通 → 保存。
-5. 走一遍：出题/问答（走你自己 Key）、上传知识库（embedding 走平台 key）、语音面试（麦克风需 HTTPS）。
-6. `docker stats` 看内存，确认没有容器濒临 OOM。
-
-在保存好根目录 `.env` 的 Windows 开发机上，可运行真实主链路验收（会创建测试用户、知识库和
-三题面试数据）：
+先在仓库根目录验证配置：
 
 ```powershell
-pwsh ./dev-ops/smoke-test.ps1 -BaseUrl https://interview.xiaoxiong123.cloud
+$ErrorActionPreference = 'Stop'
+./dev-ops/ci/Test-PowerShellSyntax.ps1
+./dev-ops/ci/Test-ReleaseContent.ps1
+./dev-ops/ci/Test-ComposeConfig.ps1
+./dev-ops/ci/Test-FreshSchema.ps1
+./dev-ops/ci/Test-DeploymentAssets.ps1
 ```
 
----
+每次部署前在服务器 `dev-ops` 目录执行 MySQL `--single-transaction` 快照。它保证本次数据库导出的
+事务一致性，但不是 MySQL、MinIO、Elasticsearch 和 RabbitMQ 的全平台一致性备份。快照包含用户和
+加密后的 BYOK 配置，目录权限必须限制为部署账号；下面命令只保留最近 3 份：
 
-## 排障速查
+```bash
+set -euo pipefail
+mkdir -p backups/mysql
+chmod 700 backups backups/mysql
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+docker compose --env-file .env -f docker-compose-prod.yml exec -T mysql \
+  sh -ec 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --quick --routines --triggers "$MYSQL_DATABASE"' \
+  | gzip -9 > "backups/mysql/ai-interview-${stamp}.sql.gz"
+chmod 600 "backups/mysql/ai-interview-${stamp}.sql.gz"
+ls -1t backups/mysql/ai-interview-*.sql.gz | tail -n +4 | xargs -r rm --
+gzip -t "backups/mysql/ai-interview-${stamp}.sql.gz"
+```
 
-| 现象 | 可能原因 / 处理 |
-|---|---|
-| Caddy 证书签不下来 | 备案未过 / 80 未放行 / DNS 未生效；`docker logs interview-caddy` 看 ACME 报错 |
-| ES 容器反复重启 | 忘了 `vm.max_map_count=262144`；或内存不足（`docker stats`） |
-| app 启动 OOM / 被杀 | 确认 `mem_limit: 896m` 与 Compose 中的 `JAVA_OPTS` 生效；swap 已开；用 `docker stats` 判断是否需要升配 |
-| 构建时 OOM | 别与其它容器同时构建；已加 swap；或改用本地构建镜像后 scp/registry |
-| 上传大文件 413 | frontend nginx 已设 300M；Caddy 默认不限；确认走的是 https 域名 |
-| 语音无法用麦克风 | 必须 https（已满足）；检查浏览器麦克风授权 |
+## 4. 构建与启动
 
-## 升配到 8G 想启图谱（可选）
+记录待发布 Git SHA。推荐先启动核心业务与 Prometheus / Grafana，不默认让 Logstash / Kibana
+占用 4C6G 主机资源：
 
-在 `docker-compose-prod.yml` 加回 Neo4j 服务（参考 `docker-compose-environment.yml`），给 app 补
-`NEO4J_URI/USER/PASSWORD`，并把 Graph 相关开关改为 `true`。不要只改 `.env`：4C4G Compose
-故意把这些开关固定为关闭，防止缺少依赖时误启动。
+```bash
+set -euo pipefail
+git rev-parse HEAD | tee .last-release-sha
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  config --quiet
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  up -d --build --remove-orphans
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  ps
+```
+
+核心服务和 Prometheus / Grafana 健康后，再按需启用轻量日志链路。启用前后都要观察
+`docker stats` 和磁盘；如果出现持续 swap、OOM 或核心服务延迟，优先关闭 Logstash / Kibana：
+
+```bash
+set -euo pipefail
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  --profile logs config --quiet
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  --profile logs up -d --remove-orphans
+```
+
+服务健康后，可从服务器或一台可信的 PowerShell 7 客户端运行基础 smoke：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+./smoke-test.ps1 -BaseUrl "https://$env:APP_DOMAIN" `
+  -FilesBaseUrl "https://$env:FILES_DOMAIN"
+```
+
+`smoke-test.ps1` 默认只验证边缘健康和私有文件域，不创建业务数据。全业务接线 smoke 使用进程级
+`SMOKE_*` 输入；不要把 BYOK Key 写进命令参数、脚本或报告：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$env:SMOKE_BYOK_API_KEY = '<仅在当前可信终端设置>'
+$env:SMOKE_BYOK_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+$env:SMOKE_BYOK_MODEL = 'qwen3.5-flash'
+$env:SMOKE_GITHUB_REPOSITORY_URL = 'https://github.com/owner/public-repository'
+$env:SMOKE_DOCUMENT_PATH = '/absolute/path/to/non-sensitive-fixture.pdf'
+$env:SMOKE_DOCUMENT_QUESTION = '这份文档的核心设计是什么？'
+
+./smoke-test.ps1 -RequireFullFlow `
+  -BaseUrl "https://interview.example.com" `
+  -FilesBaseUrl "https://files.interview.example.com" `
+  -ReportPath './reports/release-smoke.json'
+
+$env:SMOKE_BYOK_API_KEY = $null
+```
+
+全业务接线 smoke 真实执行注册/登录、BYOK 连通性、MinerU PDF 解析与 RAG、JD 分析冻结、GitHub 固定 SHA、
+岗位实战 REST/SSE、Judge0、报告/画像/训练和 LLM Usage 可见性。缺少输入、MinerU 发生 Tika 降级、
+Judge0 返回待补判或任何阶段跳过时，`-RequireFullFlow` 都会失败关闭，不能宣称真实 E2E 通过。报告只
+保存业务 ID、状态和计数，不保存 Key、Prompt、回答、源码、隐藏用例或签名 URL。默认清理 BYOK、
+文档和 GitHub 绑定，并对冻结 JD 做脱敏删除；保留 smoke 用户、会话、报告和训练记录作为验收证据。
+
+这个脚本验证的是跨模块接线，不是完整 45 分钟产品验收：它只回答一道岗位题后主动结束会话，
+Judge0 使用独立训练 attempt；它不覆盖四阶段完整作答、岗位算法阶段、DOCX / HTML 的真实 MinerU 解析、
+24 小时续面、GitHub MCP 确实命中、Redis / RabbitMQ / 容器重启和客户端中途断线恢复。上述场景必须
+另行执行并保存脱敏记录，不能用接线 smoke 的 `PASS` 代替。
+
+## 5. 私有文件域与 SSE 验证
+
+```bash
+# 前端/Caddy 健康
+curl --fail --silent --show-error "https://${APP_DOMAIN}/healthz"
+
+# 公网写 MinIO 必须被 Caddy 拒绝（预期 405）
+curl -sS -o /dev/null -w '%{http_code}\n' -X PUT "https://${FILES_DOMAIN}/forbidden"
+
+# 未签名对象不可读取（预期 403 或 404，不得为 200）
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  "https://${FILES_DOMAIN}/${MINIO_BUCKET}/unsigned-object"
+```
+
+SSE 用真实文字面试或资料学习请求验证：首个事件应持续到达，Caddy/nginx 不应攒批。不要把
+Authorization、Prompt 或回答复制到日志或验收报告。
+
+## 6. 观测与日志
+
+从本机建立隧道：
+
+```bash
+ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 \
+  -L 5601:127.0.0.1:5601 deploy@server
+```
+
+- Grafana：`http://127.0.0.1:3000`
+- Prometheus：`http://127.0.0.1:9090`
+- Kibana：`http://127.0.0.1:5601`
+- 应用滚动日志：`app_logs` 卷，单文件 20 MiB、最多 7 天、总上限 300 MiB。
+- 容器 stdout：单文件 10 MiB、3 份。
+- Prometheus：默认 7 天且最多 512 MiB。
+- 日志 ES 索引：`ai-interview-logs-*`，默认 7 天 ILM。
+
+抽检日志时确认没有 Key、Authorization、完整 Prompt/回答、简历/资料正文、源码、隐藏用例和
+预签名 URL。日志索引与 RAG 向量索引共享 ES 进程，但索引名称、生命周期策略相互独立。
+
+## 7. 回滚
+
+应用回滚优先恢复上一版本代码/镜像，不先回滚数据：
+
+```bash
+set -euo pipefail
+previous_sha='<已验证的上一版本 SHA>'
+git switch --detach "$previous_sha"
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  --profile logs up -d --build --remove-orphans
+```
+
+确认 smoke 和健康状态后再决定是否回到分支。生产 `.env` 与
+`APP_AI_CONFIG_ENCRYPTION_KEY` 必须保持不变。
+
+只有本次发布已经写入不兼容数据时才恢复 MySQL 快照。先停止 app 和异步消费者，再重建数据库并
+导入指定快照：
+
+```bash
+set -euo pipefail
+snapshot='backups/mysql/ai-interview-YYYYmmddTHHMMSSZ.sql.gz'
+gzip -t "$snapshot"
+docker compose --env-file .env -f docker-compose-prod.yml stop app
+docker compose --env-file .env -f docker-compose-prod.yml exec -T mysql \
+  sh -ec 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -e "DROP DATABASE IF EXISTS \`$MYSQL_DATABASE\`; CREATE DATABASE \`$MYSQL_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"'
+gzip -dc "$snapshot" | docker compose --env-file .env -f docker-compose-prod.yml exec -T mysql \
+  sh -ec 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot "$MYSQL_DATABASE"'
+docker compose --env-file .env \
+  -f docker-compose-prod.yml -f docker-compose-observability.yml \
+  --profile logs up -d
+```
+
+恢复后逐项验证 MySQL 记录引用的 MinIO 对象仍存在，再按业务提供的重建入口重新向量化 ES。这里没有
+创建 MinIO 历史快照，因此已经删除的对象不能靠 MySQL dump 恢复；缺失对象需要重新上传或将对应记录
+标记为来源不可用。Redis 是短期运行态，丢失后由 MySQL 恢复会话事实；RabbitMQ 重启后依靠持久消息、
+幂等状态与补偿任务收敛。未实际演练前，这些只能表述为恢复设计，不能表述为恢复实测。
+
+## 8. 24 小时观察清单
+
+记录时间段、Git SHA、Compose 配置摘要和脱敏结果：
+
+- `docker stats` 是否出现 OOM、持续 swap 或 CPU 饥饿。
+- 数据盘、Docker 日志、Prometheus、应用滚动日志和 ES 日志索引增量。
+- app、RabbitMQ、Redis、ES、MinIO 单容器重启后的恢复表现。
+- MinerU/Judge0/GitHub 超时与降级、SSE 断线恢复、RabbitMQ DLQ。
+- 5 个以内账号的数据隔离、删除与 BYOK 解密。
+
+没有目标服务器凭据时，本仓库只能完成 Compose/config/镜像门禁，不能勾选真实 HTTPS、真实外部
+服务 E2E、恢复演练和 24 小时稳定性验收。

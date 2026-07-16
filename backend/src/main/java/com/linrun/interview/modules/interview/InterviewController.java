@@ -120,7 +120,8 @@ public class InterviewController {
      */
     @GetMapping("/api/interview/sessions/unfinished/{resumeId}")
     public Result<InterviewSessionDTO> findUnfinishedSession(@PathVariable Long resumeId) {
-        return Result.success(sessionService.findUnfinishedSessionOrThrow(resumeId));
+        // “没有未完成会话”是简历详情页的正常空状态，不应转成业务异常污染日志。
+        return Result.success(sessionService.findUnfinishedSession(resumeId).orElse(null));
     }
     
     /**

@@ -43,27 +43,19 @@
     <minio.version>8.5.1</minio.version>
     <onnxruntime.version>1.17.1</onnxruntime.version>
     <mapstruct.version>1.6.3</mapstruct.version>
-    <aws-sdk.version>2.29.51</aws-sdk.version>
     <itext.version>8.0.5</itext.version>
     <pinyin4j.version>2.5.0</pinyin4j.version>
     <springdoc.version>2.8.17</springdoc.version>
-    <dashscope.version>2.22.7</dashscope.version>
-    <victools-jsonschema.version>5.0.0</victools-jsonschema.version>
     <!-- commons-compress 1.27.x 运行时需要 ChecksumInputStream（commons-io 2.16+） -->
     <commons-io.version>2.16.1</commons-io.version>
 
     <!-- LangChain4j（对齐业界实践：核心 1.11.0，扩展模块 1.11.0-beta19） -->
     <langchain4j.version>1.11.0</langchain4j.version>
     <langchain4j-beta.version>1.11.0-beta19</langchain4j-beta.version>
-    <!-- Spring AI（仅用 MCP Server starter；1.1.x 对应 Spring Boot 3.5.x） -->
-    <spring-ai.version>1.1.8</spring-ai.version>
-    <!-- RocketMQ Spring Boot Starter（异步任务引擎可选实现，app.async.engine=rocketmq 启用）。
-         2.3.x 仍走 spring.factories，Spring Boot 3 下需手动补 AutoConfiguration.imports（见 backend resources）。 -->
-    <rocketmq-spring.version>2.3.5</rocketmq-spring.version>
     <!-- surefire 默认排除评测组：rag-eval（RAG 检索，连真实 ES + DashScope）、
-         agent-eval（面试 Agent Critic 质量门，连真实 DashScope）、graph-eval（图谱检索，连真实 Neo4j）。
+         agent-eval（面试 Agent Critic 质量门，连真实 DashScope）。
          评测集见 eval/。触发评测时用 -Dtest.excludedGroups= 清空该值（见 backend/pom.xml surefire 配置注释）。 -->
-    <test.excludedGroups>rag-eval,agent-eval,graph-eval</test.excludedGroups>
+    <test.excludedGroups>rag-eval,agent-eval</test.excludedGroups>
   </properties>
 
   <dependencyManagement>
@@ -83,31 +75,9 @@
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>org.springframework.ai</groupId>
-        <artifactId>spring-ai-bom</artifactId>
-        <version>${spring-ai.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-      <dependency>
         <groupId>commons-io</groupId>
         <artifactId>commons-io</artifactId>
         <version>${commons-io.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.github.victools</groupId>
-        <artifactId>jsonschema-generator</artifactId>
-        <version>${victools-jsonschema.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.github.victools</groupId>
-        <artifactId>jsonschema-module-jackson</artifactId>
-        <version>${victools-jsonschema.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.github.victools</groupId>
-        <artifactId>jsonschema-module-swagger-2</artifactId>
-        <version>${victools-jsonschema.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -134,5 +104,4 @@
     </pluginRepository>
   </pluginRepositories>
 </project>
-
 

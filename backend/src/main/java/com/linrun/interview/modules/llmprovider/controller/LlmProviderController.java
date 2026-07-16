@@ -3,14 +3,10 @@ package com.linrun.interview.modules.llmprovider.controller;
 import com.linrun.interview.common.annotation.RateLimit;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.common.security.UserContext;
-import com.linrun.interview.modules.llmprovider.dto.AsrConfigDTO;
-import com.linrun.interview.modules.llmprovider.dto.AsrConfigRequest;
 import com.linrun.interview.modules.llmprovider.dto.CreateProviderRequest;
 import com.linrun.interview.modules.llmprovider.dto.DefaultProviderDTO;
 import com.linrun.interview.modules.llmprovider.dto.ProviderDTO;
 import com.linrun.interview.modules.llmprovider.dto.ProviderTestResult;
-import com.linrun.interview.modules.llmprovider.dto.TtsConfigDTO;
-import com.linrun.interview.modules.llmprovider.dto.TtsConfigRequest;
 import com.linrun.interview.modules.llmprovider.dto.UpdateProviderRequest;
 import com.linrun.interview.modules.llmprovider.service.LlmProviderConfigService;
 import jakarta.validation.Valid;
@@ -112,42 +108,4 @@ public class LlmProviderController {
     return Result.success();
   }
 
-  // ===== Voice ASR/TTS Config =====
-
-  @GetMapping("/voice/asr")
-  @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<AsrConfigDTO> getAsrConfig() {
-    UserContext.requireAdmin();
-    return Result.success(configService.getAsrConfig());
-  }
-
-  @PutMapping("/voice/asr")
-  @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateAsrConfig(@RequestBody AsrConfigRequest request) {
-    UserContext.requireAdmin();
-    configService.updateAsrConfig(request);
-    return Result.success();
-  }
-
-  @GetMapping("/voice/tts")
-  @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<TtsConfigDTO> getTtsConfig() {
-    UserContext.requireAdmin();
-    return Result.success(configService.getTtsConfig());
-  }
-
-  @PutMapping("/voice/tts")
-  @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateTtsConfig(@RequestBody TtsConfigRequest request) {
-    UserContext.requireAdmin();
-    configService.updateTtsConfig(request);
-    return Result.success();
-  }
-
-  @PostMapping("/voice/asr/test")
-  @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
-  public Result<ProviderTestResult> testAsrConfig() {
-    UserContext.requireAdmin();
-    return Result.success(configService.testAsrConfig());
-  }
 }

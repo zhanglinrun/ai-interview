@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import com.linrun.interview.common.mybatis.BaseEntity;
+import com.linrun.interview.common.evidence.DataDomain;
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 
 import java.time.LocalDateTime;
@@ -40,6 +41,30 @@ public class KnowledgeBaseSegmentEntity extends BaseEntity {
 
     /** 元数据 JSON（docId/version/fileName/headerLevel/parentChunkId 等）。 */
     private String metadata;
+
+    /** 数据所有者，作为 MySQL 与 ES 双重隔离字段。 */
+    private Long userId;
+
+    /** 证据业务域。 */
+    private DataDomain dataDomain;
+
+    /** 域内资源 ID。 */
+    private String resourceId;
+
+    /** 不可变资源版本。 */
+    private String resourceVersion;
+
+    /** 跨 Trace / 报告稳定的证据 ID。 */
+    private String evidenceId;
+
+    /** 当前片段正文 SHA-256。 */
+    private String contentHash;
+
+    /** 来源类型。 */
+    private String sourceType;
+
+    /** 来源内定位。 */
+    private String sourceLocator;
 
     /** 所属知识库 ID。 */
     private Long documentId;
@@ -119,6 +144,70 @@ public class KnowledgeBaseSegmentEntity extends BaseEntity {
 
     public void setMetadata(String metadata) {
         this.metadata = metadata;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
+    public DataDomain getDataDomain() {
+        return dataDomain;
+    }
+
+    public void setDataDomain(DataDomain dataDomain) {
+        this.dataDomain = dataDomain;
+    }
+
+    public String getResourceId() {
+        return resourceId;
+    }
+
+    public void setResourceId(String resourceId) {
+        this.resourceId = resourceId;
+    }
+
+    public String getResourceVersion() {
+        return resourceVersion;
+    }
+
+    public void setResourceVersion(String resourceVersion) {
+        this.resourceVersion = resourceVersion;
+    }
+
+    public String getEvidenceId() {
+        return evidenceId;
+    }
+
+    public void setEvidenceId(String evidenceId) {
+        this.evidenceId = evidenceId;
+    }
+
+    public String getContentHash() {
+        return contentHash;
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceLocator() {
+        return sourceLocator;
+    }
+
+    public void setSourceLocator(String sourceLocator) {
+        this.sourceLocator = sourceLocator;
     }
 
     public Long getDocumentId() {

@@ -9,12 +9,13 @@ import com.linrun.interview.modules.interview.agent.InterviewTurnDecisionService
 import com.linrun.interview.modules.interview.agent.InterviewerAiService;
 import com.linrun.interview.modules.interview.agent.model.AgentQuestionOutput;
 import com.linrun.interview.modules.interview.agent.model.CriticVerdict;
-import com.linrun.interview.common.observability.LangfuseTracer;
+import com.linrun.interview.modules.interview.agent.model.InterviewPlan;
+import com.linrun.interview.modules.interview.agent.model.InterviewPlan.PlanTopic;
 import com.linrun.interview.modules.interview.agent.orchestrator.InterviewOrchestrator.GeneratedQuestion;
 import com.linrun.interview.modules.interview.agent.orchestrator.InterviewOrchestrator.NextQuestionRequest;
 import com.linrun.interview.modules.interview.memory.CandidateMemoryService;
 import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -68,12 +69,10 @@ class InterviewOrchestratorTest {
         mock(InterviewKnowledgeRetrievalService.class);
     when(knowledgeRetrievalService.buildEvidencePrompt(any())).thenReturn("");
     InterviewTurnDecisionService turnDecisionService = new InterviewTurnDecisionService(
-        mock(InterviewSkillService.class), knowledgeRetrievalService);
-    LangfuseTracer langfuseTracer = mock(LangfuseTracer.class);
-
+        mock(InterviewTopicCatalog.class), knowledgeRetrievalService);
     orchestrator = new InterviewOrchestrator(factory, properties, traceService,
         candidateMemoryService, knowledgeRetrievalService, turnDecisionService, new ObjectMapper(),
-        langfuseTracer, null);
+        null);
   }
 
   private NextQuestionRequest request() {
@@ -133,6 +132,40 @@ class InterviewOrchestratorTest {
       verify(critic, times(2)).review(anyString());
       // 第二次出题的 instruction 必须带上 Critic 的 retryHint（Reflexion 输入）
       assertThat(instructionCaptor.getAllValues().get(1)).contains("请聚焦 JVM 垃圾回收细节");
+    }
+
+    @Test
+    @DisplayName("动态追问明确禁止补造候选人未提及的实现前提")
+    void forbidsInventedPremisesInFollowUpPrompts() {
+      properties.setCriticEnabled(true);
+      properties.setMaxReflexion(1);
+      when(interviewer.nextQuestion(anyString(), anyString(), anyString(), anyString()))
+          .thenReturn(new AgentQuestionOutput(
+              "你刚才提到文档切块，实际处理了哪些资料，规则如何确定？",
+              "承接候选人的切块实践", true));
+      when(critic.review(anyString()))
+          .thenReturn(new CriticVerdict(true, 90, "前提均来自上一答", ""));
+
+      InterviewPlan plan = new InterviewPlan(
+          List.of(new PlanTopic("RAG 文档处理", "上传与切块", 2)),
+          "由浅入深", List.of(), List.of());
+      NextQuestionRequest followUpRequest = new NextQuestionRequest(
+          "session-1", 1L, PROVIDER, "java-backend", "mid",
+          1, 8, plan, "我负责了文档上传和切块。", List.of("请介绍项目"), null, List.of());
+
+      orchestrator.nextQuestion(followUpRequest);
+
+      ArgumentCaptor<String> instructionCaptor = ArgumentCaptor.forClass(String.class);
+      verify(interviewer).nextQuestion(anyString(), anyString(), anyString(), instructionCaptor.capture());
+      assertThat(instructionCaptor.getValue())
+          .contains("不得把泛称补成候选人没有说过的具体实现")
+          .contains("上一答未说明亲历故障时必须使用条件式场景问法");
+
+      ArgumentCaptor<String> reviewCaptor = ArgumentCaptor.forClass(String.class);
+      verify(critic).review(reviewCaptor.capture());
+      assertThat(reviewCaptor.getValue())
+          .contains("上一答未明确出现且不能直接推出的前提，一律不通过")
+          .contains("未说明亲历故障却要求讲真实故障案例，也一律不通过");
     }
 
     @Test

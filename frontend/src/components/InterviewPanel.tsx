@@ -1,5 +1,4 @@
 import {useMemo, useState} from 'react';
-import {motion} from 'framer-motion';
 import {CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {formatDateOnly} from '../utils/date';
 import {getScoreColor} from '../utils/score';
@@ -36,8 +35,7 @@ export default function InterviewPanel({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ sessionId: string } | null>(null);
 
-  const handleDeleteClick = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // 阻止触发卡片点击事件
+  const handleDeleteClick = (sessionId: string) => {
     setDeleteConfirm({ sessionId });
   };
 
@@ -74,37 +72,31 @@ export default function InterviewPanel({
     return (
       <EmptyState
         iconNode={
-          <div className="w-16 h-16 mx-auto mb-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
+          <div className="w-12 h-12 mx-auto mb-4 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center">
             <Mic className="w-8 h-8 text-slate-400" />
           </div>
         }
         title="暂无面试记录"
-        description="开始模拟面试，获取专业评估"
-        className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center"
+        description="开始一场模拟面试后，记录会显示在这里。"
+        className="surface-card p-10 text-center"
         descriptionClassName="text-slate-500 dark:text-slate-400 mb-6"
         action={
-        <motion.button
+        <button
           onClick={onStartInterview}
-          className="px-6 py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-medium shadow-lg shadow-primary-500/30"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+          className="btn-primary px-4 py-2 text-sm"
         >
           开始模拟面试
-        </motion.button>
+        </button>
         }
       />
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* 面试表现趋势图 */}
       {chartData.length > 0 && (
-          <motion.div
-              className="bg-white dark:bg-slate-800 rounded-2xl p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
+        <section className="surface-card p-5">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-primary-500" />
@@ -133,48 +125,41 @@ export default function InterviewPanel({
                     contentStyle={{
                       backgroundColor: '#fff',
                     border: '1px solid #e2e8f0',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    borderRadius: '8px',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.08)'
                   }}
                   formatter={(value) => [`${value} 分`, '得分']}
                 />
                 <Line
                     type="monotone"
                     dataKey="score"
-                    stroke="#6366f1"
+                    stroke="#0d9488"
                   strokeWidth={3}
-                  dot={{ fill: '#6366f1', strokeWidth: 2, r: 5 }}
-                  activeDot={{ r: 8, fill: '#6366f1' }}
+                  dot={{ fill: '#0d9488', strokeWidth: 2, r: 4 }}
+                  activeDot={{ r: 6, fill: '#0d9488' }}
                 />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </motion.div>
+        </section>
       )}
 
       {/* 历史面试场次 */}
-      <motion.div
-          className="bg-white dark:bg-slate-800 rounded-2xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-      >
+      <section className="surface-card p-5">
         <div className="flex items-center justify-between mb-6">
           <span className="font-semibold text-slate-800 dark:text-white">历史面试场次</span>
         </div>
 
         <div className="space-y-4">
-          {interviews.map((interview, index) => (
+          {interviews.map(interview => (
             <InterviewItemCard
               key={interview.id}
               interview={interview}
-              index={index}
-              total={interviews.length}
               exporting={exporting === interview.sessionId}
               deleting={deletingSessionId === interview.sessionId}
               onView={() => onViewInterview(interview.sessionId)}
               onExport={() => onExportInterview(interview.sessionId)}
-              onDelete={(e) => handleDeleteClick(interview.sessionId, e)}
+              onDelete={() => handleDeleteClick(interview.sessionId)}
             />
           ))}
         </div>
@@ -194,13 +179,13 @@ export default function InterviewPanel({
             <div className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50">
               <LoadingState
                 label="加载面试详情..."
-                className="bg-white dark:bg-slate-800 rounded-2xl p-6 flex items-center gap-4"
+                className="surface-card p-5 flex items-center gap-4"
                 spinnerClassName="w-8 h-8 text-primary-500 animate-spin"
                 textClassName="text-slate-600 dark:text-slate-300"
               />
           </div>
         )}
-      </motion.div>
+      </section>
     </div>
   );
 }
@@ -208,8 +193,6 @@ export default function InterviewPanel({
 // 面试项卡片组件
 function InterviewItemCard({
   interview,
-  index,
-  total,
   exporting,
   deleting,
   onView,
@@ -217,67 +200,67 @@ function InterviewItemCard({
   onDelete
 }: {
   interview: InterviewItem;
-  index: number;
-  total: number;
   exporting: boolean;
   deleting: boolean;
   onView: () => void;
   onExport: () => void;
-  onDelete: (e: React.MouseEvent) => void;
+  onDelete: () => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      onClick={onView}
-      className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer transition-colors group"
-    >
-      {/* 得分 */}
-      <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg ${
-        interview.overallScore !== null 
-          ? getScoreColor(interview.overallScore, [85, 70])
-            : 'bg-slate-100 dark:bg-slate-600 text-slate-400'
-      }`}>
-        {interview.overallScore ?? '-'}
-      </div>
-
-      {/* 信息 */}
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-slate-800 dark:text-white truncate">
-          模拟面试 #{total - index}
-        </p>
-        <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
-          <span className="flex items-center gap-1">
-            <Calendar className="w-4 h-4" />
-            {formatDateOnly(interview.createdAt)}
-          </span>
-          <span className="flex items-center gap-1">
-            <MessageSquare className="w-4 h-4" />
-            {interview.totalQuestions} 题
-          </span>
-        </div>
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100">
-      {/* 导出按钮 */}
-      <motion.button
-        onClick={(e) => { e.stopPropagation(); onExport(); }}
-        disabled={exporting}
-        className="px-3 py-2 text-slate-400 hover:text-primary-500 hover:bg-white dark:hover:bg-slate-600 rounded-lg transition-all"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+    <article className="flex items-center gap-2 rounded-lg bg-stone-50 p-3 dark:bg-stone-800/60 sm:gap-3 sm:p-4">
+      <button
+        type="button"
+        onClick={onView}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        aria-label={`查看模拟面试 ${formatDateOnly(interview.createdAt)}`}
       >
-        <Download className="w-5 h-5" />
-      </motion.button>
+        <span className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full text-base font-bold ${
+          interview.overallScore !== null
+            ? getScoreColor(interview.overallScore, [85, 70])
+            : 'bg-stone-100 text-stone-400 dark:bg-stone-700'
+        }`}>
+          {interview.overallScore ?? '-'}
+        </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-stone-800 dark:text-white">
+            模拟面试
+          </span>
+          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-stone-400 sm:text-sm">
+            <span className="flex items-center gap-1">
+              <Calendar className="h-4 w-4" />
+              {formatDateOnly(interview.createdAt)}
+            </span>
+            <span className="flex items-center gap-1">
+              <MessageSquare className="h-4 w-4" />
+              {interview.totalQuestions} 题
+            </span>
+          </span>
+        </span>
+
+        <ChevronRight className="h-5 w-5 flex-shrink-0 text-stone-400" />
+      </button>
+
+      <div className="flex items-center gap-1 border-l border-stone-200 pl-2 dark:border-stone-700">
+      <button
+        type="button"
+        onClick={onExport}
+        disabled={exporting}
+        className="rounded-lg p-2 text-stone-400 transition-colors hover:bg-white hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-700"
+        title="导出面试记录"
+        aria-label="导出面试记录"
+      >
+        <Download className="h-5 w-5" />
+      </button>
 
         {/* 删除按钮 */}
         <button
+          type="button"
           onClick={onDelete}
           disabled={deleting}
           className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="删除面试记录"
+          aria-label="删除面试记录"
         >
           <LoadingButtonContent
             loading={deleting}
@@ -289,10 +272,6 @@ function InterviewItemCard({
           </LoadingButtonContent>
         </button>
       </div>
-
-      {/* 箭头 */}
-      <ChevronRight
-          className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all flex-shrink-0"/>
-    </motion.div>
+    </article>
   );
 }

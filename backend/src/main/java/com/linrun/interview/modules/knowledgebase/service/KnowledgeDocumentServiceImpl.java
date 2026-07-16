@@ -6,6 +6,7 @@ import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.security.UserContext;
+import com.linrun.interview.common.evidence.DataDomain;
 import com.linrun.interview.infrastructure.file.FileStorageService;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
@@ -26,6 +27,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,13 +66,12 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final KnowledgeSegmentService segmentService;
     private final VectorStoreService vectorStoreService;
     private final FileStorageService fileStorageService;
+    private final SegmentTextCacheService segmentTextCacheService;
+    private final EvidenceSnapshotService evidenceSnapshotService;
+    private final DocumentParseTaskService documentParseTaskService;
     private final RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
-    private final KnowledgeBaseDataTableService dataTableService;
     /** 向量化三段式的编程式小事务（方法级 @Transactional 会把外部 API 调用圈进长事务） */
     private final TransactionTemplate transactionTemplate;
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private KnowledgeGraphSyncService knowledgeGraphSyncService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private MeterRegistry meterRegistry;
@@ -90,21 +91,24 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             knowledgeBaseEntityMapper, userId, docId, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
         log.info("删除知识库（级联）: docId={}", docId);
+        List<String> storageKeys = collectStorageKeys(doc);
 
+        // 历史报告中的最小证据快照与源文档正文同事务脱敏，避免 DB 删除成功后仍残留正文。
+        evidenceSnapshotService.markSourceUnavailable(
+            userId, DataDomain.CANDIDATE, String.valueOf(docId));
         // 1. 删除所有 RAG 会话中的知识库关联（必须先删关联，否则外键约束阻止删除文档）
         removeSessionAssociations(userId, docId);
-        // 2. 删除动态数据表（Excel/CSV DATA_QUERY）
-        dataTableService.deleteByDoc(userId, docId);
-        // 3. 物理删 segment
+        documentParseTaskService.deleteByDocument(userId, docId);
+        // 2. 物理删 segment
         segmentService.physicalDeleteByDocumentId(docId);
-        // 4. 物理删 version
+        // 3. 物理删 version
         versionService.physicalDeleteByDocId(docId);
-        // 5. 物理删文档主表（绕过逻辑删除，与 segment/version 一致）
+        // 4. 物理删文档主表（绕过逻辑删除，与 segment/version 一致）
         knowledgeBaseEntityMapper.physicalDeleteById(docId);
         log.info("删除知识库 DB 记录完成: docId={}", docId);
 
         // 5. ES 删向量 + RustFS 删文件：外部 IO，移到事务提交后执行（事务内禁止外部 API）
-        schedulePostCommitCleanup(docId, doc.getStorageKey());
+        schedulePostCommitCleanup(docId, storageKeys);
     }
 
     @Override
@@ -123,12 +127,15 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 log.warn("批量删除跳过不存在的知识库: docId={}", docId);
                 continue;
             }
+            List<String> storageKeys = collectStorageKeys(doc);
+            evidenceSnapshotService.markSourceUnavailable(
+                userId, DataDomain.CANDIDATE, String.valueOf(docId));
             removeSessionAssociations(userId, docId);
-            dataTableService.deleteByDoc(userId, docId);
+            documentParseTaskService.deleteByDocument(userId, docId);
             segmentService.physicalDeleteByDocumentId(docId);
             versionService.physicalDeleteByDocId(docId);
             knowledgeBaseEntityMapper.physicalDeleteById(docId);
-            schedulePostCommitCleanup(docId, doc.getStorageKey());
+            schedulePostCommitCleanup(docId, storageKeys);
         }
         log.info("批量删除知识库 DB 记录完成: count={}", docIds.size());
     }
@@ -137,7 +144,10 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * 把 ES 删向量 + RustFS 删文件注册到当前事务的 afterCommit 回调。
      * 失败仅告警，不阻断已提交的 DB 删除（外部残留靠人工或后续清理）。
      */
-    private void schedulePostCommitCleanup(Long docId, String storageKey) {
+    private void schedulePostCommitCleanup(
+        Long docId,
+        List<String> storageKeys
+    ) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
@@ -146,7 +156,9 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 } catch (Exception e) {
                     log.warn("删除ES向量失败（DB已删，需人工清理）: docId={}, error={}", docId, e.getMessage(), e);
                 }
-                deleteStorageFile(docId, storageKey);
+                segmentTextCacheService.evictAll();
+                segmentService.evictExpansionCache();
+                storageKeys.forEach(key -> deleteStorageFile(docId, key));
             }
         });
     }
@@ -299,14 +311,18 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             MapperUtils.save(knowledgeBaseEntityMapper, doc);
         });
         log.info("版本向量化完成: docId={}, versionId={}", docId, versionId);
-        syncKnowledgeGraphIfEnabled(doc, versionId);
     }
 
-    private void syncKnowledgeGraphIfEnabled(KnowledgeBaseEntity doc, Long versionId) {
-        if (knowledgeGraphSyncService == null || !knowledgeGraphSyncService.isEnabled()) {
-            return;
+    private List<String> collectStorageKeys(KnowledgeBaseEntity document) {
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        if (document.getStorageKey() != null && !document.getStorageKey().isBlank()) {
+            keys.add(document.getStorageKey());
         }
-        knowledgeGraphSyncService.syncDocument(doc.getId(), versionId, doc.getUserId(), doc.getName());
+        versionService.listByDocId(document.getId()).stream()
+            .map(KnowledgeBaseVersionEntity::getStorageKey)
+            .filter(key -> key != null && !key.isBlank())
+            .forEach(keys::add);
+        return List.copyOf(keys);
     }
 
     @Override

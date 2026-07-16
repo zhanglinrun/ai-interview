@@ -16,6 +16,33 @@ public final class MetadataKeyConstant {
     /** 知识库 ID（对应 KnowledgeBaseEntity.id） */
     public static final String DOC_ID = "docId";
 
+    /** 证据所有者；PLATFORM 固定为 0，其他域固定为真实 dataUserId。 */
+    public static final String OWNER_USER_ID = "ownerUserId";
+
+    /** 证据域：PLATFORM / JOB / CANDIDATE / GITHUB。 */
+    public static final String DATA_DOMAIN = "dataDomain";
+
+    /** 域内资源 ID，例如知识库 ID、JD ID 或 GitHub 仓库 ID。 */
+    public static final String RESOURCE_ID = "resourceId";
+
+    /** 冻结资源版本，例如知识库 versionId 或 Git commit SHA。 */
+    public static final String RESOURCE_VERSION = "resourceVersion";
+
+    /** 稳定片段证据 ID。 */
+    public static final String EVIDENCE_ID = "evidenceId";
+
+    /** 当前片段正文 SHA-256。 */
+    public static final String CONTENT_HASH = "contentHash";
+
+    /** 来源类型，例如 KNOWLEDGE_DOCUMENT / GITHUB_CODE。 */
+    public static final String SOURCE_TYPE = "sourceType";
+
+    /** 来源内定位，例如 chunk ID、文件路径与行号。 */
+    public static final String SOURCE_LOCATOR = "sourceLocator";
+
+    /** 本次 EvidenceScope 为所属域配置的召回权重（仅检索结果元数据）。 */
+    public static final String DOMAIN_WEIGHT = "domainWeight";
+
     /** chunk 唯一 ID（雪花算法生成，用于父子/兄弟关系） */
     public static final String CHUNK_ID = "chunkId";
 

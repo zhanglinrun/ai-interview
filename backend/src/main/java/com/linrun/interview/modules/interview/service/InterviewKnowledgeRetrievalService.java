@@ -1,10 +1,12 @@
 package com.linrun.interview.modules.interview.service;
 
 import com.linrun.interview.common.ai.PromptSanitizer;
+import com.linrun.interview.common.exception.BusinessException;
+import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.modules.interview.agent.model.InterviewEvidence;
 import com.linrun.interview.modules.interview.agent.model.InterviewEvidence.Bundle;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import dev.langchain4j.data.segment.TextSegment;
@@ -18,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -40,11 +43,25 @@ public class InterviewKnowledgeRetrievalService {
   /**
    * Planner 使用的宽查询入口。底层同样走逐轮轻量检索通道，不触发生成式查询改写。
    */
-  public String buildKbReferenceSection(List<Long> knowledgeBaseIds, SkillDTO skill) {
-    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || skill == null) {
+  public String buildKbReferenceSection(List<Long> knowledgeBaseIds, InterviewTopic topic) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || topic == null) {
       return "";
     }
-    Bundle bundle = retrieveEvidence(knowledgeBaseIds, buildQuery(skill));
+    return buildKbReferenceSection(retrieveEvidence(knowledgeBaseIds, buildQuery(topic)));
+  }
+
+  /** 异步 Planner 使用持久化的数据用户身份检索，禁止回退消费线程的 UserContext。 */
+  public String buildKbReferenceSection(Long dataUserId, List<Long> knowledgeBaseIds,
+                                        InterviewTopic topic) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || topic == null) {
+      return "";
+    }
+    requireDataUserId(dataUserId);
+    return buildKbReferenceSection(
+        retrieveEvidence(dataUserId, knowledgeBaseIds, buildQuery(topic)));
+  }
+
+  private String buildKbReferenceSection(Bundle bundle) {
     if (bundle.promptEvidence().isEmpty()) {
       return "";
     }
@@ -61,9 +78,25 @@ public class InterviewKnowledgeRetrievalService {
         || query == null || query.isBlank()) {
       return Bundle.empty(query);
     }
+    return retrieveEvidence(knowledgeBaseIds, query, () -> knowledgeBaseQueryService
+        .retrieveContentsForInterviewEvidence(knowledgeBaseIds, query));
+  }
+
+  /** 异步入口：dataUserId 是数据权限身份，不从线程上下文推断。 */
+  public Bundle retrieveEvidence(Long dataUserId, List<Long> knowledgeBaseIds, String query) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+        || query == null || query.isBlank()) {
+      return Bundle.empty(query);
+    }
+    requireDataUserId(dataUserId);
+    return retrieveEvidence(knowledgeBaseIds, query, () -> knowledgeBaseQueryService
+        .retrieveContentsForInterviewEvidence(dataUserId, knowledgeBaseIds, query));
+  }
+
+  private Bundle retrieveEvidence(List<Long> knowledgeBaseIds, String query,
+                                  Supplier<List<Content>> retriever) {
     try {
-      List<Content> contents = knowledgeBaseQueryService
-          .retrieveContentsForInterviewEvidence(knowledgeBaseIds, query);
+      List<Content> contents = retriever.get();
       Map<String, InterviewEvidence> unique = new LinkedHashMap<>();
       contents.stream()
           .map(this::toEvidence)
@@ -83,6 +116,12 @@ public class InterviewKnowledgeRetrievalService {
       log.warn("面试证据检索失败，降级为无知识库证据: kbIds={}, query={}",
           knowledgeBaseIds, query, e);
       return Bundle.empty(query);
+    }
+  }
+
+  private void requireDataUserId(Long dataUserId) {
+    if (dataUserId == null) {
+      throw new BusinessException(ErrorCode.UNAUTHORIZED, "面试证据检索缺少数据用户身份");
     }
   }
 
@@ -130,12 +169,12 @@ public class InterviewKnowledgeRetrievalService {
         + "; score=" + score + "] " + evidence.snippet();
   }
 
-  private String buildQuery(SkillDTO skill) {
-    String categories = skill.categories() == null ? "" : skill.categories().stream()
+  private String buildQuery(InterviewTopic topic) {
+    String categories = topic.categories() == null ? "" : topic.categories().stream()
         .limit(MAX_QUERY_CATEGORIES)
-        .map(SkillCategoryDTO::label)
+        .map(Category::label)
         .collect(Collectors.joining(" "));
-    return (skill.name() + " " + categories + " 核心知识点 面试考点").strip();
+    return (topic.name() + " " + categories + " 核心知识点 面试考点").strip();
   }
 
   private Double extractScore(Content content) {

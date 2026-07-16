@@ -7,9 +7,9 @@ import com.linrun.interview.modules.interview.agent.model.InterviewPlan;
 import com.linrun.interview.modules.interview.agent.model.InterviewPlan.PlanTopic;
 import com.linrun.interview.modules.interview.agent.model.TurnDecision;
 import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
@@ -60,17 +60,17 @@ class InterviewTurnDecisionDatasetTest {
   }
 
   private InterviewTurnDecisionService buildService() {
-    InterviewSkillService skillService = mock(InterviewSkillService.class);
-    when(skillService.getSkill("java-backend")).thenReturn(new SkillDTO(
+    InterviewTopicCatalog topicCatalog = mock(InterviewTopicCatalog.class);
+    when(topicCatalog.getTopic("java-backend")).thenReturn(new InterviewTopic(
         "java-backend", "Java 后端", "后端开发", List.of(
-            new SkillCategoryDTO("MYSQL", "MySQL", "CORE", "mysql.md", true),
-            new SkillCategoryDTO("REDIS", "Redis", "CORE", "redis.md", true)),
+            new Category("MYSQL", "MySQL", "CORE", "1.0.0"),
+            new Category("REDIS", "Redis", "CORE", "1.0.0")),
         true, null, null, null));
     InterviewKnowledgeRetrievalService retrievalService =
         mock(InterviewKnowledgeRetrievalService.class);
     when(retrievalService.retrieveEvidence(anyList(), anyString()))
         .thenAnswer(invocation -> Bundle.empty(invocation.getArgument(1)));
-    return new InterviewTurnDecisionService(skillService, retrievalService);
+    return new InterviewTurnDecisionService(topicCatalog, retrievalService);
   }
 
   @SuppressWarnings("unchecked")

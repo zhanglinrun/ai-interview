@@ -28,21 +28,22 @@ export class CalendarErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-6 shadow-xl">
-          <div className="text-center py-12">
-            <div className="text-red-500 text-6xl mb-4">📅</div>
-            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-              日历渲染出错
+        <div className="surface-card p-6">
+          <div className="py-10 text-center">
+            <div className="mb-3 text-3xl" aria-hidden="true">📅</div>
+            <h3 className="mb-2 text-lg font-semibold text-stone-900 dark:text-stone-50">
+              日历暂时无法显示
             </h3>
-            <p className="text-slate-600 dark:text-slate-400 mb-4">
-              {this.state.error?.message || '未知错误'}
+            <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">
+              请刷新页面后重试。
             </p>
             <button
+              type="button"
               onClick={() => {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();
               }}
-              className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+              className="btn-primary px-4 py-2 text-sm"
             >
               刷新页面
             </button>

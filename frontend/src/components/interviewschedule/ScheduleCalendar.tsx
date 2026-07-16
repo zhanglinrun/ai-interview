@@ -3,12 +3,14 @@
 import { Calendar, dayjsLocalizer, View } from 'react-big-calendar';
 import withDragAndDrop, { EventInteractionArgs } from 'react-big-calendar/lib/addons/dragAndDrop';
 import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './ScheduleCalendar.css';
-import { motion } from 'framer-motion';
 import type { InterviewSchedule } from '../../types/interviewSchedule';
 import { InterviewEvent } from './InterviewEvent';
+
+dayjs.locale('zh-cn');
 
 const localizer = dayjsLocalizer(dayjs);
 
@@ -124,6 +126,17 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   });
 
   const formats = {
+    dateFormat: (value: Date) => dayjs(value).format('D'),
+    dayFormat: (value: Date) => dayjs(value).format('D日 ddd'),
+    weekdayFormat: (value: Date) => dayjs(value).format('ddd'),
+    monthHeaderFormat: (value: Date) => dayjs(value).format('YYYY年M月'),
+    dayHeaderFormat: (value: Date) => dayjs(value).format('YYYY年M月D日 dddd'),
+    dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
+      `${dayjs(start).format('M月D日')} - ${dayjs(end).format('M月D日')}`,
+    agendaDateFormat: (value: Date) => dayjs(value).format('M月D日 ddd'),
+    agendaTimeFormat: (value: Date) => dayjs(value).format('HH:mm'),
+    agendaTimeRangeFormat: ({ start, end }: { start: Date; end: Date }) =>
+      `${dayjs(start).format('HH:mm')} - ${dayjs(end).format('HH:mm')}`,
     timeGutterFormat: 'HH:mm',
     eventTimeRangeFormat: ({ start, end }: { start: Date; end: Date }) =>
       `${dayjs(start).format('HH:mm')} - ${dayjs(end).format('HH:mm')}`,
@@ -134,13 +147,11 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white dark:bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-6 shadow-xl shadow-slate-200/50 dark:shadow-slate-900/50"
-    >
-      <DnDCalendar
+    <div className="surface-card overflow-x-auto p-3 sm:p-4">
+      <div className="min-w-[720px]">
+        <DnDCalendar
           localizer={localizer}
+          culture="zh-cn"
           events={events}
           view={view}
           onView={onViewChange}
@@ -152,7 +163,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
           max={finalMaxTime}
           step={30}
           timeslots={2}
-          style={{ height: 800 }}
+          style={{ height: 720 }}
           eventPropGetter={eventStyleGetter}
           components={{
             event: InterviewEvent,
@@ -179,6 +190,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
           resizable
           selectable
         />
-      </motion.div>
+      </div>
+    </div>
   );
 };

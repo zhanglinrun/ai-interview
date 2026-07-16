@@ -5,7 +5,6 @@ interface ScoreProgressBarProps {
   score: number;
   maxScore: number;
   color?: string;
-  delay?: number;
   className?: string;
 }
 
@@ -17,7 +16,6 @@ export default function ScoreProgressBar({
   score,
   maxScore,
   color = 'bg-primary-500',
-  delay = 0,
   className = ''
 }: ScoreProgressBarProps) {
   return (
@@ -27,7 +25,6 @@ export default function ScoreProgressBar({
         score={score}
         maxScore={maxScore}
         colorClassName={color}
-        delay={delay}
         displayValue={`${score}/${maxScore}`}
         trackColorClassName="bg-slate-200 dark:bg-slate-600"
         widthClassName="flex-1"

@@ -37,8 +37,8 @@ class CandidateMemoryServiceTest {
 
     InterviewSessionEntity session = session("session-1");
     InterviewQuestionDTO question = InterviewQuestionDTO.createAgent(
-        0, "如何保证缓存一致性？", "skill:java-backend:redis", "Redis",
-        "Redis", false, null, "skill:java-backend:redis", "SWITCH_TOPIC",
+        0, "如何保证缓存一致性？", "template:java-backend:redis", "Redis",
+        "Redis", false, null, "template:java-backend:redis", "SWITCH_TOPIC",
         List.of("chunk:101"));
     InterviewReportDTO report = report(new QuestionEvaluation(
         0, question.question(), question.category(), "先更新数据库再删缓存，因为……",
@@ -50,7 +50,7 @@ class CandidateMemoryServiceTest {
         ArgumentCaptor.forClass(CandidateMemoryEntity.class);
     verify(mapper).insert(captor.capture());
     CandidateMemoryEntity saved = captor.getValue();
-    assertThat(saved.getCapabilityAtomId()).isEqualTo("skill:java-backend:redis");
+    assertThat(saved.getCapabilityAtomId()).isEqualTo("template:java-backend:redis");
     assertThat(saved.getMasteryScore()).isEqualTo(82);
     assertThat(saved.getKind()).isEqualTo(CandidateMemoryEntity.KIND_STRENGTH);
     assertThat(saved.getQuestionIndex()).isZero();
@@ -66,8 +66,8 @@ class CandidateMemoryServiceTest {
         .thenThrow(new DuplicateKeyException("duplicate observation"));
     CandidateMemoryService service = service(mapper);
     InterviewQuestionDTO question = InterviewQuestionDTO.createAgent(
-        0, "如何保证缓存一致性？", "skill:java-backend:redis", "Redis",
-        "Redis", false, null, "skill:java-backend:redis", "SWITCH_TOPIC",
+        0, "如何保证缓存一致性？", "template:java-backend:redis", "Redis",
+        "Redis", false, null, "template:java-backend:redis", "SWITCH_TOPIC",
         List.of("chunk:101"));
 
     assertThatCode(() -> service.extractAndSave(
@@ -131,7 +131,7 @@ class CandidateMemoryServiceTest {
         .id(id)
         .userId(1L)
         .skillId("java-backend")
-        .capabilityAtomId("skill:java-backend:redis")
+        .capabilityAtomId("template:java-backend:redis")
         .topic("Redis")
         .kind(kind)
         .questionIndex(questionIndex)

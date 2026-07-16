@@ -26,7 +26,7 @@ import java.util.Optional;
 /**
  * 简历上传服务
  * 处理简历上传、解析的业务逻辑
- * AI 分析改为异步处理，通过 Redis Stream 实现
+ * AI 分析通过 RabbitMQ 异步处理。
  */
 @Slf4j
 @Service
@@ -91,8 +91,8 @@ public class ResumeUploadService {
         // 6. 保存简历到数据库（状态为 PENDING）
         ResumeEntity savedResume = persistenceService.saveResume(file, resumeText, fileKey, fileUrl);
 
-        // 7. 发送分析任务到 Redis Stream（异步处理）
-        analyzeStreamProducer.sendAnalyzeTask(savedResume.getId(), resumeText);
+        // 7. 发送分析任务到 RabbitMQ（消息只携带资源 ID 与 userId，不传简历正文）
+        analyzeStreamProducer.sendAnalyzeTask(savedResume.getId());
 
         long totalTime = System.currentTimeMillis() - startTime;
         log.info("简历上传处理完成: {}, resumeId={} - 总耗时: {}ms (解析+存储+入库)",
@@ -174,7 +174,6 @@ public class ResumeUploadService {
      *
      * @param resumeId 简历ID
      */
-    @Transactional
     public void reanalyze(Long resumeId) {
         Long userId = UserContext.requireUserId();
         ResumeEntity resume = EntityQueries.byUserAndId(
@@ -199,8 +198,8 @@ public class ResumeUploadService {
         resume.setAnalyzeError(null);
         MapperUtils.save(resumeEntityMapper, resume);
 
-        // 发送分析任务到 Stream
-        analyzeStreamProducer.sendAnalyzeTask(resumeId, resumeText);
+        // DB 状态提交后发送 RabbitMQ；发送失败由调用方感知，正文不进入消息体。
+        analyzeStreamProducer.sendAnalyzeTask(resumeId);
 
         log.info("重新分析任务已发送: resumeId={}", resumeId);
     }

@@ -13,7 +13,7 @@ public record LlmIntentRecognitionResult(
     String reason,
     @JsonPropertyDescription("用户问题是否与 AI 面试/技术/简历/求职场景相关")
     boolean related,
-    @JsonPropertyDescription("意图：TECH_KB/CODE_REVIEW/DATA_QUERY/RESUME_STATS/INTERVIEW_PREP/SCHEDULE/CAREER/OFF_TOPIC")
+    @JsonPropertyDescription("意图：TECH_KB/CODE_REVIEW/RESUME_STATS/INTERVIEW_PREP/SCHEDULE/CAREER/OFF_TOPIC")
     String intent,
     @JsonPropertyDescription("LLM 对该判断的置信度，范围 0.0~1.0")
     Double confidence,

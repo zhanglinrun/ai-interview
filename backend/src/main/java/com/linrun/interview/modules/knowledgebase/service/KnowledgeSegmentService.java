@@ -77,6 +77,9 @@ public interface KnowledgeSegmentService {
      */
     List<KnowledgeBaseSegmentEntity> findByBrotherChunkIdIn(List<String> brotherChunkIds);
 
+    /** 清理父子/兄弟正文 Redis 缓存。 */
+    void evictExpansionCache();
+
     /**
      * 按 ID 查分段（需校验文档归属）。
      */

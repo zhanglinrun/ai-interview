@@ -1,12 +1,11 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
 @plugin "@tailwindcss/typography";
 
 /* 启用深色模式 - 使用 class 策略 */
 @custom-variant dark (&:where(.dark, .dark *));
 
 
-/* 自定义主题 — 偏产品感：暖灰底 + 青绿强调，减少「AI 紫」 */
+/* 克制的产品配色：暖灰底 + 青绿强调。 */
 @theme {
   --color-primary-50: #f0fdfa;
   --color-primary-100: #ccfbf1;
@@ -20,8 +19,10 @@
   --color-primary-900: #134e4a;
   --color-primary-950: #042f2e;
 
-  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
-  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
 }
 
 /* 自定义基础样式 */
@@ -33,17 +34,8 @@
   body {
     @apply antialiased;
     font-family: var(--font-sans);
-    @apply bg-stone-50 text-stone-900;
+    @apply bg-stone-100 text-stone-900;
     @apply dark:bg-stone-950 dark:text-stone-100;
-    background-image:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgb(204 251 241 / 0.35), transparent),
-      radial-gradient(ellipse 60% 40% at 100% 0%, rgb(245 245 244 / 0.9), transparent);
-  }
-
-  .dark body {
-    background-image:
-      radial-gradient(ellipse 70% 50% at 50% -10%, rgb(19 78 74 / 0.25), transparent),
-      radial-gradient(ellipse 50% 30% at 100% 0%, rgb(28 25 23 / 0.5), transparent);
   }
 
   #root {
@@ -52,36 +44,30 @@
 
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
-    @apply font-semibold tracking-tight;
+    @apply font-semibold tracking-tight text-balance;
   }
 }
 
-/* 深色模式通用样式 - 自动应用于所有卡片和容器 */
+/* 所有业务页共用的平面组件。 */
 @layer components {
-    /* 高级毛玻璃卡片质感 */
     .surface-card,
     .dark-card {
-        @apply bg-white/70 dark:bg-stone-900/60 backdrop-blur-xl rounded-2xl;
-        @apply border border-white/60 dark:border-white/10;
-        @apply shadow-[0_4px_24px_-4px_rgba(0,0,0,0.05),0_1px_4px_-1px_rgba(0,0,0,0.02)];
-        @apply transition-all duration-300;
+        @apply rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900;
+        @apply shadow-[0_1px_2px_rgba(0,0,0,0.035)];
     }
 
-    .dark .surface-card,
-    .dark .dark-card {
-        @apply shadow-[0_8px_32px_-4px_rgba(0,0,0,0.3),0_2px_8px_-1px_rgba(0,0,0,0.2)];
-    }
-
-    /* 悬浮态高级卡片 (可选添加此类名以获得交互) */
     .hover-card {
-        @apply hover:-translate-y-1 hover:shadow-xl dark:hover:shadow-[0_8px_40px_-4px_rgba(0,0,0,0.4)] hover:border-primary-500/20 dark:hover:border-primary-500/30;
+        @apply transition-[border-color,box-shadow,background-color] duration-150;
+        @apply hover:border-primary-300 hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)];
+        @apply dark:hover:border-primary-800;
     }
 
-    /* 通用输入框 */
     .dark-input {
-        @apply bg-white/80 dark:bg-stone-900/80 backdrop-blur-md border border-stone-200/80 dark:border-stone-800/80 text-stone-900 dark:text-stone-100;
-        @apply focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 dark:focus:ring-primary-400/20 dark:focus:border-primary-400;
-        @apply transition-all duration-300 shadow-inner rounded-xl;
+        @apply rounded-lg border border-stone-300 bg-white text-stone-900 outline-none;
+        @apply dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100;
+        @apply focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15;
+        @apply dark:focus:border-primary-400 dark:focus:ring-primary-400/15;
+        @apply transition-[border-color,box-shadow] duration-150;
     }
 
     /* 通用文字颜色 */
@@ -93,39 +79,31 @@
         @apply text-stone-500 dark:text-stone-400;
     }
 
-    /* 按钮基础样式 - 更动感和呼吸感 */
     .btn-primary {
-        @apply bg-primary-600 hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-500;
-        @apply text-white font-medium rounded-xl;
-        @apply active:scale-95 hover:scale-[1.02];
-        @apply shadow-[0_4px_16px_rgba(13,148,136,0.3)] hover:shadow-[0_8px_24px_rgba(13,148,136,0.4)];
-        @apply transition-all duration-300;
+        @apply rounded-lg bg-primary-600 font-medium text-white hover:bg-primary-700;
+        @apply dark:bg-primary-600 dark:hover:bg-primary-500;
+        @apply transition-colors duration-150;
     }
 
     .btn-secondary {
-        @apply bg-white/80 dark:bg-stone-900/80 text-stone-700 dark:text-stone-200 backdrop-blur-md;
-        @apply hover:bg-white dark:hover:bg-stone-800 rounded-xl;
-        @apply active:scale-95 hover:scale-[1.02];
-        @apply border border-stone-200 dark:border-stone-700/80;
-        @apply shadow-sm hover:shadow-md;
-        @apply transition-all duration-300;
+        @apply rounded-lg border border-stone-300 bg-white font-medium text-stone-700;
+        @apply hover:border-stone-400 hover:bg-stone-50;
+        @apply dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800;
+        @apply transition-colors duration-150;
     }
 
-    /* 虚线拖放区 */
     .dropzone {
-        @apply rounded-2xl border-2 border-dashed border-stone-300 dark:border-stone-700;
-        @apply bg-stone-50/50 dark:bg-stone-900/30;
-        @apply transition-all duration-300 hover:bg-stone-100/50 dark:hover:bg-stone-800/30;
+        @apply rounded-xl border border-dashed border-stone-300 bg-stone-50;
+        @apply transition-colors duration-150 hover:border-stone-400 hover:bg-stone-100;
+        @apply dark:border-stone-700 dark:bg-stone-900 dark:hover:bg-stone-800;
     }
 
     .dropzone-active {
-        @apply border-primary-500 bg-primary-50/50 dark:border-primary-500 dark:bg-primary-900/20 scale-[1.02] shadow-lg shadow-primary-500/10;
+        @apply border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-950/30;
     }
 
-    /* 状态徽章 */
     .status-badge {
-        @apply px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase;
-        @apply border border-white/20 shadow-sm backdrop-blur-md;
+        @apply rounded-md px-2 py-0.5 text-xs font-medium;
     }
 }
 
@@ -167,23 +145,18 @@
   }
 
   .rbc-toolbar {
-    @apply mb-6;
+    @apply mb-4;
   }
 
   .rbc-toolbar button {
     @apply px-4 py-2 rounded-lg font-medium text-sm;
-    @apply bg-slate-100/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200;
-    @apply border border-slate-200/50 dark:border-slate-700/50;
-    @apply hover:bg-slate-200/90 dark:hover:bg-slate-700/90;
-    @apply backdrop-blur-sm;
-    @apply transition-all duration-200;
+    @apply border border-stone-300 bg-white text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200;
+    @apply hover:bg-stone-100 dark:hover:bg-stone-800;
+    @apply transition-colors duration-150;
   }
 
   .rbc-toolbar button.rbc-active {
-    @apply bg-primary-600/90 dark:bg-primary-500/90 text-white;
-    @apply border-primary-600/90 dark:border-primary-500/90;
-    @apply shadow-lg shadow-primary-500/20;
-    @apply backdrop-blur-sm;
+    @apply border-primary-600 bg-primary-600 text-white dark:border-primary-500 dark:bg-primary-500;
   }
 
   .rbc-toolbar-label {
@@ -192,14 +165,12 @@
 
   .rbc-header {
     @apply py-3 font-display font-semibold text-sm uppercase tracking-wide;
-    @apply bg-slate-50/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300;
-    @apply border-b-2 border-slate-200/50 dark:border-slate-700/50;
-    @apply backdrop-blur-sm;
+    @apply border-b border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300;
   }
 
   .rbc-month-view, .rbc-time-view, .rbc-agenda-view {
     @apply rounded-xl overflow-hidden;
-    @apply border border-slate-200 dark:border-slate-700/50;
+    @apply border border-stone-200 dark:border-stone-700;
   }
 
   .rbc-day-bg, .rbc-time-header-content, .rbc-time-gutter {
@@ -211,9 +182,7 @@
   }
 
   .rbc-today {
-    @apply bg-primary-50/80;
-    @apply dark:bg-primary-950/40;
-    @apply backdrop-blur-sm;
+    @apply bg-primary-50 dark:bg-primary-950/40;
   }
 
   .rbc-time-slot {
@@ -221,10 +190,8 @@
   }
 
   .rbc-event {
-    @apply rounded-lg shadow-md;
-    @apply transition-all duration-200;
-    @apply hover:shadow-xl hover:shadow-primary-500/20 hover:scale-[1.02];
-    @apply backdrop-blur-sm;
+    @apply rounded-md;
+    @apply transition-colors duration-150;
   }
 
   .rbc-event-content {

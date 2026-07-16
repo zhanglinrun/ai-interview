@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Database, KeyRound, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { userLlmProviderApi } from '../api/userLlmProvider';
 import { USER_LLM_NOT_CONFIGURED_EVENT } from '../api/request';
@@ -68,7 +67,7 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
     };
   }, [userId]);
 
-  // 监听全局「未配置模型 Key」事件（覆盖 RAG 问答/出题/评估/语音等所有 chat 入口）
+  // 监听全局「未配置模型 Key」事件（覆盖 RAG 问答、出题与评估等 chat 入口）
   useEffect(() => {
     const handler = () => {
       if (!getStoredUser()) {
@@ -110,35 +109,28 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
   const title = step === 1 ? '配置你的模型 Key' : '填写你的模型';
   const subtitle =
     step === 1
-      ? '本 Demo 使用 BYOK（自带模型 Key）'
-      : '兼容 OpenAI 的服务都可以，填完可先测试连通';
+      ? '使用你自己的模型服务（BYOK）'
+      : '兼容 OpenAI 接口的服务都可以，保存前可先测试';
 
   return (
     <>
-      <AnimatePresence>
         {wizardOpen && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70]"
+            <div
+              className="fixed inset-0 z-[70] bg-black/50"
             />
             <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              <div
                 className="surface-card w-full max-w-lg p-6 max-h-[88vh] overflow-y-auto"
               >
                 {/* 头部 */}
                 <div className="mb-5 flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg shadow-primary-500/25">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">
                       {step === 1 ? (
-                        <Sparkles className="h-5 w-5 text-white" />
+                        <Sparkles className="h-5 w-5" />
                       ) : (
-                        <KeyRound className="h-5 w-5 text-white" />
+                        <KeyRound className="h-5 w-5" />
                       )}
                     </div>
                     <div>
@@ -171,8 +163,7 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                 {step === 1 ? (
                   <div className="space-y-4">
                     <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                      为控制在线 Demo 成本，AI 功能采用 <span className="font-semibold">BYOK（Bring Your Own Key）</span>：
-                      你使用<span className="font-semibold">自己的</span>模型 API Key，数据按账号隔离，成本自付。
+                      面试提问、回答评估和知识问答使用你自己的模型 API Key，调用记录按账号保存，费用由你的模型账号承担。
                     </p>
                     <ul className="space-y-2.5">
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
@@ -183,17 +174,17 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                       </li>
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
                         <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-500" />
-                        <span>Key 仅用于你自己的 AI 调用（问答 / 出题 / 面试评估），加密存储、永不明文回显。</span>
+                        <span>Key 仅用于你的模型调用，加密保存，页面不会再次显示完整内容。</span>
                       </li>
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
                         <Database className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-500" />
                         <span>
-                          向量化（Embedding）由平台统一承担：未配置也能上传 / 向量化知识库，但无法进行问答 / 出题 / 评估。
+                          文档向量化由平台统一处理；没有配置 Key 时仍可浏览页面和上传资料。
                         </span>
                       </li>
                     </ul>
                     <p className="text-xs text-slate-400">
-                      可以先「跳过」浏览产品，使用 AI 功能时会再次提醒你配置。
+                      可以先跳过，需要调用模型时会再次提醒。
                     </p>
 
                     <div className="flex items-center justify-between gap-3 pt-2">
@@ -205,18 +196,14 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                       >
                         跳过
                       </button>
-                      <motion.button
+                      <button
                         type="button"
                         onClick={() => setStep(2)}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
-                          text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg shadow-primary-500/25
-                          hover:from-primary-600 hover:to-primary-700 transition-all"
+                        className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
                       >
                         开始配置
                         <ArrowRight className="h-4 w-4" />
-                      </motion.button>
+                      </button>
                     </div>
                   </div>
                 ) : (
@@ -241,12 +228,10 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                     />
                   </div>
                 )}
-              </motion.div>
+              </div>
             </div>
           </>
         )}
-      </AnimatePresence>
-
       <ConfirmDialog
         open={promptOpen}
         title="需要配置模型 Key"

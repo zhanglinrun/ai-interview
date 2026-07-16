@@ -79,33 +79,33 @@
       ]
     },
     {
-      "title": "Stream 积压 (Stream 长度)",
+      "title": "JVM 堆使用率",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
-          "expr": "app_async_stream_length",
-          "legendFormat": "{{pipeline}}",
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"}) / clamp_min(sum(jvm_memory_max_bytes{area=\"heap\"}), 1)",
+          "legendFormat": "heap",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "Stream 待确认数 (PEL)",
+      "title": "RabbitMQ 消费速率",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
-          "expr": "app_async_stream_pending",
-          "legendFormat": "{{pipeline}}",
+          "expr": "sum(rate(spring_rabbitmq_listener_seconds_count[5m])) by (result)",
+          "legendFormat": "{{result}}",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "死信队列长度 (DLQ)",
+      "title": "RabbitMQ 死信事件",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
       "fieldConfig": {
@@ -123,7 +123,7 @@
       },
       "targets": [
         {
-          "expr": "app_async_stream_dlq",
+          "expr": "sum(increase(app_async_dlq_total[5m])) by (pipeline)",
           "legendFormat": "{{pipeline}}",
           "refId": "A"
         }
@@ -174,7 +174,7 @@
       ]
     },
     {
-      "title": "Multi-Agent 出题延迟 (P99 / P95)",
+      "title": "面试 Agent 出题延迟 (P99 / P95)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
@@ -234,6 +234,42 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "MinerU 解析延迟与结果",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(app_ai_document_parse_latency_seconds_bucket{provider=\"mineru\"}[5m])) by (le, result))",
+          "legendFormat": "P95 {{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(app_ai_document_parse_requests_total{provider=\"mineru\"}[5m])) by (result, failure_code)",
+          "legendFormat": "{{result}}/{{failure_code}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "JVM / 进程资源",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "process_cpu_usage",
+          "legendFormat": "process CPU",
+          "refId": "A"
+        },
+        {
+          "expr": "system_cpu_usage",
+          "legendFormat": "system CPU",
+          "refId": "B"
+        }
+      ]
     }
   ],
   "refresh": "15s",
@@ -242,7 +278,7 @@
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timezone": "browser",
-  "title": "AI Interview - RAG / 异步管道 / 稳定性",
+  "title": "AI Interview - RAG / Agent / 稳定性",
   "uid": "ai-interview-overview",
-  "version": 1
+  "version": 2
 }

@@ -7,24 +7,18 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 /**
- * RabbitMQ 投递通道（{@code app.async.engine=rabbitmq} 时启用）。
+ * RabbitMQ 投递通道。
  *
  * <p>把 {@link TaskQueueChannel} 的逻辑管道键（*_STREAM_KEY）映射为 RabbitMQ routing key，
- * 消息体以 JSON 承载与其它引擎完全一致的字段（含 taskId / retryCount），消费侧解析后复用
- * {@link AbstractStreamConsumer#consumeFromBroker} 同一套业务与幂等逻辑，实现「一行配置切换引擎」。
- *
- * <p>RabbitMQ 无 RocketMQ 式事务半消息，{@link #sendInTransaction} 沿用父接口默认（等同 {@link #send}）：
- * 业务侧已遵循 DB-first 顺序 + 补偿任务兜底，保证「DB 状态变更」与「消息投递」最终一致。
+ * 消息体以 JSON 承载 taskId 等可靠性字段，消费侧复用统一的业务与幂等逻辑。
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "app.async.engine", havingValue = AsyncEngineProperties.ENGINE_RABBITMQ)
 public class RabbitMqTaskChannel implements TaskQueueChannel {
 
     private final RabbitTemplate rabbitTemplate;
@@ -36,8 +30,10 @@ public class RabbitMqTaskChannel implements TaskQueueChannel {
         AsyncTaskStreamConstants.RABBIT_RESUME_ANALYZE_ROUTING,
         AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY,
         AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_ROUTING,
-        AsyncTaskStreamConstants.VOICE_EVALUATE_STREAM_KEY,
-        AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_ROUTING
+        AsyncTaskStreamConstants.JOB_INTERVIEW_PREPARE_STREAM_KEY,
+        AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_ROUTING,
+        AsyncTaskStreamConstants.INTERVIEW_REPORT_STREAM_KEY,
+        AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_ROUTING
     );
 
     public RabbitMqTaskChannel(RabbitTemplate rabbitTemplate, ObjectMapper objectMapper) {

@@ -1,6 +1,15 @@
 // 面试相关类型定义
 
-import type { CategoryDTO } from '../api/skill';
+export type Difficulty = 'junior' | 'mid' | 'senior';
+
+/** 仅用于兼容历史文字面试快照；新岗位实战使用版本化能力目录。 */
+export interface CategoryDTO {
+  key: string;
+  label: string;
+  priority: 'CORE' | 'NORMAL' | 'ALWAYS_ONE';
+  ref?: string;
+  shared?: boolean;
+}
 
 export interface InterviewSession {
   sessionId: string;

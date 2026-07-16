@@ -42,11 +42,4 @@ export const ragModuleApi = {
       timeout: AI_REQUEST_TIMEOUT_MS,
     });
   },
-
-  testRouterStrategy(question: string) {
-    return request.get<string>(
-      `/api/rag/module/router-strategy?question=${encodeURIComponent(question)}`,
-      { timeout: AI_REQUEST_TIMEOUT_MS },
-    );
-  },
 };

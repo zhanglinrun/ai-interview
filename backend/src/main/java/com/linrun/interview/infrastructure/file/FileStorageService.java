@@ -5,11 +5,13 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
+import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
+import io.minio.http.Method;
 import io.minio.errors.ErrorResponseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +27,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
+import java.net.URI;
 import java.util.UUID;
 
 @Slf4j
@@ -64,6 +68,44 @@ public class FileStorageService {
         } catch (Exception e) {
             log.error("下载文件失败: {}", fileKey, e);
             throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件下载失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 为外部解析服务生成短时只读 URL。桶仍保持私有，不开启匿名读或列表权限。
+     */
+    public URI presignDownload(String fileKey, Duration ttl) {
+        if (fileKey == null || fileKey.isBlank()) {
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件存储键不能为空");
+        }
+        if (!fileExists(fileKey)) {
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件不存在");
+        }
+        long seconds = ttl == null ? 600L : ttl.toSeconds();
+        if (seconds < 1 || seconds > 604800) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "预签名有效期必须在 1 秒到 7 天之间");
+        }
+        String externalEndpoint = minioProperties.getExternalEndpoint();
+        if (externalEndpoint == null || externalEndpoint.isBlank()) {
+            externalEndpoint = minioProperties.getEndpoint();
+        }
+        try {
+            MinioClient signingClient = MinioClient.builder()
+                .endpoint(externalEndpoint)
+                .credentials(minioProperties.getAccessKey(), minioProperties.getSecretKey())
+                .build();
+            String signed = signingClient.getPresignedObjectUrl(
+                GetPresignedObjectUrlArgs.builder()
+                    .method(Method.GET)
+                    .bucket(minioProperties.getBucket())
+                    .object(fileKey)
+                    .expiry((int) seconds)
+                    .build());
+            return URI.create(signed);
+        } catch (Exception e) {
+            log.warn("生成外部短时下载地址失败: objectKey={}, error={}", fileKey, e.getMessage(), e);
+            throw new BusinessException(
+                ErrorCode.STORAGE_DOWNLOAD_FAILED, "生成外部短时下载地址失败", e);
         }
     }
 

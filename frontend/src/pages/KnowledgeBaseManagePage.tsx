@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {AnimatePresence, motion} from 'framer-motion';
 import {
   Check,
   ChevronDown,
@@ -18,7 +17,6 @@ import {
   X,
 } from 'lucide-react';
 import {
-  DataTablePreview,
   knowledgeBaseApi,
   KnowledgeBaseItem,
   KnowledgeBaseSegment,
@@ -34,6 +32,7 @@ import {EmptyState, LoadingState} from '../components/PageState';
 import SearchInput from '../components/SearchInput';
 import StatCard from '../components/StatCard';
 import VectorStatusBadge from '../components/VectorStatusBadge';
+import PageHeader from '../components/ui/PageHeader';
 import {formatDateTime} from '../utils/date';
 import {downloadBlob} from '../utils/download';
 import {formatFileSize} from '../utils/format';
@@ -107,9 +106,6 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [versionUploadFile, setVersionUploadFile] = useState<File | null>(null);
   const [versionChangelog, setVersionChangelog] = useState('');
   const [versionUploading, setVersionUploading] = useState(false);
-  const [previewKb, setPreviewKb] = useState<KnowledgeBaseItem | null>(null);
-  const [dataPreview, setDataPreview] = useState<DataTablePreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [traces, setTraces] = useState<RagQueryTrace[]>([]);
   const [tracesLoading, setTracesLoading] = useState(false);
@@ -338,19 +334,6 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     }
   };
 
-  const handlePreviewData = async (kb: KnowledgeBaseItem) => {
-    setPreviewKb(kb);
-    setPreviewLoading(true);
-    try {
-      setDataPreview(await knowledgeBaseApi.previewDataTable(kb.id));
-    } catch (error) {
-      console.error('加载数据预览失败:', error);
-      setDataPreview(null);
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
   const handleShowTraces = async () => {
     setTraceOpen(true);
     setTracesLoading(true);
@@ -438,42 +421,30 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
 
   return (
     <div className="max-w-7xl mx-auto">
-      {/* 页面标题 */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-            <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-3">
-            <Database className="w-7 h-7 text-primary-500" />
-            知识库管理
-          </h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">管理您的知识库文件，查看使用统计</p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={onUpload}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            上传知识库
-          </button>
-          <button
-            onClick={handleShowTraces}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-          >
-            <Eye className="w-4 h-4" />
-            RAG Trace
-          </button>
-          <button
-            onClick={onChat}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-          >
-            <MessageSquare className="w-4 h-4" />
-            问答助手
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="我的资料"
+        title="知识库"
+        description="管理已上传的资料，查看处理状态并进入知识问答。"
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <button onClick={onUpload} className="btn-primary flex items-center gap-2 px-4 py-2 text-sm">
+              <Upload className="w-4 h-4" />
+              上传资料
+            </button>
+            <button onClick={handleShowTraces} className="btn-secondary flex items-center gap-2 px-4 py-2 text-sm">
+              <Eye className="w-4 h-4" />
+              检索记录
+            </button>
+            <button onClick={onChat} className="btn-secondary flex items-center gap-2 px-4 py-2 text-sm">
+              <MessageSquare className="w-4 h-4" />
+              知识问答
+            </button>
+          </div>
+        )}
+      />
       {/* 统计卡片 */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <StatCard
             icon={Database}
             label="知识库总数"
@@ -482,13 +453,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
           />
           <StatCard
             icon={MessageSquare}
-            label="总提问次数"
+            label="提问次数"
             value={stats.totalQuestionCount}
             color="bg-indigo-500"
           />
           <StatCard
             icon={Eye}
-            label="总访问次数"
+            label="访问次数"
             value={stats.totalAccessCount}
             color="bg-emerald-500"
           />
@@ -496,8 +467,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       )}
 
       {/* 搜索和筛选栏 */}
-        <div
-            className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-slate-100 dark:border-slate-700 mb-6">
+        <div className="surface-card p-3 mb-4">
         <div className="flex flex-wrap items-center gap-4">
           {/* 搜索框 */}
           <form onSubmit={handleSearch} className="flex-1 min-w-[200px]">
@@ -508,7 +478,6 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
               className="w-full px-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-transparent bg-white dark:bg-slate-700"
               iconClassName="w-4 h-4 text-slate-400"
               inputClassName="text-slate-900 dark:text-white placeholder:text-slate-400"
-              animated={false}
             />
           </form>
 
@@ -546,8 +515,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       </div>
 
       {/* 知识库列表 */}
-        <div
-            className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+        <div className="surface-card overflow-x-auto">
         {loading ? (
           <LoadingState />
         ) : knowledgeBases.length === 0 ? (
@@ -561,12 +529,12 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 onClick={onUpload}
                 className="mt-4 text-primary-500 hover:text-primary-600"
               >
-                上传第一个知识库
+                上传第一份资料
               </button>
             )}
           />
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[980px]">
               <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-100 dark:border-slate-600">
               <tr>
                   <th className="text-left px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -593,12 +561,9 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
               </tr>
             </thead>
             <tbody>
-              {knowledgeBases.map((kb, index) => (
-                <motion.tr
+              {knowledgeBases.map((kb) => (
+                <tr
                   key={kb.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
                   className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
                 >
                   <td className="px-6 py-4">
@@ -623,15 +588,8 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <AnimatePresence mode="wait">
                       {editingCategoryId === kb.id ? (
-                        <motion.div
-                          key="editing"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="flex items-center gap-2"
-                        >
+                        <div className="flex items-center gap-2">
                           <input
                             ref={categoryInputRef}
                             type="text"
@@ -670,15 +628,9 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           >
                             <X className="w-4 h-4" />
                           </button>
-                        </motion.div>
+                        </div>
                       ) : (
-                        <motion.div
-                          key="display"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="flex items-center gap-2 group/category"
-                        >
+                        <div className="flex items-center gap-2 group/category">
                           {kb.category ? (
                               <span
                                   className="px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-sm">
@@ -689,14 +641,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           )}
                           <button
                             onClick={() => handleStartEditCategory(kb)}
-                            className="p-1 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded opacity-0 group-hover/category:opacity-100 transition-all"
+                            className="p-1 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded opacity-70 hover:opacity-100 focus-visible:opacity-100 transition-colors"
                             title="编辑分类"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
-                        </motion.div>
+                        </div>
                       )}
-                    </AnimatePresence>
                   </td>
                     <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
                     {formatFileSize(kb.fileSize)}
@@ -716,15 +667,6 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
                       {/* 版本管理按钮 */}
-                      {kb.dataTableName && (
-                        <button
-                          onClick={() => handlePreviewData(kb)}
-                          className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
-                          title="预览数据表"
-                        >
-                          <Database className="w-4 h-4" />
-                        </button>
-                      )}
                       <button
                         onClick={() => handleShowVersions(kb)}
                         className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
@@ -732,15 +674,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       >
                         <History className="w-4 h-4" />
                       </button>
-                      {kb.knowledgeBaseType !== 'DATA_QUERY' && (
-                        <button
-                          onClick={() => handleShowSegments(kb)}
-                          className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
-                          title="查看分段"
-                        >
-                          <Layers className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleShowSegments(kb)}
+                        className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                        title="查看分段"
+                      >
+                        <Layers className="w-4 h-4" />
+                      </button>
                       {/* 下载按钮 */}
                       <button
                         onClick={() => handleDownload(kb)}
@@ -750,7 +690,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                         <Download className="w-4 h-4" />
                       </button>
                       {/* 重新向量化按钮（卡在 CHUNKED 可手动重试） */}
-                      {kb.knowledgeBaseType !== 'DATA_QUERY' && kb.docStatus === 'VECTOR_STORED' && (
+                      {kb.docStatus === 'VECTOR_STORED' && (
                         <button
                           onClick={() => setSplitModalKb(kb)}
                           className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
@@ -787,7 +727,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       )}
                     </div>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -805,20 +745,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       />
 
       {/* 版本管理弹窗 */}
-      <AnimatePresence>
-        {versionModalKb && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
+      {versionModalKb && (
+          <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={handleCloseVersions}
           >
-            <motion.div
-              initial={{scale: 0.95, opacity: 0}}
-              animate={{scale: 1, opacity: 1}}
-              exit={{scale: 0.95, opacity: 0}}
-              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+            <div
+              className="surface-card w-full max-w-2xl max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
@@ -834,6 +767,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 <button
                   onClick={handleCloseVersions}
                   className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  aria-label="关闭版本管理"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -948,105 +882,28 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </ul>
                 )}
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+      )}
 
-      <AnimatePresence>
-        {previewKb && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={() => setPreviewKb(null)}
-          >
-            <motion.div
-              initial={{scale: 0.95, opacity: 0}}
-              animate={{scale: 1, opacity: 1}}
-              exit={{scale: 0.95, opacity: 0}}
-              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-5xl max-h-[80vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
-                    <Database className="w-5 h-5 text-primary-500" />
-                    数据表预览
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                    {previewKb.name} · {dataPreview?.total ?? previewKb.dataRowCount ?? 0} 行
-                  </p>
-                </div>
-                <button
-                  onClick={() => setPreviewKb(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-auto p-5">
-                {previewLoading ? (
-                  <div className="py-12 text-center text-slate-400">加载中...</div>
-                ) : dataPreview ? (
-                  <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left text-slate-500">id</th>
-                        {dataPreview.columns.map((col) => (
-                          <th key={col.name} className="px-3 py-2 text-left text-slate-500">
-                            {col.title}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dataPreview.rows.map((row, idx) => (
-                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-700">
-                          <td className="px-3 py-2 text-slate-500">{String(row.id ?? '')}</td>
-                          {dataPreview.columns.map((col) => (
-                            <td key={col.name} className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-xs truncate">
-                              {String(row[col.name] ?? '')}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="py-12 text-center text-slate-400">暂无可预览数据</div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {traceOpen && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
+      {traceOpen && (
+          <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={() => setTraceOpen(false)}
           >
-            <motion.div
-              initial={{scale: 0.95, opacity: 0}}
-              animate={{scale: 1, opacity: 1}}
-              exit={{scale: 0.95, opacity: 0}}
-              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col"
+            <div
+              className="surface-card w-full max-w-4xl max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
                   <Eye className="w-5 h-5 text-primary-500" />
-                  RAG Trace
+                检索记录
                 </h3>
                 <button
                   onClick={() => setTraceOpen(false)}
                   className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  aria-label="关闭检索记录"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1055,7 +912,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 {tracesLoading ? (
                   <div className="py-12 text-center text-slate-400">加载中...</div>
                 ) : traces.length === 0 ? (
-                  <div className="py-12 text-center text-slate-400">暂无 Trace</div>
+                  <div className="py-12 text-center text-slate-400">暂无检索记录</div>
                 ) : traces.map((trace) => {
                   const activeTrace = expandedTraceId === trace.traceId && traceDetail ? traceDetail : trace;
                   const retrieved = parseTraceList(activeTrace.retrievedJson).slice(0, 5);
@@ -1073,8 +930,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           {expandedTraceId === trace.traceId ? '收起' : '详情'}
                         </span>
                       </div>
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-500 dark:text-slate-400">
-                        <span>路由：{trace.routeStrategy || '-'}</span>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500 dark:text-slate-400">
                         <span>耗时：{trace.latencyMs ?? '-'}ms</span>
                         <span>置信度：{trace.confidence ?? '-'}</span>
                       </div>
@@ -1083,21 +939,10 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                           改写：{trace.rewrittenQuestion}
                         </p>
                       )}
-                      {trace.routeReasoning && (
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          原因：{trace.routeReasoning}
-                        </p>
-                      )}
-                      {trace.graphAttempted && (
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          图谱：{trace.graphHit ? '命中' : '未命中（已降级向量检索）'}
-                          {trace.graphHit && trace.graphResult ? ` · ${trace.graphResult}` : ''}
-                        </p>
-                      )}
                       <div className="mt-3 grid gap-3 lg:grid-cols-3">
                         {([
-                          ['原始召回', retrieved, 'score'],
-                          ['Rerank 顺序', reranked, 'rerankScore'],
+                          ['初步检索', retrieved, 'score'],
+                          ['重排结果', reranked, 'rerankScore'],
                         ] as Array<[string, TraceContent[], 'score' | 'rerankScore']>).map(([title, items, scoreKey]) => (
                           <div key={title} className="rounded-lg bg-slate-50 dark:bg-slate-700/60 p-3">
                             <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{title}</p>
@@ -1132,7 +977,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       {expandedTraceId === trace.traceId && (
                         <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
                           {traceDetailLoading ? (
-                            <p className="text-xs text-slate-400">加载完整 Trace...</p>
+                            <p className="text-xs text-slate-400">加载完整记录...</p>
                           ) : activeTrace.answer ? (
                             <>
                               <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">完整回答</p>
@@ -1148,25 +993,17 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   );
                 })}
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+      )}
 
-      <AnimatePresence>
-        {segmentModalKb && (
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
+      {segmentModalKb && (
+          <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={() => setSegmentModalKb(null)}
           >
-            <motion.div
-              initial={{scale: 0.95, opacity: 0}}
-              animate={{scale: 1, opacity: 1}}
-              exit={{scale: 0.95, opacity: 0}}
-              className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col"
+            <div
+              className="surface-card w-full max-w-4xl max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
@@ -1182,6 +1019,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 <button
                   onClick={() => setSegmentModalKb(null)}
                   className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  aria-label="关闭分段预览"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1193,12 +1031,9 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <div className="py-12 text-center text-slate-400">暂无分段</div>
                 ) : segments.map((seg) => (
                   <div key={seg.id} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3">
-                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400 mb-2">
-                      <span>#{seg.chunkOrder}</span>
-                      <span>chunk={seg.chunkId}</span>
-                      <span>status={seg.status}</span>
-                      {seg.parentChunkId && <span>parent={seg.parentChunkId}</span>}
-                    </div>
+                    <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      第 {seg.chunkOrder + 1} 段
+                    </p>
                     <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{seg.textPreview}</p>
                   </div>
                 ))}
@@ -1222,14 +1057,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </button>
                 </div>
               )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+      )}
 
       {splitModalKb && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-600">
+          <div className="surface-card w-full max-w-md p-5">
             <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-1">重新切块</h3>
             <p className="text-sm text-slate-500 mb-4">{splitModalKb.name}</p>
             <label className="block text-sm text-slate-600 dark:text-slate-300 mb-1">策略</label>
@@ -1245,7 +1079,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
             </select>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">chunkSize</label>
+                <label className="block text-xs text-slate-500 mb-1">分段长度</label>
                 <input
                   type="number"
                   value={splitChunkSize}
@@ -1254,7 +1088,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">overlap</label>
+                <label className="block text-xs text-slate-500 mb-1">重叠长度</label>
                 <input
                   type="number"
                   value={splitOverlap}

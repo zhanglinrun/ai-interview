@@ -7,6 +7,8 @@ import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.security.UserContext;
+import com.linrun.interview.common.evidence.DataDomain;
+import com.linrun.interview.common.evidence.EvidenceMetadata;
 import com.linrun.interview.infrastructure.file.ContentTypeDetectionService;
 import com.linrun.interview.infrastructure.file.FileHashService;
 import com.linrun.interview.infrastructure.file.FileStorageService;
@@ -14,7 +16,6 @@ import com.linrun.interview.infrastructure.file.FileValidationService;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.constant.FileType;
-import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.constant.SegmentStatus;
 import com.linrun.interview.modules.knowledgebase.event.DocumentChunkedEvent;
@@ -24,9 +25,9 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEnti
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionEntity;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.modules.knowledgebase.service.parse.FileProcessService;
+import com.linrun.interview.modules.knowledgebase.service.parse.DocumentParseRequest;
 import com.linrun.interview.modules.knowledgebase.service.parse.FileProcessServiceFactory;
 import com.linrun.interview.modules.knowledgebase.service.parse.FileTypeResolver;
-import com.linrun.interview.modules.knowledgebase.service.parse.SpreadsheetProcessService;
 import com.linrun.interview.modules.knowledgebase.service.splitter.ExcelSplitter;
 import com.linrun.interview.modules.knowledgebase.util.DocumentPermissionUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,6 +41,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -78,7 +80,6 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseChunkingService chunkingService;
     private final KnowledgeDocumentService knowledgeDocumentService;
-    private final KnowledgeBaseDataTableService dataTableService;
     private final VectorStoreService vectorStoreService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
@@ -87,22 +88,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.common.security.UserContext).requireUserId() + ':' + #file.originalFilename",
         waitTime = 0, leaseTime = 300, message = "同名文件正在上传，请稍后再试")
     public Long upload(MultipartFile file, String title, String category) {
-        return upload(file, title, category, KnowledgeBaseType.DOCUMENT_SEARCH);
+        return upload(file, title, category, DocumentAccessScope.PRIVATE, null);
     }
 
     @Override
     @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.common.security.UserContext).requireUserId() + ':' + #file.originalFilename",
         waitTime = 0, leaseTime = 300, message = "同名文件正在上传，请稍后再试")
-    public Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType) {
-        return upload(file, title, category, knowledgeBaseType, DocumentAccessScope.PRIVATE, null);
-    }
-
-    @Override
-    @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.common.security.UserContext).requireUserId() + ':' + #file.originalFilename",
-        waitTime = 0, leaseTime = 300, message = "同名文件正在上传，请稍后再试")
-    public Long upload(MultipartFile file, String title, String category, KnowledgeBaseType knowledgeBaseType,
+    public Long upload(MultipartFile file, String title, String category,
                        DocumentAccessScope accessScope, LocalDate expireDate) {
-        KnowledgeBaseType type = knowledgeBaseType != null ? knowledgeBaseType : KnowledgeBaseType.DOCUMENT_SEARCH;
         Long userId = UserContext.requireUserId();
         String fileName = file.getOriginalFilename();
 
@@ -115,12 +108,6 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel 等");
         }
-        if (type == KnowledgeBaseType.DATA_QUERY
-            && !fileValidationService.isSpreadsheetExtension(fileName)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "DATA_QUERY 类型仅支持 CSV / Excel 表格文件");
-        }
-
         // 2. 内容哈希去重（按用户隔离的跨版本去重；跨用户不互相阻断，也不泄漏他人文档存在性）
         String contentHash = fileHashService.calculateHash(file);
         if (versionService.findByContentHash(contentHash, userId).isPresent()) {
@@ -152,7 +139,6 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         entity.setStorageKey(storageKey);
         entity.setStorageUrl(docUrl);
         entity.setUploadedAt(now);
-        entity.setKnowledgeBaseType(type.name());
         entity.setAccessibleBy(accessScope != null ? accessScope.name() : DocumentAccessScope.PRIVATE.name());
         entity.setExpireDate(expireDate);
         entity.setDocStatus(DocumentStatus.UPLOADED);
@@ -162,6 +148,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         version.setDocId(entity.getId());
         version.setVersion(INITIAL_VERSION);
         version.setDocUrl(docUrl);
+        version.setStorageKey(storageKey);
         version.setContentHash(contentHash);
         version.setStatus(DocumentStatus.UPLOADED);
         version.setUploadUser(String.valueOf(userId));
@@ -172,13 +159,13 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         entity.setCurrentVersionId(version.getVersionId());
         MapperUtils.save(knowledgeBaseEntityMapper, entity);
 
-        ConvertResult convertResult = convertFile(
-            entity.getId(), version.getVersionId(), fileBytes, fileName, contentType, type);
-        finalizeAfterConvert(entity, version, type, convertResult.spreadsheet());
+        String markdown = convertFile(
+            userId, entity.getId(), version.getVersionId(), fileBytes, fileName, contentType,
+            storageKey);
+        finalizeAfterConvert(entity, version);
 
-        log.info("知识库上传完成: docId={}, versionId={}, type={}, status={}, markdownChars={}",
-            entity.getId(), version.getVersionId(), type, entity.getDocStatus(),
-            convertResult.markdown().length());
+        log.info("知识库上传完成: docId={}, versionId={}, status={}, markdownChars={}",
+            entity.getId(), version.getVersionId(), entity.getDocStatus(), markdown.length());
         return entity.getId();
     }
 
@@ -226,6 +213,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         version.setDocId(docId);
         version.setVersion(newVersion);
         version.setDocUrl(docUrl);
+        version.setStorageKey(storageKey);
         version.setContentHash(contentHash);
         version.setStatus(DocumentStatus.UPLOADED);
         version.setUploadUser(String.valueOf(userId));
@@ -238,9 +226,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         // convert 成功后才切主表 currentVersionId（见 finalizeAfterConvert）：
         // 转换可能耗时数分钟（MinerU），期间指针必须始终指向旧的可用版本；
         // convert 失败时指针从未切换，无需回滚
-        KnowledgeBaseType kbType = resolveKnowledgeBaseType(entity);
-        ConvertResult convertResult =
-            convertFile(docId, version.getVersionId(), fileBytes, fileName, contentType, kbType);
+        convertFile(userId, docId, version.getVersionId(), fileBytes, fileName, contentType,
+            storageKey);
 
         // 即时失效旧当前版本：若旧版本已向量化，主动清 ES 向量 + segment 降 STORED，不等补偿任务。
         if (latest.getStatus() == DocumentStatus.VECTOR_STORED) {
@@ -252,7 +239,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             }
         }
 
-        finalizeAfterConvert(entity, version, kbType, convertResult.spreadsheet());
+        finalizeAfterConvert(entity, version);
 
         log.info("知识库新版本上传完成: docId={}, version={}, 旧版本即时失效已尝试",
             docId, newVersion);
@@ -279,10 +266,6 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         Long userId = UserContext.requireUserId();
         KnowledgeBaseEntity entity = EntityQueries.byUserAndId(knowledgeBaseEntityMapper, userId, docId, KnowledgeBaseEntity::getUserId, KnowledgeBaseEntity::getId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在: " + docId));
-
-        if (KnowledgeBaseType.DATA_QUERY.name().equals(entity.getKnowledgeBaseType())) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "DATA_QUERY 类型知识库不支持向量化切块");
-        }
 
         if (entity.getDocStatus() == DocumentStatus.CHUNKED) {
             long count = segmentService.countByDocumentVersion(entity.getCurrentVersionId());
@@ -354,15 +337,37 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             metadataMap.put(MetadataKeyConstant.ACCESSIBLE_BY, DocumentPermissionUtils.metadataAccessibleBy(entity));
             DocumentPermissionUtils.putExpireDate(metadataMap, entity.getExpireDate());
 
+            String chunkId = metadata.getString(MetadataKeyConstant.CHUNK_ID);
+            String stableChunkId = chunkId != null && !chunkId.isBlank()
+                ? chunkId : "order-" + i;
+            EvidenceMetadata evidenceMetadata = new EvidenceMetadata(
+                userId,
+                DataDomain.CANDIDATE,
+                String.valueOf(docId),
+                String.valueOf(version.getVersionId()),
+                "kb:" + docId + ":" + version.getVersionId() + ":" + stableChunkId,
+                fileHashService.calculateHash(seg.text().getBytes(StandardCharsets.UTF_8)),
+                "KNOWLEDGE_DOCUMENT",
+                "chunk:" + stableChunkId);
+            putEvidenceMetadata(metadataMap, evidenceMetadata);
+
             KnowledgeBaseSegmentEntity segEntity = new KnowledgeBaseSegmentEntity();
             segEntity.setText(seg.text());
-            segEntity.setChunkId(metadata.getString(MetadataKeyConstant.CHUNK_ID));
+            segEntity.setChunkId(chunkId);
             // 父子/兄弟关系冗余列（从 metadata 拆出建索引，供检索期 small-to-big 扩展高效查询）
             segEntity.setParentChunkId(metadata.getString(MetadataKeyConstant.PARENT_CHUNK_ID));
             segEntity.setBrotherChunkId(metadata.getString(MetadataKeyConstant.BROTHER_CHUNK_ID));
             Integer brotherIndex = metadata.getInteger(MetadataKeyConstant.BROTHER_CHUNK_INDEX);
             segEntity.setBrotherChunkIndex(brotherIndex);
             segEntity.setMetadata(toJson(metadataMap));
+            segEntity.setUserId(evidenceMetadata.ownerUserId());
+            segEntity.setDataDomain(evidenceMetadata.dataDomain());
+            segEntity.setResourceId(evidenceMetadata.resourceId());
+            segEntity.setResourceVersion(evidenceMetadata.resourceVersion());
+            segEntity.setEvidenceId(evidenceMetadata.evidenceId());
+            segEntity.setContentHash(evidenceMetadata.contentHash());
+            segEntity.setSourceType(evidenceMetadata.sourceType());
+            segEntity.setSourceLocator(evidenceMetadata.sourceLocator());
             segEntity.setDocumentId(docId);
             segEntity.setDocumentVersion(version.getVersionId());
             segEntity.setChunkOrder(i);
@@ -459,17 +464,6 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         log.info("切换完成（热切换，无重建）: docId={}, versionId={}", docId, versionId);
     }
 
-    private KnowledgeBaseType resolveKnowledgeBaseType(KnowledgeBaseEntity entity) {
-        if (entity.getKnowledgeBaseType() == null) {
-            return KnowledgeBaseType.DOCUMENT_SEARCH;
-        }
-        try {
-            return KnowledgeBaseType.valueOf(entity.getKnowledgeBaseType());
-        } catch (IllegalArgumentException e) {
-            return KnowledgeBaseType.DOCUMENT_SEARCH;
-        }
-    }
-
     private String nextVersion(String current) {
         String[] parts = current.split("\\.");
         if (parts.length != 3) {
@@ -492,23 +486,32 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         }
     }
 
+    private void putEvidenceMetadata(
+        Map<String, String> metadata,
+        EvidenceMetadata evidenceMetadata
+    ) {
+        metadata.put(MetadataKeyConstant.OWNER_USER_ID,
+            String.valueOf(evidenceMetadata.ownerUserId()));
+        metadata.put(MetadataKeyConstant.DATA_DOMAIN, evidenceMetadata.dataDomain().name());
+        metadata.put(MetadataKeyConstant.RESOURCE_ID, evidenceMetadata.resourceId());
+        metadata.put(MetadataKeyConstant.RESOURCE_VERSION, evidenceMetadata.resourceVersion());
+        metadata.put(MetadataKeyConstant.EVIDENCE_ID, evidenceMetadata.evidenceId());
+        metadata.put(MetadataKeyConstant.CONTENT_HASH, evidenceMetadata.contentHash());
+        metadata.put(MetadataKeyConstant.SOURCE_TYPE, evidenceMetadata.sourceType());
+        metadata.put(MetadataKeyConstant.SOURCE_LOCATOR, evidenceMetadata.sourceLocator());
+    }
+
     /**
      * 同步转换阶段（对齐业界实践 processFile）：UPLOADED → CONVERTING → CONVERTED/STORED。
      */
-    private ConvertResult convertFile(Long docId, Long versionId, byte[] fileBytes, String fileName,
-                                      String contentType, KnowledgeBaseType type) {
+    private String convertFile(Long userId, Long docId, Long versionId, byte[] fileBytes,
+                               String fileName, String contentType, String storageKey) {
         knowledgeDocumentService.advanceDocumentAndVersionStatus(docId, versionId, DocumentStatus.CONVERTING);
         try {
             FileType fileType = fileTypeResolver.resolve(fileName, contentType);
             FileProcessService processor = fileProcessServiceFactory.get(fileType);
-            SpreadsheetProcessService.ParsedSpreadsheet spreadsheet = null;
-            String markdown;
-            if (processor instanceof SpreadsheetProcessService spreadsheetProcessService) {
-                spreadsheet = spreadsheetProcessService.parse(fileBytes, fileName);
-                markdown = spreadsheet.markdown();
-            } else {
-                markdown = processor.processDocument(fileBytes, fileName);
-            }
+            String markdown = processor.processDocument(new DocumentParseRequest(
+                userId, docId, versionId, fileBytes, fileName, contentType, storageKey));
             if (markdown == null || markdown.isBlank()) {
                 throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED, "文件解析结果为空");
             }
@@ -518,10 +521,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             version.setConvertedContent(markdown);
             versionService.update(version);
 
-            DocumentStatus targetStatus = type == KnowledgeBaseType.DATA_QUERY
-                ? DocumentStatus.STORED : DocumentStatus.CONVERTED;
-            knowledgeDocumentService.advanceDocumentAndVersionStatus(docId, versionId, targetStatus);
-            return new ConvertResult(markdown, spreadsheet);
+            knowledgeDocumentService.advanceDocumentAndVersionStatus(
+                docId, versionId, DocumentStatus.CONVERTED);
+            return markdown;
         } catch (BusinessException e) {
             rollbackToUploaded(docId, versionId);
             throw e;
@@ -532,26 +534,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         }
     }
 
-    private void finalizeAfterConvert(KnowledgeBaseEntity entity, KnowledgeBaseVersionEntity version,
-                                      KnowledgeBaseType type,
-                                      SpreadsheetProcessService.ParsedSpreadsheet spreadsheet) {
-        Long userId = UserContext.requireUserId();
-        if (spreadsheet != null && type == KnowledgeBaseType.DATA_QUERY) {
-            var dataTable = dataTableService.createForSpreadsheet(entity, spreadsheet);
-            if (dataTable != null) {
-                entity.setDataTableName(dataTable.getPhysicalTableName());
-                entity.setDataSchemaJson(dataTable.getColumnsJson());
-                entity.setDataRowCount(dataTable.getRowCount());
-            }
-        } else if (spreadsheet != null) {
-            entity.setDataTableName(null);
-            entity.setDataSchemaJson(null);
-            entity.setDataRowCount(null);
-            dataTableService.deleteByDoc(userId, entity.getId());
-        }
+    private void finalizeAfterConvert(KnowledgeBaseEntity entity, KnowledgeBaseVersionEntity version) {
         entity.setCurrentVersionId(version.getVersionId());
-        entity.setDocStatus(type == KnowledgeBaseType.DATA_QUERY
-            ? DocumentStatus.STORED : DocumentStatus.CONVERTED);
+        entity.setDocStatus(DocumentStatus.CONVERTED);
         MapperUtils.save(knowledgeBaseEntityMapper, entity);
     }
 
@@ -570,5 +555,4 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         log.warn("文档转换失败，状态已回滚为 UPLOADED: docId={}, versionId={}", docId, versionId);
     }
 
-    private record ConvertResult(String markdown, SpreadsheetProcessService.ParsedSpreadsheet spreadsheet) {}
 }

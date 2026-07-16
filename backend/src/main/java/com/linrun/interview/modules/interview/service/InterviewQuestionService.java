@@ -10,10 +10,9 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.modules.interview.model.HistoricalQuestion;
 import com.linrun.interview.modules.interview.model.InterviewQuestionDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.CategoryDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +32,7 @@ import java.util.stream.Collectors;
 
 /**
  * 面试问题生成服务
- * 无简历：单次 Skill 驱动出题
+ * 无简历：版本化能力模板驱动出题
  * 有简历：并行调用（简历题 60% + 方向题 40%）
  */
 @Service
@@ -67,12 +66,12 @@ public class InterviewQuestionService {
         {"你在团队协作中遇到过最大的分歧是什么？如何解决的？", "GENERAL", "综合能力"},
     };
 
-    private final PromptTemplate skillSystemPromptTemplate;
-    private final PromptTemplate skillUserPromptTemplate;
+    private final PromptTemplate topicSystemPromptTemplate;
+    private final PromptTemplate topicUserPromptTemplate;
     private final PromptTemplate resumeSystemPromptTemplate;
     private final PromptTemplate resumeUserPromptTemplate;
     private final StructuredOutputInvoker structuredOutputInvoker;
-    private final InterviewSkillService skillService;
+    private final InterviewTopicCatalog topicCatalog;
     private final LlmProviderRegistry llmProviderRegistry;
     private final PromptSanitizer promptSanitizer;
     private final InterviewKnowledgeRetrievalService knowledgeRetrievalService;
@@ -87,7 +86,7 @@ public class InterviewQuestionService {
 
     public InterviewQuestionService(
             StructuredOutputInvoker structuredOutputInvoker,
-            InterviewSkillService skillService,
+            InterviewTopicCatalog topicCatalog,
             InterviewQuestionProperties properties,
             ResourceLoader resourceLoader,
             LlmProviderRegistry llmProviderRegistry,
@@ -95,13 +94,13 @@ public class InterviewQuestionService {
             InterviewKnowledgeRetrievalService knowledgeRetrievalService,
             AsyncTaskExecutor questionExecutor) throws IOException {
         this.structuredOutputInvoker = structuredOutputInvoker;
-        this.skillService = skillService;
+        this.topicCatalog = topicCatalog;
         this.llmProviderRegistry = llmProviderRegistry;
         this.promptSanitizer = promptSanitizer;
         this.knowledgeRetrievalService = knowledgeRetrievalService;
         this.questionExecutor = questionExecutor;
-        this.skillSystemPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionSystemPromptPath());
-        this.skillUserPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionUserPromptPath());
+        this.topicSystemPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionSystemPromptPath());
+        this.topicUserPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionUserPromptPath());
         this.resumeSystemPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionSystemPromptPath());
         this.resumeUserPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionUserPromptPath());
         this.followUpCount = Math.max(0, Math.min(properties.getFollowUpCount(), MAX_FOLLOW_UP_COUNT));
@@ -111,18 +110,18 @@ public class InterviewQuestionService {
         return new PromptTemplate(loader.getResource(location).getContentAsString(StandardCharsets.UTF_8));
     }
 
-    public List<InterviewQuestionDTO> generateQuestionsBySkill(
+    public List<InterviewQuestionDTO> generateQuestionsForTopic(
             Long userId,
-            String skillId,
+            String topicId,
             String difficulty,
             String resumeText,
             int questionCount,
             List<HistoricalQuestion> historicalQuestions,
-            List<CategoryDTO> customCategories,
+            List<Category> customCategories,
             String jdText,
             List<Long> knowledgeBaseIds) {
 
-        SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
+        InterviewTopic topic = resolveTopic(topicId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
         // 用户触发的批量出题走 BYOK：用当前用户的「我的模型」（userId 由会话入口捕获后传入）
         ChatModel questionChatClient = llmProviderRegistry.getUserChatModel(userId);
@@ -131,25 +130,25 @@ public class InterviewQuestionService {
         String historicalSection = buildHistoricalSection(historicalQuestions);
         // 知识库检索必须在请求线程完成（UserContext 是 ThreadLocal，进不了虚拟线程池）
         String kbReferenceSection =
-            knowledgeRetrievalService.buildKbReferenceSection(knowledgeBaseIds, skill);
+            knowledgeRetrievalService.buildKbReferenceSection(knowledgeBaseIds, topic);
         if (!hasResume) {
-            return generateDirectionOnly(questionChatClient, skill, difficultyDesc, questionCount,
+            return generateDirectionOnly(questionChatClient, topic, difficultyDesc, questionCount,
                 historicalSection, kbReferenceSection);
         }
 
         int resumeCount = Math.max(1, (int) Math.round(questionCount * RESUME_QUESTION_RATIO));
         int directionCount = questionCount - resumeCount;
 
-        log.info("并行出题: skill={}, total={}, resumeCount={}, directionCount={}",
-            skillId, questionCount, resumeCount, directionCount);
+        log.info("并行出题: topic={}, total={}, resumeCount={}, directionCount={}",
+            topicId, questionCount, resumeCount, directionCount);
 
         CompletableFuture<List<InterviewQuestionDTO>> resumeFuture = CompletableFuture.supplyAsync(
-            () -> generateResumeQuestions(questionChatClient, resumeText, resumeCount, skill,
+            () -> generateResumeQuestions(questionChatClient, resumeText, resumeCount, topic,
                 difficultyDesc, historicalSection),
             questionExecutor);
 
         CompletableFuture<List<InterviewQuestionDTO>> directionFuture = CompletableFuture.supplyAsync(
-            () -> generateDirectionOnly(questionChatClient, skill, difficultyDesc, directionCount,
+            () -> generateDirectionOnly(questionChatClient, topic, difficultyDesc, directionCount,
                 historicalSection, kbReferenceSection),
             questionExecutor);
 
@@ -160,7 +159,7 @@ public class InterviewQuestionService {
         } catch (CompletionException e) {
             log.error("简历题生成失败，降级为全方向题", e.getCause());
             directionFuture.cancel(true);
-            return generateDirectionOnly(questionChatClient, skill, difficultyDesc, questionCount,
+            return generateDirectionOnly(questionChatClient, topic, difficultyDesc, questionCount,
                 historicalSection, kbReferenceSection);
         }
 
@@ -169,14 +168,14 @@ public class InterviewQuestionService {
         } catch (CompletionException e) {
             log.error("方向题生成失败，降级为全简历题", e.getCause());
             if (resumeQuestions.isEmpty()) {
-                return generateFallbackQuestions(skill, questionCount);
+                return generateFallbackQuestions(topic, questionCount);
             }
             return resumeQuestions;
         }
 
         if (resumeQuestions.isEmpty() && directionQuestions.isEmpty()) {
             log.warn("简历题和方向题均为空，回退到默认问题");
-            return generateFallbackQuestions(skill, questionCount);
+            return generateFallbackQuestions(topic, questionCount);
         }
 
         List<InterviewQuestionDTO> merged = mergeQuestionBatches(resumeQuestions, directionQuestions);
@@ -187,19 +186,18 @@ public class InterviewQuestionService {
 
     private List<InterviewQuestionDTO> generateResumeQuestions(
             ChatModel questionClient, String resumeText, int questionCount,
-            SkillDTO skill, String difficultyDesc, String historicalSection) {
+            InterviewTopic topic, String difficultyDesc, String historicalSection) {
         try {
             Map<String, Object> variables = new HashMap<>();
             variables.put("questionCount", questionCount);
             variables.put("followUpCount", followUpCount);
-            variables.put("skillName", skill.name());
-            variables.put("skillDescription", skill.description() != null ? skill.description() : "");
+            variables.put("topicName", topic.name());
+            variables.put("topicDescription", topic.description() != null ? topic.description() : "");
             variables.put("difficultyDescription", difficultyDesc);
             variables.put("resumeText", resumeText);
             variables.put("historicalSection", historicalSection);
 
-            String systemPrompt = resumeSystemPromptTemplate.render()
-                + buildSkillPersonaSection(skill);
+            String systemPrompt = resumeSystemPromptTemplate.render();
             String userPrompt = resumeUserPromptTemplate.render(variables);
 
             QuestionListDTO dto = structuredOutputInvoker.invoke(
@@ -221,33 +219,32 @@ public class InterviewQuestionService {
     }
 
     private List<InterviewQuestionDTO> generateDirectionOnly(
-            ChatModel questionClient, SkillDTO skill, String difficultyDesc,
+            ChatModel questionClient, InterviewTopic topic, String difficultyDesc,
             int questionCount, String historicalSection, String kbReferenceSection) {
-        Map<String, Integer> allocation = skillService.calculateAllocation(skill.categories(), questionCount);
-        String allocationTable = skillService.buildAllocationDescription(allocation, skill.categories());
+        Map<String, Integer> allocation = topicCatalog.calculateAllocation(
+            topic.categories(), questionCount);
+        String allocationTable = topicCatalog.buildAllocationDescription(
+            allocation, topic.categories());
 
-        log.info("方向题生成: skill={}, total={}, allocation={}",
-            skill.id(), questionCount, allocation);
+        log.info("方向题生成: topic={}, total={}, allocation={}",
+            topic.id(), questionCount, allocation);
 
         try {
             Map<String, Object> variables = new HashMap<>();
             variables.put("questionCount", questionCount);
             variables.put("followUpCount", followUpCount);
             variables.put("difficultyDescription", difficultyDesc);
-            variables.put("skillName", skill.name());
-            variables.put("skillDescription", skill.description() != null ? skill.description() : "");
+            variables.put("topicName", topic.name());
+            variables.put("topicDescription", topic.description() != null ? topic.description() : "");
             variables.put("allocationTable", allocationTable);
             variables.put("historicalSection", historicalSection);
-            variables.put("referenceSection", skillService.buildReferenceSection(skill, allocation));
-            variables.put("kbReferenceSection",
+            variables.put("ragEvidenceSection",
                 kbReferenceSection == null || kbReferenceSection.isBlank()
                     ? "本次面试未关联知识库。" : kbReferenceSection);
-            variables.put("jdSection", buildJdSection(skill.sourceJd()));
+            variables.put("jdSection", buildJdSection(topic.sourceJd()));
 
-            String systemPrompt = skillSystemPromptTemplate.render()
-                + buildSkillPersonaSection(skill)
-                + GENERIC_MODE_SYSTEM_APPEND;
-            String userPrompt = skillUserPromptTemplate.render(variables);
+            String systemPrompt = topicSystemPromptTemplate.render() + GENERIC_MODE_SYSTEM_APPEND;
+            String userPrompt = topicUserPromptTemplate.render(variables);
 
             QuestionListDTO dto = structuredOutputInvoker.invoke(
                 questionClient, systemPrompt, userPrompt, QuestionListDTO.class,
@@ -257,7 +254,7 @@ public class InterviewQuestionService {
             List<InterviewQuestionDTO> questions = convertToQuestions(dto);
             if (questions.stream().filter(q -> !q.isFollowUp()).count() == 0) {
                 log.warn("方向题返回空题单，回退到默认问题");
-                return generateFallbackQuestions(skill, questionCount);
+                return generateFallbackQuestions(topic, questionCount);
             }
             questions = capToMainCount(questions, questionCount);
             log.info("方向题生成完成: 请求={}, 实际主问题={}",
@@ -267,7 +264,7 @@ public class InterviewQuestionService {
             throw e;
         } catch (Exception e) {
             log.error("方向题生成失败，回退到默认问题: {}", e.getMessage(), e);
-            return generateFallbackQuestions(skill, questionCount);
+            return generateFallbackQuestions(topic, questionCount);
         }
     }
 
@@ -292,12 +289,15 @@ public class InterviewQuestionService {
         return merged;
     }
 
-    private SkillDTO resolveSkill(String skillId, List<CategoryDTO> customCategories, String jdText) {
-        if (InterviewSkillService.CUSTOM_SKILL_ID.equals(skillId)
+    private InterviewTopic resolveTopic(
+            String topicId,
+            List<Category> customCategories,
+            String jdText) {
+        if (InterviewTopicCatalog.CUSTOM_TOPIC_ID.equals(topicId)
                 && customCategories != null && !customCategories.isEmpty()) {
-            return skillService.buildCustomSkill(customCategories, jdText != null ? jdText : "");
+            return topicCatalog.buildCustomTopic(customCategories, jdText != null ? jdText : "");
         }
-        return skillService.getSkill(skillId);
+        return topicCatalog.getTopic(topicId);
     }
 
     private String resolveDifficulty(String difficulty) {
@@ -363,15 +363,15 @@ public class InterviewQuestionService {
         return capped;
     }
 
-    private List<InterviewQuestionDTO> generateFallbackQuestions(SkillDTO skill, int count) {
-        List<SkillCategoryDTO> categories = skill != null ? skill.categories() : List.of();
+    private List<InterviewQuestionDTO> generateFallbackQuestions(InterviewTopic topic, int count) {
+        List<Category> categories = topic != null ? topic.categories() : List.of();
         List<InterviewQuestionDTO> questions = new ArrayList<>();
         int index = 0;
 
         if (!categories.isEmpty()) {
             int generated = 0;
             while (generated < count) {
-                SkillCategoryDTO cat = categories.get(generated % categories.size());
+                Category cat = categories.get(generated % categories.size());
                 String question = "请谈谈你在\"" + cat.label() + "\"方向的技术理解和实践经验。";
                 questions.add(InterviewQuestionDTO.create(index++, question, cat.key(), cat.label(), null, false, null));
                 int mainIndex = index - 1;
@@ -432,15 +432,6 @@ public class InterviewQuestionService {
         return PromptSecurityConstants.DATA_BOUNDARY_INSTRUCTION + "\n" +
             "## 职位描述（JD）\n根据以下 JD 关键要求出题，确保题目与岗位实际需求相关：\n" +
             promptSanitizer.wrapWithDelimiters("jd", promptSanitizer.sanitize(sourceJd));
-    }
-
-    private String buildSkillPersonaSection(SkillDTO skill) {
-        if (skill == null || skill.persona() == null || skill.persona().isBlank()) {
-            return "";
-        }
-        return "\n\n# Skill Persona\n"
-            + "以下内容来自当前面试方向的 SKILL.md，请作为面试官角色、风格与出题约束：\n"
-            + promptSanitizer.wrapWithDelimiters("skill_persona", skill.persona());
     }
 
     private List<String> sanitizeFollowUps(List<String> followUps) {

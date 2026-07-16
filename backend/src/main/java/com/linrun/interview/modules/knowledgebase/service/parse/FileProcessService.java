@@ -24,4 +24,12 @@ public interface FileProcessService {
      * @return Markdown 文本
      */
     String processDocument(byte[] fileBytes, String fileName);
+
+    /**
+     * 带持久化和对象存储上下文的解析入口。旧解析器默认只消费字节；MinerU 使用 storageKey
+     * 生成短时预签名 URL，并把 provider task 状态关联到文档版本。
+     */
+    default String processDocument(DocumentParseRequest request) {
+        return processDocument(request.fileBytes(), request.fileName());
+    }
 }

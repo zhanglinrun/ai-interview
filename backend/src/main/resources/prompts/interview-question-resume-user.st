@@ -3,7 +3,7 @@
 每个主问题必须额外生成 {followUpCount} 个追问。
 
 ## 面试方向
-{skillName}（{skillDescription}）
+{topicName}（{topicDescription}）
 
 ## 难度级别
 {difficultyDescription}

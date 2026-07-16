@@ -187,6 +187,18 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
         .orderByAsc(KnowledgeBaseSegmentEntity::getBrotherChunkIndex));
   }
 
+  @Override
+  public void evictExpansionCache() {
+    try {
+      var keys = stringRedisTemplate.keys(PARENT_CHUNK_CACHE_PREFIX + "*");
+      if (keys != null && !keys.isEmpty()) {
+        stringRedisTemplate.delete(keys);
+      }
+    } catch (Exception e) {
+      log.warn("清理父块正文缓存失败: error={}", e.getMessage(), e);
+    }
+  }
+
   private KnowledgeBaseSegmentEntity readParentChunkCache(String chunkId) {
     try {
       String json = stringRedisTemplate.opsForValue().get(PARENT_CHUNK_CACHE_PREFIX + chunkId);

@@ -8,9 +8,9 @@ import com.linrun.interview.modules.interview.agent.model.InterviewPlan.PlanTopi
 import com.linrun.interview.modules.interview.agent.model.TurnDecision;
 import com.linrun.interview.modules.interview.agent.model.TurnDecision.FollowUpAction;
 import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -31,17 +31,17 @@ class InterviewTurnDecisionServiceTest {
 
   @BeforeEach
   void setUp() {
-    InterviewSkillService skillService = mock(InterviewSkillService.class);
-    when(skillService.getSkill("java-backend")).thenReturn(new SkillDTO(
+    InterviewTopicCatalog topicCatalog = mock(InterviewTopicCatalog.class);
+    when(topicCatalog.getTopic("java-backend")).thenReturn(new InterviewTopic(
         "java-backend", "Java 后端", "后端开发", List.of(
-            new SkillCategoryDTO("MYSQL", "MySQL", "CORE", "mysql.md", true),
-            new SkillCategoryDTO("REDIS", "Redis", "CORE", "redis.md", true)),
+            new Category("MYSQL", "MySQL", "CORE", "1.0.0"),
+            new Category("REDIS", "Redis", "CORE", "1.0.0")),
         true, null, null, null));
     InterviewKnowledgeRetrievalService retrievalService =
         mock(InterviewKnowledgeRetrievalService.class);
     when(retrievalService.retrieveEvidence(anyList(), anyString()))
         .thenAnswer(invocation -> Bundle.empty(invocation.getArgument(1)));
-    service = new InterviewTurnDecisionService(skillService, retrievalService);
+    service = new InterviewTurnDecisionService(topicCatalog, retrievalService);
   }
 
   @Nested
@@ -49,13 +49,13 @@ class InterviewTurnDecisionServiceTest {
   class ActionSelection {
 
     @Test
-    @DisplayName("首题按 Planner 节点进入稳定 Skill 能力原子")
+    @DisplayName("首题按 Planner 节点进入稳定模板能力原子")
     void startsWithPlannedCapability() {
       TurnDecision decision = service.decide(request(0, plan(1), null));
 
       assertThat(decision.action()).isEqualTo(FollowUpAction.SWITCH_TOPIC);
-      assertThat(decision.targetCapability().id()).isEqualTo("skill:java-backend:mysql");
-      assertThat(decision.targetCapability().source()).isEqualTo(Source.SKILL);
+      assertThat(decision.targetCapability().id()).isEqualTo("template:java-backend:mysql");
+      assertThat(decision.targetCapability().source()).isEqualTo(Source.TEMPLATE);
       assertThat(decision.requiresFollowUp()).isFalse();
     }
 
@@ -90,7 +90,7 @@ class InterviewTurnDecisionServiceTest {
       TurnDecision decision = service.decide(request(1, plan(1), answer));
 
       assertThat(decision.action()).isEqualTo(FollowUpAction.SWITCH_TOPIC);
-      assertThat(decision.targetCapability().id()).isEqualTo("skill:java-backend:redis");
+      assertThat(decision.targetCapability().id()).isEqualTo("template:java-backend:redis");
       assertThat(decision.answerSignals().hasReasoning()).isTrue();
       assertThat(decision.answerSignals().hasExample()).isTrue();
       assertThat(decision.answerSignals().hasTradeOff()).isTrue();
@@ -117,10 +117,10 @@ class InterviewTurnDecisionServiceTest {
           "由浅入深", List.of(), List.of());
 
       TurnDecision first = service.decide(new DecisionRequest(
-          "session-1", InterviewSkillService.CUSTOM_SKILL_ID,
+          "session-1", InterviewTopicCatalog.CUSTOM_TOPIC_ID,
           0, customPlan, null, List.of()));
       TurnDecision second = service.decide(new DecisionRequest(
-          "session-2", InterviewSkillService.CUSTOM_SKILL_ID,
+          "session-2", InterviewTopicCatalog.CUSTOM_TOPIC_ID,
           0, customPlan, null, List.of()));
 
       assertThat(first.targetCapability().source()).isEqualTo(Source.JD);

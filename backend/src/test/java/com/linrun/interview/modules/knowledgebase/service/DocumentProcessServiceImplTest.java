@@ -41,7 +41,6 @@ class DocumentProcessServiceImplTest {
     @Mock private KnowledgeSegmentService segmentService;
     @Mock private KnowledgeBaseChunkingService chunkingService;
     @Mock private KnowledgeDocumentService knowledgeDocumentService;
-    @Mock private KnowledgeBaseDataTableService dataTableService;
     @Mock private VectorStoreService vectorStoreService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ObjectMapper objectMapper;

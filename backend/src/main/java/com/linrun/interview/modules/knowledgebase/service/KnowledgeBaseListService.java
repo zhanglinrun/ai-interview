@@ -1,6 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.linrun.interview.common.evidence.EvidenceScope;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.mybatis.EntityQueries;
@@ -12,17 +13,17 @@ import com.linrun.interview.infrastructure.mapper.KnowledgeBaseMapper;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentStatus;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
-import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseEntity;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
-import com.linrun.interview.modules.knowledgebase.model.RagChatMessageEntity.MessageType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,7 +38,6 @@ public class KnowledgeBaseListService {
   private static final String NULL_ID_PREFIX = "kb:null:";
 
   private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
-  private final RagChatMessageMapper ragChatMessageMapper;
   private final KnowledgeBaseMapper knowledgeBaseMapper;
   private final FileStorageService fileStorageService;
   private final RedisService redisService;
@@ -177,9 +177,11 @@ public class KnowledgeBaseListService {
       .filter(kb -> kb.getDocStatus() == DocumentStatus.CONVERTED
         || kb.getDocStatus() == DocumentStatus.CHUNKED)
       .count();
-    long userMessages = ragChatMessageMapper.countByTypeAndSessionUserId(
-      MessageType.USER.name(), userId);
-    return new KnowledgeBaseStatsDTO(totalDocs, userMessages, totalAccess, vectorStored, processing);
+    long totalQuestions = all.stream()
+      .mapToLong(kb -> kb.getQuestionCount() != null ? kb.getQuestionCount() : 0)
+      .sum();
+    return new KnowledgeBaseStatsDTO(
+      totalDocs, totalQuestions, totalAccess, vectorStored, processing);
   }
 
   public byte[] downloadFile(Long id) {
@@ -228,9 +230,73 @@ public class KnowledgeBaseListService {
     if (ids == null || ids.isEmpty()) {
       return List.of();
     }
-    return ids.stream()
-      .map(this::findReadableEntity)
-      .flatMap(Optional::stream)
+    if (userId == null) {
+      throw new BusinessException(ErrorCode.UNAUTHORIZED, "知识库访问缺少用户身份");
+    }
+    List<Long> uniqueIds = ids.stream()
+      .filter(java.util.Objects::nonNull)
+      .distinct()
+      .toList();
+    if (uniqueIds.isEmpty()) {
+      return List.of();
+    }
+    List<KnowledgeBaseEntity> candidates = knowledgeBaseEntityMapper.selectList(
+      Wrappers.<KnowledgeBaseEntity>lambdaQuery()
+        .in(KnowledgeBaseEntity::getId, uniqueIds)
+        .and(wrapper -> wrapper.eq(KnowledgeBaseEntity::getUserId, userId)
+          .or()
+          .eq(KnowledgeBaseEntity::getAccessibleBy, DocumentAccessScope.PUBLIC.name())));
+    Map<Long, KnowledgeBaseEntity> readableById = candidates.stream()
+      // 查询条件之外再校验一次，避免错误 Mapper 或未来 SQL 改动放宽私有库边界。
+      .filter(entity -> userId.equals(entity.getUserId())
+        || DocumentAccessScope.PUBLIC.name().equalsIgnoreCase(entity.getAccessibleBy()))
+      .collect(Collectors.toMap(
+        KnowledgeBaseEntity::getId,
+        entity -> entity,
+        (left, right) -> left,
+        LinkedHashMap::new));
+    return uniqueIds.stream()
+      .map(readableById::get)
+      .filter(java.util.Objects::nonNull)
+      .toList();
+  }
+
+  /**
+   * 将访问者可读的候选人知识库按真实 owner 分组为 ES 证据范围。
+   *
+   * <p>PUBLIC 只授予读取权限，不改变资源所有者；因此不能用访问者 ID 代替 owner 过滤。
+   * 私有越权或不存在的 ID 会在进入 ES 前直接拒绝，绝不退化为无 owner 条件的检索。
+   */
+  public List<EvidenceScope> resolveReadableCandidateScopes(Long userId, List<Long> ids) {
+    if (ids == null || ids.isEmpty()) {
+      return List.of();
+    }
+    List<Long> uniqueIds = ids.stream()
+      .filter(java.util.Objects::nonNull)
+      .distinct()
+      .toList();
+    List<KnowledgeBaseEntity> readable = listReadableByIds(userId, uniqueIds);
+    Map<Long, KnowledgeBaseEntity> readableById = readable.stream()
+      .collect(Collectors.toMap(KnowledgeBaseEntity::getId, entity -> entity));
+    List<Long> rejectedIds = uniqueIds.stream()
+      .filter(id -> !readableById.containsKey(id))
+      .toList();
+    if (!rejectedIds.isEmpty()) {
+      throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND,
+        "知识库不存在或无权访问: " + rejectedIds);
+    }
+
+    Map<Long, List<Long>> idsByOwner = new LinkedHashMap<>();
+    for (Long id : uniqueIds) {
+      Long ownerUserId = readableById.get(id).getUserId();
+      if (ownerUserId == null || ownerUserId <= 0) {
+        throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND,
+          "知识库缺少有效所有者: " + id);
+      }
+      idsByOwner.computeIfAbsent(ownerUserId, ignored -> new ArrayList<>()).add(id);
+    }
+    return idsByOwner.entrySet().stream()
+      .map(entry -> EvidenceScope.candidateKnowledgeBases(entry.getKey(), entry.getValue()))
       .toList();
   }
 
@@ -245,7 +311,6 @@ public class KnowledgeBaseListService {
       base.id(), base.name(), base.category(), base.originalFilename(),
       base.fileSize(), base.contentType(), base.uploadedAt(), base.lastAccessedAt(),
       base.accessCount(), base.questionCount(), base.docStatus(), base.currentVersionId(),
-      base.dataTableName(), base.dataRowCount(), base.knowledgeBaseType(),
       base.accessibleBy(), base.expireDate(), owned);
   }
 

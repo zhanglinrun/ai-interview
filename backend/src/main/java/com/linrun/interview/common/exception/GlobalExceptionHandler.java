@@ -1,22 +1,35 @@
 package com.linrun.interview.common.exception;
 
 import com.linrun.interview.common.result.Result;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.io.IOException;
 import java.net.SocketTimeoutException;
+import java.nio.channels.ClosedChannelException;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -32,7 +45,18 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     @ResponseStatus(HttpStatus.OK)
-    public Result<Void> handleBusinessException(BusinessException e) {
+    public Result<Void> handleBusinessException(
+            BusinessException e,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        if (response.isCommitted()
+                || (request.getDispatcherType() == DispatcherType.ASYNC
+                    && isEventStream(response.getContentType()))) {
+            log.debug(
+                "异步流式响应已结束，跳过业务异常的二次写入: code={}, committed={}, contentType={}",
+                e.getCode(), response.isCommitted(), response.getContentType());
+            return null;
+        }
         log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
         return Result.error(e.getCode(), e.getMessage());
     }
@@ -61,6 +85,32 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         log.warn("参数绑定失败: {}", message);
         return Result.error(ErrorCode.BAD_REQUEST, message);
+    }
+
+    /**
+     * 处理缺失、空值或类型不匹配的查询参数。
+     */
+    @ExceptionHandler({
+        ServletRequestBindingException.class,
+        MethodArgumentTypeMismatchException.class
+    })
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleRequestParameterException(Exception e) {
+        log.warn("请求参数格式错误: {}", e.getMessage());
+        return Result.error(ErrorCode.BAD_REQUEST, "请求参数不完整或格式不正确");
+    }
+
+    /**
+     * 处理无法读取或 Content-Type 不支持的请求体。
+     */
+    @ExceptionHandler({
+        HttpMessageNotReadableException.class,
+        HttpMediaTypeNotSupportedException.class
+    })
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleRequestBodyException(Exception e) {
+        log.warn("请求内容格式错误: {}", e.getMessage());
+        return Result.error(ErrorCode.BAD_REQUEST, "请求内容格式不正确");
     }
     
     /**
@@ -150,13 +200,118 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * SSE/流式响应已被浏览器刷新、路由切换等动作关闭时，响应对象已经不可再写。
+     *
+     * <p>Spring 官方的 {@code ResponseEntityExceptionHandler} 对该异常同样返回 {@code null}；
+     * 这里显式吞掉响应写入，避免继续把统一 JSON 写入 {@code text/event-stream}，进而产生
+     * {@link HttpMessageNotWritableException}。客户端断连属于正常生命周期事件，不打印堆栈。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncRequestNotUsableException(AsyncRequestNotUsableException e) {
+        if (isClientDisconnect(e)) {
+            log.debug("客户端已断开异步响应连接，跳过错误响应写回: causeType={}",
+                disconnectCauseType(e));
+            return;
+        }
+        // 即使并非典型 ClientAbort，AsyncRequestNotUsableException 也表示响应已不可用，不能二次写。
+        log.warn("异步响应已不可用，跳过二次写入", e);
+    }
+
+    /**
+     * 容器有时直接抛出 ClientAbortException/IOException，而不是包装成
+     * AsyncRequestNotUsableException。只忽略明确的连接中止；其他 I/O 异常仍走统一错误响应。
+     */
+    @ExceptionHandler(IOException.class)
+    public Result<Void> handleIOException(IOException e) {
+        if (isClientDisconnect(e)) {
+            log.debug("客户端已断开响应连接，跳过错误响应写回: causeType={}",
+                disconnectCauseType(e));
+            return null;
+        }
+        return handleException(e);
+    }
+
+    /** 已提交的 SSE 响应无法改写为 JSON；未提交的真实序列化异常仍走原统一响应。 */
+    @ExceptionHandler(HttpMessageNotWritableException.class)
+    public Result<Void> handleHttpMessageNotWritableException(
+            HttpMessageNotWritableException e,
+            HttpServletResponse response) {
+        if (response.isCommitted() || isEventStream(response.getContentType())) {
+            log.warn("流式响应已提交，跳过不可写异常的二次响应: committed={}, contentType={}",
+                response.isCommitted(), response.getContentType());
+            return null;
+        }
+        return handleException(e);
+    }
+
+    /**
      * 处理其他未知异常
      * 统一返回 HTTP 200，通过业务错误码区分异常类型
      */
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.OK)
     public Result<Void> handleException(Exception e) {
+        // 异步框架/容器可能再包一层 RuntimeException；最终原因仍是断连时不能回写 JSON。
+        if (isClientDisconnect(e)) {
+            log.debug("客户端已断开响应连接，跳过错误响应写回: causeType={}",
+                disconnectCauseType(e));
+            return null;
+        }
         log.error("系统异常: {}", e.getMessage(), e);
         return Result.error(ErrorCode.INTERNAL_ERROR, "系统繁忙，请稍后重试");
+    }
+
+    static boolean isClientDisconnect(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            String typeName = current.getClass().getName();
+            if (typeName.endsWith("ClientAbortException")
+                    || typeName.endsWith("EofException")
+                    || current instanceof ClosedChannelException) {
+                return true;
+            }
+            if (current instanceof IOException && isDisconnectMessage(current.getMessage())) {
+                return true;
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return false;
+    }
+
+    private static boolean isDisconnectMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("broken pipe")
+                || normalized.contains("connection reset")
+                || normalized.contains("connection abort")
+                || normalized.contains("software caused connection abort")
+                || normalized.contains("远程主机强迫关闭")
+                || normalized.contains("软件中止了一个已建立的连接");
+    }
+
+    private static String disconnectCauseType(Throwable error) {
+        Throwable current = error;
+        String type = error == null ? "unknown" : error.getClass().getSimpleName();
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            type = current.getClass().getSimpleName();
+            Throwable next = current.getCause();
+            if (next == null || next == current) {
+                break;
+            }
+            current = next;
+        }
+        return type;
+    }
+
+    private static boolean isEventStream(String contentType) {
+        return contentType != null
+                && contentType.toLowerCase(Locale.ROOT)
+                    .startsWith(MediaType.TEXT_EVENT_STREAM_VALUE);
     }
 }

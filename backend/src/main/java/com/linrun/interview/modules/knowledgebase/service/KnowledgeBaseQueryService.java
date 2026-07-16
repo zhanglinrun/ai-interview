@@ -7,34 +7,26 @@ import com.linrun.interview.common.ai.PromptSecurityConstants;
 import com.linrun.interview.common.ai.PromptTemplate;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.common.observability.LangfuseSpan;
-import com.linrun.interview.common.observability.LangfuseTracer;
+import com.linrun.interview.common.evidence.EvidenceScope;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
-import com.linrun.interview.modules.knowledgebase.rag.CompositeContentRetriever;
-import com.linrun.interview.modules.knowledgebase.rag.ContentUtil;
 import com.linrun.interview.modules.knowledgebase.rag.CorrectiveRetrievalGrader;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryDecomposer;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewCompositeQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewIntent;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewHybridContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewNeo4jContentRetriever;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryRouter;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewSqlContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.RagQueryTrace;
 import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
 import com.linrun.interview.common.util.JsonUtil;
-import dev.langchain4j.community.rag.content.retriever.neo4j.Neo4jGraph;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -56,19 +48,16 @@ import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.client.RestClient;
-import org.neo4j.driver.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,7 +67,7 @@ import java.util.function.Consumer;
  * 知识库查询服务（LangChain4j RetrievalAugmentor 编排版，对齐业界实践）。
  *
  * <p>检索/改写/融合/rerank 不再手写，改用 {@link DefaultRetrievalAugmentor} 编排
- * （{@link InterviewQueryTransformer} 改写 → {@link InterviewQueryRouter} 路由 →
+ * （{@link InterviewQueryTransformer} 改写 → ES 双通道检索 →
  * {@link InterviewElasticsearchContentRetriever} ES 检索 → {@link InterviewReRankingContentAggregator}
  * RRF 融合 + DashScope rerank → {@link DefaultContentInjector} 注入）。
  *
@@ -125,8 +114,6 @@ public class KnowledgeBaseQueryService {
     static final String REFERENCE_PREFIX = "reference:";
     /** SSE 改写后问题（检索优化结果）。 */
     static final String REWRITTEN_PREFIX = "rewritten:";
-    /** SSE 路由策略（JSON：strategy/reasoning）。 */
-    static final String ROUTE_PREFIX = "route:";
     /** SSE 交互卡片提示。 */
     static final String CARD_PREFIX = "card:";
     /** SSE 交互卡片选项 JSON。 */
@@ -142,7 +129,6 @@ public class KnowledgeBaseQueryService {
     private final KnowledgeBaseCountService countService;
     private final RerankService rerankService;
     private final KnowledgeSegmentService segmentService;
-    private final PromptTemplate systemPromptTemplate;
     private final PromptTemplate rewritePromptTemplate;
     private final boolean rewriteEnabled;
     private final String rewriteModel;
@@ -156,26 +142,17 @@ public class KnowledgeBaseQueryService {
     private final int rerankTopN;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
     private final KnowledgeBaseQueryProperties.Hybrid hybrid;
-    private final KnowledgeBaseQueryProperties.Sql sql;
-    private final KnowledgeBaseQueryProperties.Routing routing;
-    private final KnowledgeBaseQueryProperties.Graph graph;
     private final KnowledgeBaseQueryProperties.Generation generation;
-    private final dev.langchain4j.model.input.PromptTemplate cypherPromptTemplate;
-    private final dev.langchain4j.model.input.PromptTemplate sqlPromptTemplate;
-    private final Driver neo4jDriver;
     private final KnowledgeBaseQueryProperties.IntentRecognition intentRecognition;
     private final MeterRegistry meterRegistry;
     private final RagChatMessageMapper ragChatMessageMapper;
     private final ObjectMapper objectMapper;
     private final IntentRecognitionService intentRecognitionService;
     private final CommonChatService commonChatService;
-    private final DataSource dataSource;
-    private final KnowledgeBaseDataTableService dataTableService;
     private final RagQueryTraceService traceService;
     private final RagPromptService ragPromptService;
     private final RagCardService ragCardService;
     private final SegmentTextCacheService segmentTextCacheService;
-    private final LangfuseTracer langfuseTracer;
     private final PromptTemplate hydePromptTemplate;
     private final boolean hydeEnabled;
     private final int hydeMaxChars;
@@ -200,14 +177,10 @@ public class KnowledgeBaseQueryService {
             ObjectMapper objectMapper,
             IntentRecognitionService intentRecognitionService,
             CommonChatService commonChatService,
-            DataSource dataSource,
-            KnowledgeBaseDataTableService dataTableService,
             RagQueryTraceService traceService,
             RagPromptService ragPromptService,
             RagCardService ragCardService,
             SegmentTextCacheService segmentTextCacheService,
-            LangfuseTracer langfuseTracer,
-            @Autowired(required = false) Driver neo4jDriver,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
@@ -222,22 +195,16 @@ public class KnowledgeBaseQueryService {
         this.objectMapper = objectMapper;
         this.intentRecognitionService = intentRecognitionService;
         this.commonChatService = commonChatService;
-        this.dataSource = dataSource;
-        this.dataTableService = dataTableService;
         this.traceService = traceService;
         this.ragPromptService = ragPromptService;
         this.ragCardService = ragCardService;
         this.segmentTextCacheService = segmentTextCacheService;
-        this.langfuseTracer = langfuseTracer;
         this.hydePromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getHydePromptPath())
                 .getContentAsString(StandardCharsets.UTF_8));
         this.hydeEnabled = queryProperties.getHyde().isEnabled();
         this.hydeMaxChars = queryProperties.getHyde().getMaxChars();
         this.meterRegistry = meterRegistry;
-        this.systemPromptTemplate = new PromptTemplate(
-            resourceLoader.getResource(queryProperties.getSystemPromptPath())
-                .getContentAsString(StandardCharsets.UTF_8));
         this.rewritePromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getRewritePromptPath())
                 .getContentAsString(StandardCharsets.UTF_8));
@@ -253,17 +220,7 @@ public class KnowledgeBaseQueryService {
         this.rerankTopN = queryProperties.getRerank().getTopN();
         this.parentExpand = queryProperties.getParentExpand();
         this.hybrid = queryProperties.getHybrid();
-        this.sql = queryProperties.getSql();
-        this.routing = queryProperties.getRouting();
-        this.graph = queryProperties.getGraph();
         this.generation = queryProperties.getGeneration();
-        this.cypherPromptTemplate = dev.langchain4j.model.input.PromptTemplate.from(
-            resourceLoader.getResource(graph.getCypherPromptPath())
-                .getContentAsString(StandardCharsets.UTF_8));
-        this.sqlPromptTemplate = dev.langchain4j.model.input.PromptTemplate.from(
-            resourceLoader.getResource(sql.getPromptPath())
-                .getContentAsString(StandardCharsets.UTF_8));
-        this.neo4jDriver = neo4jDriver;
         this.intentRecognition = queryProperties.getIntentRecognition();
         this.decompose = queryProperties.getDecompose();
         this.crag = queryProperties.getCrag();
@@ -284,7 +241,7 @@ public class KnowledgeBaseQueryService {
     private ChatModel getChatModel(Long userId) {
         return userId != null
             ? llmProviderRegistry.getUserChatModel(userId)
-            : llmProviderRegistry.getChatModelWithModel(null, routing.getModel());
+            : llmProviderRegistry.getDefaultChatModel();
     }
 
     private ChatModel getRewriteChatModel(Long userId) {
@@ -336,8 +293,24 @@ public class KnowledgeBaseQueryService {
                 || normalizeQuestion(question).isBlank()) {
             return List.of();
         }
+        return retrieveContentsForInterviewEvidence(
+            UserContext.requireUserId(), knowledgeBaseIds, question);
+    }
+
+    /**
+     * 异步面试任务的证据检索入口。数据用户来自任务持久化快照，不能依赖消费线程中不存在的
+     * {@link UserContext}；该身份只用于数据权限过滤，不参与模型路由。
+     */
+    public List<Content> retrieveContentsForInterviewEvidence(Long dataUserId,
+                                                               List<Long> knowledgeBaseIds,
+                                                               String question) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+                || normalizeQuestion(question).isBlank()) {
+            return List.of();
+        }
+        requireDataUserId(dataUserId);
         RetrievalAugmentor augmentor = buildAugmentor(
-            knowledgeBaseIds, List.of(), null, null, null, true, null, false);
+            knowledgeBaseIds, List.of(), null, null, null, true, null, false, dataUserId);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, List.of());
         long startNanos = System.nanoTime();
@@ -370,24 +343,17 @@ public class KnowledgeBaseQueryService {
         Long userId = UserContext.requireUserId();
         countService.updateQuestionCounts(knowledgeBaseIds);
 
-        langfuseTracer.startTrace("rag.query", userId, null, question);
         long start = System.nanoTime();
         RagQueryTrace trace = new RagQueryTrace();
-        LangfuseSpan retrieveSpan = langfuseTracer.span("rag-retrieve", question);
         AugmentationOutcome outcome = augment(knowledgeBaseIds, question, List.of(), null, null, trace, userId);
         List<Content> contents = outcome.contents();
-        langfuseTracer.end(retrieveSpan, "retrieved=" + contents.size());
         if (contents.isEmpty()) {
             traceService.save(userId, knowledgeBaseIds, question, trace, List.of(),
                 NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
-            langfuseTracer.updateTraceOutput(NO_RESULT_RESPONSE);
             return new QueryResponse(NO_RESULT_RESPONSE, primaryKbId, kbNamesStr, List.of(), null, List.of());
         }
 
-        LangfuseSpan generateSpan = langfuseTracer.span("rag-generate", question);
         String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of(), userId);
-        langfuseTracer.end(generateSpan, answer);
-        langfuseTracer.updateTraceOutput(answer);
         CitationAnalyzer.CitationAnalysis citation = citationEnabled
             ? citationAnalyzer.analyze(answer, contents.size())
             : new CitationAnalyzer.CitationAnalysis(List.of(), List.of(), 0.0d);
@@ -488,7 +454,7 @@ public class KnowledgeBaseQueryService {
                     }
                     if (intent != null) {
                         ACTIVE_INTENT.set(intent);
-                        var cardFlux = ragCardService.maybeInteractionCards(intent);
+                        var cardFlux = ragCardService.maybeInteractionCards(intent, question);
                         if (cardFlux.isPresent()) {
                             cardFlux.get().subscribe(
                                 sink::next,
@@ -516,7 +482,6 @@ public class KnowledgeBaseQueryService {
                 // augment 后推引用来源（reference: 前缀 + RagSourceDTO JSON）
                 List<RagSourceDTO> traceSources = buildSources(contents, null);
                 emitRewrittenQuestion(sink, trace);
-                emitRouteStrategy(sink, trace);
                 emitReference(sink, traceSources);
 
                 log.debug("检索到 {} 个相关片段", contents.size());
@@ -732,57 +697,48 @@ public class KnowledgeBaseQueryService {
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
-                                              RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId) {
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly,
+                                              Long modelUserId) {
         return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
-            trace, knowledgeBaseOnly, userId, true);
+            trace, knowledgeBaseOnly, modelUserId, true);
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
-                                              RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId,
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly,
+                                              Long modelUserId,
                                               boolean queryTransformationEnabled) {
-        // 数据隔离 userId（ES/SQL 按用户过滤）恒取自 UserContext（同步/评测线程有效，流式已在 sink 内恢复）；
-        // chat 路由 userId（BYOK）由参数显式传入，评测/系统路径为 null 时回退全局模型。
-        Long dataUserId = UserContext.requireUserId();
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
+            trace, knowledgeBaseOnly, modelUserId, queryTransformationEnabled,
+            UserContext.requireUserId());
+    }
+
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId,
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly,
+                                              Long modelUserId, boolean queryTransformationEnabled,
+                                              Long dataUserId) {
+        // dataUserId 只控制 ES 数据隔离；modelUserId 只控制 BYOK 路由，禁止混用两种身份。
+        requireDataUserId(dataUserId);
         List<InterviewElasticsearchContentRetriever> esRetrievers =
             buildElasticsearchRetrievers(knowledgeBaseIds, null, trace, dataUserId);
         List<ContentRetriever> esRouterRetrievers = esRetrievers.stream()
             .map(r -> ProgressAwareContentRetriever.wrap(
                 r, progressCallback, ProgressAwareContentRetriever.Kind.ES))
             .toList();
-        ContentRetriever esFallback = esRouterRetrievers.size() == 1
-            ? esRouterRetrievers.getFirst()
-            : new CompositeContentRetriever(new ArrayList<>(esRouterRetrievers));
-        InterviewSqlContentRetriever sqlRetriever = sql.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewSqlContentRetriever(dataSource, getChatModel(userId), esFallback,
-                dataTableService.databaseStructure(dataUserId),
-                dataTableService.allowedDynamicTables(dataUserId),
-                sql.getQueryTimeoutSeconds(),
-                sql.getMaxRows(),
-                dataUserId,
-                sqlPromptTemplate)
-            : null;
-        ContentRetriever routedSql = sqlRetriever == null ? null
-            : ProgressAwareContentRetriever.wrap(
-                sqlRetriever, progressCallback, ProgressAwareContentRetriever.Kind.SQL);
-        InterviewNeo4jContentRetriever neo4jRetriever =
-            buildNeo4jRetriever(esFallback, knowledgeBaseOnly, trace, userId);
-        ContentRetriever routedNeo4j = neo4jRetriever == null ? null
-            : ProgressAwareContentRetriever.wrap(
-                neo4jRetriever, progressCallback, ProgressAwareContentRetriever.Kind.NEO4J);
         QueryTransformer queryTransformer;
         if (!queryTransformationEnabled) {
             queryTransformer = query -> List.of(query);
         } else {
             InterviewQueryTransformer rewriteTransformer = new InterviewQueryTransformer(
-                getRewriteChatModel(userId), rewritePromptTemplate, rewriteEnabled, progressCallback,
+                getRewriteChatModel(modelUserId), rewritePromptTemplate, rewriteEnabled, progressCallback,
                 assistantMessageId, ragChatMessageMapper, trace);
             InterviewCompositeQueryTransformer transformer = new InterviewCompositeQueryTransformer(
-                rewriteTransformer, getRewriteChatModel(userId), hydePromptTemplate,
+                rewriteTransformer, getRewriteChatModel(modelUserId), hydePromptTemplate,
                 hydeEnabled, hydeMaxChars);
             // Agentic RAG：复杂问题先分解成子查询；知识库评测路径不分解，保证指标可复现。
             queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
-                ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(userId),
+                ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(modelUserId),
                     decomposePromptTemplate, decompose.getMaxSubQueries(), progressCallback, trace)
                 : transformer;
         }
@@ -796,31 +752,11 @@ public class KnowledgeBaseQueryService {
                 .build()
             : null;
         ContentInjector contentInjector = new DefaultContentInjector();
-        ContentAggregator hybridAggregator = sql.isEnabled() && !knowledgeBaseOnly
-            ? new InterviewHybridContentAggregator(rerankAggregator)
-            : rerankAggregator;
-        ContentAggregator finalAggregator = ProgressAwareContentAggregator.wrap(hybridAggregator, progressCallback);
+        ContentAggregator finalAggregator =
+            ProgressAwareContentAggregator.wrap(rerankAggregator, progressCallback);
 
-        InterviewIntent intentHint = ACTIVE_INTENT.get() != null
-            ? ACTIVE_INTENT.get().resolvedIntent()
-            : null;
-        InterviewQueryRouter queryRouter = knowledgeBaseOnly
-            ? InterviewQueryRouter.builder()
-                .elasticsearchRetrievers(esRouterRetrievers)
-                .intentHint(intentHint)
-                .build()
-            : InterviewQueryRouter.builder()
-                .elasticsearchRetrievers(esRouterRetrievers)
-                .sqlRetriever(routedSql)
-                .neo4jRetriever(routedNeo4j)
-                .chatModel(getChatModel(userId))
-                .enabled(isRouterEnabled(sqlRetriever, neo4jRetriever))
-                .progressCallback(progressCallback)
-                .trace(trace)
-                .intentHint(intentHint)
-                .build();
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
-            .queryRouter(queryRouter)
+            .queryRouter(query -> esRouterRetrievers)
             .queryTransformer(queryTransformer)
             .contentInjector(contentInjector);
         if (finalAggregator != null) {
@@ -829,17 +765,31 @@ public class KnowledgeBaseQueryService {
         return builder.build();
     }
 
+    private void requireDataUserId(Long dataUserId) {
+        if (dataUserId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "知识库检索缺少数据用户身份");
+        }
+    }
+
     private List<InterviewElasticsearchContentRetriever> buildElasticsearchRetrievers(
         List<Long> knowledgeBaseIds,
         Consumer<String> progressCallback,
         RagQueryTrace trace,
         Long userId) {
-        if (hybrid.isDualChannel()) {
-            return List.of(
-                createElasticsearchRetriever(knowledgeBaseIds, progressCallback, trace, userId, "vector"),
-                createElasticsearchRetriever(knowledgeBaseIds, progressCallback, trace, userId, "full_text"));
+        List<EvidenceScope> scopes = listService.resolveReadableCandidateScopes(userId, knowledgeBaseIds);
+        List<InterviewElasticsearchContentRetriever> retrievers = new ArrayList<>();
+        for (EvidenceScope scope : scopes) {
+            if (hybrid.isDualChannel()) {
+                retrievers.add(createElasticsearchRetriever(
+                    knowledgeBaseIds, progressCallback, trace, userId, "vector", scope));
+                retrievers.add(createElasticsearchRetriever(
+                    knowledgeBaseIds, progressCallback, trace, userId, "full_text", scope));
+            } else {
+                retrievers.add(createElasticsearchRetriever(
+                    knowledgeBaseIds, progressCallback, trace, userId, null, scope));
+            }
         }
-        return List.of(createElasticsearchRetriever(knowledgeBaseIds, progressCallback, trace, userId, null));
+        return List.copyOf(retrievers);
     }
 
     private InterviewElasticsearchContentRetriever createElasticsearchRetriever(
@@ -847,12 +797,14 @@ public class KnowledgeBaseQueryService {
         Consumer<String> progressCallback,
         RagQueryTrace trace,
         Long userId,
-        String forcedSearchMode) {
+        String forcedSearchMode,
+        EvidenceScope evidenceScope) {
         return new InterviewElasticsearchContentRetriever(
             embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore,
             knowledgeBaseIds, segmentService, parentExpand, hybrid, progressCallback, trace,
             restClient, elasticSearchProperties.getIndexName(), objectMapper,
-            forcedSearchMode, userId, segmentTextCacheService);
+            forcedSearchMode, userId, segmentTextCacheService,
+            evidenceScope);
     }
 
     private void emitRewrittenQuestion(reactor.core.publisher.FluxSink<String> sink, RagQueryTrace trace) {
@@ -863,50 +815,6 @@ public class KnowledgeBaseQueryService {
         if (rewritten != null && !rewritten.isBlank()) {
             sink.next(REWRITTEN_PREFIX + rewritten);
         }
-    }
-
-    private void emitRouteStrategy(reactor.core.publisher.FluxSink<String> sink, RagQueryTrace trace) {
-        if (sink.isCancelled() || trace == null || trace.routeStrategy() == null) {
-            return;
-        }
-        try {
-            String json = objectMapper.writeValueAsString(Map.of(
-                "strategy", trace.routeStrategy(),
-                "reasoning", trace.routeReasoning() == null ? "" : trace.routeReasoning()));
-            sink.next(ROUTE_PREFIX + json);
-        } catch (Exception e) {
-            log.warn("路由策略 SSE 序列化失败: {}", e.getMessage(), e);
-        }
-    }
-
-    private InterviewNeo4jContentRetriever buildNeo4jRetriever(
-        ContentRetriever fallbackRetriever, boolean knowledgeBaseOnly, RagQueryTrace trace, Long userId) {
-        if (knowledgeBaseOnly || !graph.isEnabled() || neo4jDriver == null) {
-            return null;
-        }
-        try {
-            return InterviewNeo4jContentRetriever.builder()
-                .graph(Neo4jGraph.builder().driver(neo4jDriver).build())
-                .chatModel(getChatModel(userId))
-                .promptTemplate(cypherPromptTemplate)
-                .fallbackRetriever(fallbackRetriever)
-                .trace(trace)
-                .build();
-        } catch (Exception e) {
-            log.warn("[KnowledgeBaseQueryService] Neo4j 检索器创建失败，跳过图检索: {}", e.getMessage(), e);
-            return null;
-        }
-    }
-
-    private boolean isRouterEnabled(InterviewSqlContentRetriever sqlRetriever,
-                                    InterviewNeo4jContentRetriever neo4jRetriever) {
-        if (sqlRetriever == null && neo4jRetriever == null) {
-            return false;
-        }
-        if (sqlRetriever != null) {
-            return sql.isRouterEnabled();
-        }
-        return graph.isEnabled();
     }
 
     // ========== 生成 ==========
@@ -973,8 +881,7 @@ public class KnowledgeBaseQueryService {
             TextSegment segment = content.textSegment();
             Long knowledgeBaseId = extractKnowledgeBaseId(content);
             var metadata = segment.metadata();
-            // 图谱检索命中（skipRerank 标记）没有 docId/fileName 元数据，标为「知识图谱」而非「未知知识库」
-            String noKbTitle = ContentUtil.isSkipRerank(content) ? "知识图谱" : "未知知识库";
+            String noKbTitle = "未知知识库";
             String fallbackTitle = knowledgeBaseId == null
                 ? noKbTitle : nameMap.getOrDefault(knowledgeBaseId, noKbTitle);
             String documentTitle = firstNonBlank(metadata.getString("fileName"), fallbackTitle);

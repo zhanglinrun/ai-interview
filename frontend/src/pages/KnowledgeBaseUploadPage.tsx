@@ -1,10 +1,9 @@
 import {useState} from 'react';
-import {FileSpreadsheet, FileStack, Globe, Lock, Table2} from 'lucide-react';
+import {FileSpreadsheet, Globe, Lock} from 'lucide-react';
 import {
   knowledgeBaseApi,
   type BatchUploadItemResult,
   type DocumentAccessScope,
-  type KnowledgeBaseType,
   type UploadKnowledgeBaseResponse,
 } from '../api/knowledgebase';
 import {getErrorMessage} from '../api/request';
@@ -28,7 +27,6 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
   const [notice, setNotice] = useState('');
   const [batchCategory, setBatchCategory] = useState('');
   const [batchResults, setBatchResults] = useState<BatchUploadItemResult[] | null>(null);
-  const [knowledgeBaseType, setKnowledgeBaseType] = useState<KnowledgeBaseType>('DOCUMENT_SEARCH');
   const [accessibleBy, setAccessibleBy] = useState<DocumentAccessScope>('PRIVATE');
   const [expireDate, setExpireDate] = useState('');
 
@@ -42,7 +40,6 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
         file,
         name,
         undefined,
-        knowledgeBaseType,
         { accessibleBy, expireDate: expireDate.trim() || undefined },
       );
       if (data.duplicate) {
@@ -50,9 +47,7 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
         setUploading(false);
         return;
       }
-      if (knowledgeBaseType === 'DOCUMENT_SEARCH') {
-        await knowledgeBaseApi.splitDocument(data.knowledgeBase.id);
-      }
+      await knowledgeBaseApi.splitDocument(data.knowledgeBase.id);
       onUploadComplete(data);
     } catch (err: unknown) {
       setError(getErrorMessage(err, '上传失败，请重试'));
@@ -77,19 +72,17 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
         // 批量接口不返回各文档 docId：上传成功后【后台异步】拉取 CONVERTED 知识库逐个触发切块，
         // 切块后由 AFTER_COMMIT 事件 + 定时补偿任务完成向量化。fire-and-forget 不阻塞 UI，
         // 避免"处理中"按钮长时间卡住（切块/向量化在后台进行，可在知识库管理页看进度）。
-        if (knowledgeBaseType === 'DOCUMENT_SEARCH') {
-          void (async () => {
-            try {
-              const pending = await knowledgeBaseApi.getAllKnowledgeBases(undefined, 'CONVERTED');
-              for (const kb of pending) {
-                await knowledgeBaseApi.splitDocument(kb.id).catch(() => undefined);
-              }
-            } catch {
-              // 触发失败不影响上传结果；用户可在知识库管理页手动"重新向量化"
+        void (async () => {
+          try {
+            const pending = await knowledgeBaseApi.getAllKnowledgeBases(undefined, 'CONVERTED');
+            for (const kb of pending) {
+              await knowledgeBaseApi.splitDocument(kb.id).catch(() => undefined);
             }
-          })();
-        }
-        setNotice(`批量上传完成：成功 ${result.success}，失败 ${result.failed}。正在后台切块向量化，可在「知识库管理」查看进度。`);
+          } catch {
+            // 触发失败不影响上传结果；用户可在知识库管理页手动"重新向量化"
+          }
+        })();
+        setNotice(`批量上传完成：成功 ${result.success}，失败 ${result.failed}。文件正在后台处理，可在知识库列表查看进度。`);
         setTimeout(() => onUploadComplete({
           knowledgeBase: { id: 0, name: 'batch', category: '', fileSize: 0, contentLength: 0, docStatus: 'CONVERTED' },
           storage: { fileKey: '', fileUrl: '' },
@@ -105,18 +98,16 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     }
   };
 
-  const isSpreadsheetOnly = knowledgeBaseType === 'DATA_QUERY';
-
   return (
     <div className="max-w-6xl mx-auto">
       <PageHeader
         eyebrow="知识库"
-        title="上传文档"
-        description="将面试资料、技术文档或表格导入知识库，供 RAG 检索与模拟面试使用。"
+        title="添加知识资料"
+        description="上传技术文档或学习资料，处理完成后可直接提问，也可在模拟面试中使用。"
         onBack={onBack}
       />
 
-      <div className="grid lg:grid-cols-[minmax(280px,340px)_1fr] gap-6 lg:gap-8 items-start">
+      <div className="grid lg:grid-cols-[minmax(260px,300px)_1fr] gap-5 items-start">
         <aside className="space-y-4 lg:sticky lg:top-6">
           <FormSection title="上传方式">
             <SegmentedControl
@@ -124,35 +115,10 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
               onChange={setUploadMode}
               options={[
                 { value: 'single', label: '单文件' },
-                { value: 'batch', label: '批量', disabled: isSpreadsheetOnly },
+                { value: 'batch', label: '批量' },
               ]}
               className="w-full flex"
             />
-          </FormSection>
-
-          <FormSection title="知识库类型" description="决定后续解析与检索方式">
-            <div className="space-y-2">
-              <OptionTile
-                selected={knowledgeBaseType === 'DOCUMENT_SEARCH'}
-                onClick={() => {
-                  setKnowledgeBaseType('DOCUMENT_SEARCH');
-                  setUploadMode('single');
-                }}
-                title="文档检索"
-                description="PDF / Word / Markdown，切块后向量化"
-                icon={<FileStack className="w-4 h-4" />}
-              />
-              <OptionTile
-                selected={knowledgeBaseType === 'DATA_QUERY'}
-                onClick={() => {
-                  setKnowledgeBaseType('DATA_QUERY');
-                  setUploadMode('single');
-                }}
-                title="数据查询"
-                description="Excel / CSV，走 Text2SQL"
-                icon={<Table2 className="w-4 h-4" />}
-              />
-            </div>
           </FormSection>
 
           <FormSection title="可见范围">
@@ -167,8 +133,8 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
               <OptionTile
                 selected={accessibleBy === 'PUBLIC'}
                 onClick={() => setAccessibleBy('PUBLIC')}
-                title="公开可读"
-                description="团队内其他用户可检索，不可改删"
+                title="所有用户可读"
+                description="其他用户可以检索，但不能修改或删除"
                 icon={<Globe className="w-4 h-4" />}
               />
             </div>
@@ -184,31 +150,35 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
                 />
               </label>
             )}
-            <label className="block mt-4 text-sm text-stone-600 dark:text-stone-400">
-              到期日（可选）
-              <input
-                type="date"
-                value={expireDate}
-                onChange={(e) => setExpireDate(e.target.value)}
-                className="dark-input mt-1.5 w-full px-3 py-2 rounded-lg text-sm"
-              />
-            </label>
+            {uploadMode === 'single' ? (
+              <label className="block mt-4 text-sm text-stone-600 dark:text-stone-400">
+                自动失效日期（可选）
+                <input
+                  type="date"
+                  value={expireDate}
+                  onChange={(e) => setExpireDate(e.target.value)}
+                  className="dark-input mt-1.5 w-full px-3 py-2 rounded-lg text-sm"
+                />
+              </label>
+            ) : (
+              <p className="mt-4 text-xs leading-5 text-stone-400">
+                批量上传暂不支持自动失效日期；需要设置时请使用单文件上传。
+              </p>
+            )}
           </FormSection>
         </aside>
 
-        <div className="surface-card p-6 md:p-8">
+        <div className="surface-card p-5 md:p-6">
           <FileUploadCard
             variant="embedded"
             title={uploadMode === 'batch' ? '选择文件' : '上传文件'}
             subtitle={
               uploadMode === 'batch'
                 ? '支持一次选择多个文档，失败项不影响其余文件'
-                : isSpreadsheetOnly
-                  ? '上传表格文件用于结构化查询'
-                  : '上传后将自动解析、切块并向量化'
+                : '上传后会自动处理，完成后即可使用'
             }
-            accept={isSpreadsheetOnly ? '.csv,.xlsx,.xls,.tsv' : '.pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls'}
-            formatHint={isSpreadsheetOnly ? 'CSV、Excel' : 'PDF、DOCX、TXT、MD 等'}
+            accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls"
+            formatHint="PDF、DOCX、TXT、MD 等"
             maxSizeHint="单文件 ≤ 50MB"
             uploading={uploading}
             uploadButtonText={uploadMode === 'batch' ? '开始批量上传' : '开始上传'}

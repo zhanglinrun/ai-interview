@@ -10,11 +10,10 @@ WORKDIR /app
 # 避免每次构建都重新下载 npm 包，显著加快构建速度。
 COPY package.json pnpm-lock.yaml ./
 
-# 2. 安装依赖
-# npm install -g pnpm: 全局安装 pnpm 包管理器
-# pnpm install: 安装所有依赖（包括 devDependencies，构建需要 TypeScript、Vite 等）
-# 注意：不使用 --prod 标志，因为构建阶段需要完整的开发环境
-RUN npm install -g pnpm && pnpm install
+# 2. 安装锁定版本的 pnpm 与依赖（包括构建所需 devDependencies）
+RUN corepack enable && \
+    corepack prepare pnpm@10.26.2 --activate && \
+    pnpm install --frozen-lockfile
 
 # 3. 复制源代码并构建
 COPY . .

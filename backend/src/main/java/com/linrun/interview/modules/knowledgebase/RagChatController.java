@@ -35,6 +35,8 @@ import java.util.List;
 @Tag(name = "RAG 问答", description = "基于知识库的智能问答会话")
 public class RagChatController {
 
+    static final String EMPTY_RESPONSE_FALLBACK = "本次回答未生成有效内容，请重新提问。";
+
     private final RagChatSessionService sessionService;
 
     /**
@@ -129,9 +131,11 @@ public class RagChatController {
         return sessionService.getStreamAnswer(sessionId, request.question(), messageId)
             .doOnNext(chunk -> {
                 // progress:/reference: 前缀事件是元数据，不计入回答正文；
-                // 普通文本才是回答 token，累加进 fullContent 用于完成后落库
+                // 普通文本是回答 token；交互卡片的提示正文也需要落库，避免刷新后只剩空消息
                 if (!isPrefixedEvent(chunk)) {
                     fullContent.append(unescapeChunk(chunk));
+                } else if (chunk.startsWith("card:")) {
+                    fullContent.append(chunk.substring("card:".length()));
                 }
             })
             // 使用 ServerSentEvent 包装；progress:/reference: 原样透传，回答 token 转义换行避免破坏 SSE
@@ -140,7 +144,11 @@ public class RagChatController {
                 .build())
             .doOnComplete(() -> {
                 // 3. 流式完成后更新消息内容
-                sessionService.completeStreamMessage(messageId, fullContent.toString());
+                String completedContent = fullContent.toString();
+                String content = !completedContent.isBlank()
+                    ? completedContent
+                    : EMPTY_RESPONSE_FALLBACK;
+                sessionService.completeStreamMessage(messageId, content);
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
                 // 4. 异步 LLM 标题生成（亮点6）：首问完成后用虚拟线程根据首问生成摘要标题
                 sessionService.maybeGenerateTitleAsync(sessionId, request.question());
@@ -155,7 +163,7 @@ public class RagChatController {
             });
     }
 
-    /** progress:/reference:/rewritten:/route:/card: 前缀事件（元数据），原样透传不转义、不计入回答正文。 */
+    /** 前缀事件原样透传；除 card: 提示会持久化外，其余事件不计入回答正文。 */
     private static boolean isPrefixedEvent(String chunk) {
         return chunk != null
             && (chunk.startsWith("progress:") || chunk.startsWith("reference:")

@@ -18,6 +18,7 @@ import com.linrun.interview.modules.interview.model.InterviewAnswerEntity;
 import com.linrun.interview.modules.interview.model.InterviewQuestionDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO;
 import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
+import com.linrun.interview.modules.jobinterview.service.JobInterviewSessionDeletionService;
 import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
 import com.linrun.interview.modules.resume.model.ResumeEntity;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,7 @@ public class InterviewPersistenceService {
   private final InterviewAnswerMapper interviewAnswerMapper;
   private final ResumeEntityMapper resumeEntityMapper;
   private final ObjectMapper objectMapper;
+  private final JobInterviewSessionDeletionService jobInterviewSessionDeletionService;
 
   @Transactional(rollbackFor = Exception.class)
   public InterviewSessionEntity saveSession(String sessionId, Long resumeId,
@@ -202,6 +204,10 @@ public class InterviewPersistenceService {
       }
 
       InterviewSessionEntity session = sessionOpt.get();
+      if (session.getPreparationRunId() != null) {
+        log.warn("旧版评估报告拒绝覆盖岗位实战会话: sessionId={}", sessionId);
+        return;
+      }
       session.setOverallScore(report.overallScore());
       session.setOverallFeedback(report.overallFeedback());
       session.setStrengthsJson(objectMapper.writeValueAsString(report.strengths()));
@@ -377,7 +383,9 @@ public class InterviewPersistenceService {
   }
 
   public Optional<InterviewSessionEntity> findBySessionIdInternal(String sessionId) {
-    return findSessionEntityBySessionId(sessionId).map(this::attachResumeIfPresent);
+    return findSessionEntityBySessionId(sessionId)
+      .filter(session -> session.getPreparationRunId() == null)
+      .map(this::attachResumeIfPresent);
   }
 
   public List<InterviewSessionEntity> findByResumeId(Long resumeId) {
@@ -397,10 +405,14 @@ public class InterviewPersistenceService {
 
   @Transactional(rollbackFor = Exception.class)
   public void deleteSessionsByResumeId(Long resumeId) {
+    Long userId = UserContext.requireUserId();
     List<InterviewSessionEntity> sessions = findByResumeId(resumeId);
     for (InterviewSessionEntity session : sessions) {
-      deleteAnswersBySessionId(session.getId());
-      interviewSessionMapper.deleteById(session.getId());
+      jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
+          userId, session.getId(), session.getSessionId());
+      interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
+          .eq(InterviewSessionEntity::getId, session.getId())
+          .eq(InterviewSessionEntity::getUserId, userId));
     }
     if (!sessions.isEmpty()) {
       log.info("已删除 {} 个面试会话（包含所有答案）", sessions.size());
@@ -409,10 +421,14 @@ public class InterviewPersistenceService {
 
   @Transactional(rollbackFor = Exception.class)
   public void deleteSessionBySessionId(String sessionId) {
-    InterviewSessionEntity session = findSessionByUserAndSessionId(UserContext.requireUserId(), sessionId)
+    Long userId = UserContext.requireUserId();
+    InterviewSessionEntity session = findSessionByUserAndSessionId(userId, sessionId)
       .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
-    deleteAnswersBySessionId(session.getId());
-    interviewSessionMapper.deleteById(session.getId());
+    jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
+        userId, session.getId(), session.getSessionId());
+    interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
+        .eq(InterviewSessionEntity::getId, session.getId())
+        .eq(InterviewSessionEntity::getUserId, userId));
     log.info("已删除面试会话: sessionId={}", sessionId);
   }
 
@@ -516,11 +532,6 @@ public class InterviewPersistenceService {
       Wrappers.<InterviewAnswerEntity>lambdaQuery()
         .eq(InterviewAnswerEntity::getSessionId, sessionPkId)
         .eq(InterviewAnswerEntity::getQuestionIndex, questionIndex));
-  }
-
-  private void deleteAnswersBySessionId(Long sessionPkId) {
-    interviewAnswerMapper.delete(Wrappers.<InterviewAnswerEntity>lambdaQuery()
-      .eq(InterviewAnswerEntity::getSessionId, sessionPkId));
   }
 
   private InterviewSessionEntity attachResumeIfPresent(InterviewSessionEntity session) {

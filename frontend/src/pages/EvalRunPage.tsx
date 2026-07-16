@@ -15,12 +15,10 @@ import {
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 const num = (v: number) => v.toFixed(3);
 
-const INPUT_CLASS =
-  'w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 ' +
-  'text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50';
+const INPUT_CLASS = 'dark-input w-full px-3 py-2 text-sm';
 
 export default function EvalRunPage() {
-  const [title, setTitle] = useState('面试路由基础回归');
+  const [title, setTitle] = useState('RAG 检索基础评测');
   const [baselineKey, setBaselineKey] = useState('interview-routing-basic');
   const [updateBaseline, setUpdateBaseline] = useState(false);
   const [regressionThreshold, setRegressionThreshold] = useState(0.03);
@@ -44,7 +42,7 @@ export default function EvalRunPage() {
   }, []);
 
   const loadExample = () => {
-    setTitle('面试路由基础回归');
+    setTitle('RAG 检索基础评测');
     setBaselineKey('interview-routing-basic');
     setUpdateBaseline(false);
     setRegressionThreshold(0.03);
@@ -89,7 +87,7 @@ export default function EvalRunPage() {
       };
     }
     if (!body.intentCases?.length && !body.judgeCases?.length && !body.rag) {
-      setError('请至少填写一类评测用例（意图识别 / RAG 检索 / LLM-as-Judge）。');
+      setError('请至少添加一组评测用例。');
       return;
     }
     setRunning(true);
@@ -103,11 +101,11 @@ export default function EvalRunPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-5xl mx-auto space-y-5">
       <PageHeader
-        eyebrow="评测"
-        title="统一评测闭环"
-        description="意图识别 + RAG 检索 + LLM-as-Judge 回答质量 + 基线回归，一次运行留痕可追踪"
+        eyebrow="效果检查"
+        title="效果评测"
+        description="用固定样例检查问题分类、资料检索和回答质量，并与历史结果比较。"
       />
 
       <div className="flex flex-wrap gap-3">
@@ -131,19 +129,19 @@ export default function EvalRunPage() {
       )}
 
       {/* 运行配置 */}
-      <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <section className="surface-card p-4 space-y-3">
         <h2 className="font-semibold text-sm text-slate-900 dark:text-white">运行配置</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <span>标题</span>
+            <span>运行名称</span>
             <input className={INPUT_CLASS} value={title} onChange={e => setTitle(e.target.value)} />
           </label>
           <label className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <span>基线 Key（baselineKey）</span>
+            <span>基线标识</span>
             <input className={INPUT_CLASS} value={baselineKey} onChange={e => setBaselineKey(e.target.value)} />
           </label>
           <label className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <span>回归阈值（regressionThreshold）</span>
+            <span>允许波动</span>
             <input
               type="number"
               step="0.01"
@@ -154,15 +152,15 @@ export default function EvalRunPage() {
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 self-end pb-2">
             <input type="checkbox" checked={updateBaseline} onChange={e => setUpdateBaseline(e.target.checked)} />
-            <span>将本次结果设为新基线（updateBaseline）</span>
+            <span>将本次结果保存为后续比较基准</span>
           </label>
         </div>
       </section>
 
       {/* 意图识别用例 */}
-      <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">意图识别用例</h2>
+          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">问题分类用例</h2>
           <button
             onClick={() => setIntentCases(prev => [...prev, { question: '', expectedIntent: '' }])}
             className="text-primary-600 dark:text-primary-400 text-sm inline-flex items-center gap-1"
@@ -170,7 +168,7 @@ export default function EvalRunPage() {
             <Plus className="w-4 h-4" /> 添加
           </button>
         </div>
-        {intentCases.length === 0 && <p className="text-sm text-slate-400">未添加意图用例（可选）</p>}
+        {intentCases.length === 0 && <p className="text-sm text-slate-400">暂未添加，可选</p>}
         {intentCases.map((c, i) => (
           <div key={i} className="flex flex-wrap gap-2 items-center">
             <input
@@ -181,7 +179,7 @@ export default function EvalRunPage() {
             />
             <input
               className={`${INPUT_CLASS} w-40`}
-              placeholder="期望意图，如 TECH_KB"
+              placeholder="期望类型，如 TECH_KB"
               value={c.expectedIntent ?? ''}
               onChange={e => setIntentCases(prev => prev.map((x, j) => (j === i ? { ...x, expectedIntent: e.target.value } : x)))}
             />
@@ -193,9 +191,9 @@ export default function EvalRunPage() {
       </section>
 
       {/* RAG 检索用例 */}
-      <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">RAG 检索用例</h2>
+          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">资料检索用例</h2>
           <button
             onClick={() => setRagItems(prev => [...prev, { question: '', expectedKeywords: [] }])}
             className="text-primary-600 dark:text-primary-400 text-sm inline-flex items-center gap-1"
@@ -205,7 +203,7 @@ export default function EvalRunPage() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <span>知识库（可多选）</span>
+            <span>检索资料（可多选）</span>
             <select
               multiple
               className={`${INPUT_CLASS} h-24`}
@@ -218,7 +216,7 @@ export default function EvalRunPage() {
             </select>
           </label>
           <label className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <span>Top-K</span>
+            <span>返回条数</span>
             <input type="number" min={1} className={INPUT_CLASS} value={ragK} onChange={e => setRagK(parseInt(e.target.value) || 5)} />
           </label>
         </div>
@@ -248,14 +246,14 @@ export default function EvalRunPage() {
           </div>
         ))}
         {ragItems.length > 0 && ragKbIds.length === 0 && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">已填 RAG 用例但未选知识库，本次将跳过 RAG 评测。</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400">尚未选择资料，这组检索用例不会运行。</p>
         )}
       </section>
 
       {/* LLM-as-Judge 用例 */}
-      <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">回答质量用例（LLM-as-Judge）</h2>
+          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">回答质量用例</h2>
           <button
             onClick={() => setJudgeCases(prev => [...prev, { question: '', answer: '', minOverallScore: 0.75 }])}
             className="text-primary-600 dark:text-primary-400 text-sm inline-flex items-center gap-1"
@@ -311,7 +309,7 @@ export default function EvalRunPage() {
 
 function EvalResult({ result }: { result: EvalRunResponse }) {
   return (
-    <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-5">
+    <section className="surface-card p-4 space-y-5">
       <div className="flex flex-wrap items-center gap-4">
         <h2 className="font-semibold text-slate-900 dark:text-white">评测结果</h2>
         <span className="text-2xl font-bold text-primary-600 dark:text-primary-400 tabular-nums">
@@ -324,19 +322,19 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
               : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
           }`}
         >
-          {result.regression ? '相对基线退化' : '未退化'}
+          {result.regression ? '低于历史基准' : '未低于历史基准'}
         </span>
         {result.baseline && (
           <span className="px-2.5 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-            已记为新基线
+            已保存为基准
           </span>
         )}
-        <span className="text-xs text-slate-400">runId: {result.runId}</span>
+        <span className="text-xs text-slate-400">运行编号：{result.runId}</span>
       </div>
 
       {result.intent && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">意图识别</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">问题分类</h3>
           <p className="text-sm text-slate-500">
             准确率 {pct(result.intent.accuracy)} · Macro-F1 {num(result.intent.macroF1)} · {result.intent.correct}/{result.intent.total} 正确
           </p>
@@ -354,7 +352,7 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
 
       {result.rag && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">RAG 检索</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">资料检索</h3>
           <p className="text-sm text-slate-500">
             命中率 {pct(result.rag.hitRate)} · MRR {num(result.rag.mrr)} · NDCG {num(result.rag.ndcg)} · Top-{result.rag.k} · {result.rag.total} 题
           </p>
@@ -372,7 +370,7 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
 
       {result.judge && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">回答质量（LLM-as-Judge）</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">回答质量</h3>
           <p className="text-sm text-slate-500">
             通过率 {pct(result.judge.passRate)} · 平均分 {num(result.judge.averageOverall)} · {result.judge.passed}/{result.judge.total} 通过
           </p>
@@ -390,7 +388,7 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
 
       {result.baselineComparison && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">基线对比</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">历史基准对比</h3>
           <p className="text-xs text-slate-400">
             基线 runId {result.baselineComparison.baselineRunId} · 阈值 {num(result.baselineComparison.threshold)}
           </p>

@@ -10,7 +10,6 @@ import com.linrun.interview.modules.interview.model.InterviewReportDTO;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO.CategoryScore;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO.QuestionEvaluation;
 import com.linrun.interview.modules.interview.model.InterviewReportDTO.ReferenceAnswer;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
 import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,15 +27,8 @@ public class AnswerEvaluationService {
     private static final Logger log = LoggerFactory.getLogger(AnswerEvaluationService.class);
 
     private final UnifiedEvaluationService unifiedEvaluationService;
-    private final InterviewPersistenceService persistenceService;
-    private final InterviewSkillService skillService;
-
-    public AnswerEvaluationService(UnifiedEvaluationService unifiedEvaluationService,
-                                   InterviewPersistenceService persistenceService,
-                                   InterviewSkillService skillService) {
+    public AnswerEvaluationService(UnifiedEvaluationService unifiedEvaluationService) {
         this.unifiedEvaluationService = unifiedEvaluationService;
-        this.persistenceService = persistenceService;
-        this.skillService = skillService;
     }
 
     /**
@@ -52,15 +44,10 @@ public class AnswerEvaluationService {
                 .map(q -> new QaRecord(q.questionIndex(), q.question(), q.category(), q.userAnswer()))
                 .toList();
 
-            String referenceContext = skillService.buildEvaluationReferenceSectionSafe(
-                persistenceService.findBySessionIdInternal(sessionId)
-                    .map(s -> s.getSkillId())
-                    .orElse(null)
-            );
-
-            // 调用通用评估服务
+            // 旧文字面试不再注入未经审核的静态 Markdown 答案。岗位实战由版本化 Rubric
+            // 与证据快照评估；这里保留通用回答评估，并显式传空参考上下文。
             EvaluationReport report = unifiedEvaluationService.evaluate(
-                chatModel, sessionId, qaRecords, resumeText, referenceContext
+                chatModel, sessionId, qaRecords, resumeText, ""
             );
 
             // 转为文字面试专用 DTO

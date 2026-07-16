@@ -1,4 +1,3 @@
-import {AnimatePresence, motion} from 'framer-motion';
 import LoadingButtonContent from './LoadingButtonContent';
 
 export interface ConfirmDialogProps {
@@ -37,29 +36,22 @@ export default function ConfirmDialog({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* 背景遮罩 */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onCancel}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-          />
+    <>
+      <div
+        onClick={onCancel}
+        className="fixed inset-0 z-50 bg-black/50"
+      />
 
-          {/* 对话框 */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="surface-card max-w-md w-full p-6"
-            >
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-dialog-title"
+          onClick={(e) => e.stopPropagation()}
+          className="surface-card w-full max-w-md p-6"
+        >
               {/* 标题 */}
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+              <h3 id="confirm-dialog-title" className="mb-4 text-xl font-bold text-slate-900 dark:text-white">
                 {title}
               </h3>
 
@@ -76,21 +68,17 @@ export default function ConfirmDialog({
               {/* 按钮 */}
               {!hideButtons && (
                 <div className="flex gap-3 justify-end">
-                  <motion.button
+                  <button
                     onClick={onCancel}
                     disabled={loading}
-                    className="px-5 py-2.5 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    className="btn-secondary px-5 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {cancelText}
-                  </motion.button>
-                  <motion.button
+                  </button>
+                  <button
                     onClick={onConfirm}
                     disabled={loading}
-                    className={`px-5 py-2.5 text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variantStyles[confirmVariant]}`}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    className={`rounded-lg px-5 py-2.5 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 ${variantStyles[confirmVariant]}`}
                   >
                     <LoadingButtonContent
                       loading={loading}
@@ -99,14 +87,11 @@ export default function ConfirmDialog({
                     >
                       {confirmText}
                     </LoadingButtonContent>
-                  </motion.button>
+                  </button>
                 </div>
               )}
-            </motion.div>
-          </div>
-        </>
-      )}
-    </AnimatePresence>
+        </div>
+      </div>
+    </>
   );
 }
-

@@ -44,21 +44,6 @@ public class AsyncConfig {
     }
 
     /**
-     * 语音面试管线执行器：LLM/TTS/JDBC 等阻塞调用跑虚拟线程，
-     * 并发上限防止恶意/异常流量无界创建任务（替代散落的
-     * {@code Executors.newVirtualThreadPerTaskExecutor()}，生命周期交给 Spring 管理）。
-     */
-    @Bean("voicePipelineExecutor")
-    public AsyncTaskExecutor voicePipelineExecutor() {
-        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("voice-pipeline-");
-        executor.setVirtualThreads(true);
-        executor.setConcurrencyLimit(64);
-        executor.setTaskTerminationTimeout(Duration.ofSeconds(5).toMillis());
-        log.info("语音管线虚拟线程执行器初始化完成: concurrencyLimit=64");
-        return executor;
-    }
-
-    /**
      * 面试出题并行执行器：简历题与方向题两路 LLM 调用并行，虚拟线程 + 并发上限。
      */
     @Bean("questionExecutor")

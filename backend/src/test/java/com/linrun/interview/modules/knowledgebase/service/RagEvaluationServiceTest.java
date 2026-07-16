@@ -28,8 +28,8 @@ class RagEvaluationServiceTest {
     void evaluateMetrics() {
         KnowledgeBaseQueryService queryService = mock(KnowledgeBaseQueryService.class);
         when(queryService.retrieveForEvaluation(any(), any())).thenReturn(List.of(
-            segment("c1", "无关内容"),
-            segment("c2", "这里解释 JVM 垃圾回收")
+            segment("c1", "无关内容", 0.91234d),
+            segment("c2", "这里解释 JVM 垃圾回收", 0.81234d)
         ));
         RagEvaluationRunMapper runMapper = mock(RagEvaluationRunMapper.class);
         when(runMapper.insert(any(RagEvaluationRunEntity.class))).thenReturn(1);
@@ -53,10 +53,14 @@ class RagEvaluationServiceTest {
         assertThat(response.mrr()).isEqualTo(0.5);
         assertThat(response.items().getFirst().firstHitRank()).isEqualTo(2);
         assertThat(response.items().getFirst().ndcg()).isGreaterThan(0);
+        assertThat(response.items().getFirst().retrievedSegments().getFirst().score())
+            .isEqualTo(0.9123d);
         verify(runMapper).insert(any(RagEvaluationRunEntity.class));
     }
 
-    private TextSegment segment(String chunkId, String text) {
-        return new TextSegment(text, Metadata.from(MetadataKeyConstant.CHUNK_ID, chunkId));
+    private TextSegment segment(String chunkId, String text, double score) {
+        Metadata metadata = Metadata.from(MetadataKeyConstant.CHUNK_ID, chunkId)
+            .put("SCORE", score);
+        return new TextSegment(text, metadata);
     }
 }

@@ -4,7 +4,6 @@ import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.infrastructure.redis.RedisChatMemoryStore;
 import com.linrun.interview.modules.interview.agent.model.AgentTraceStep;
 import com.linrun.interview.modules.interview.agent.tool.AgentTraceCollector;
-import com.linrun.interview.modules.interview.agent.tool.GithubProfileTool;
 import com.linrun.interview.modules.interview.agent.tool.KnowledgeBaseSearchTool;
 import com.linrun.interview.modules.interview.agent.tool.ResumeReadTool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -38,7 +37,6 @@ public class AgentAiServiceFactory {
   private final AgentOrchestrationProperties properties;
   private final KnowledgeBaseSearchTool knowledgeBaseSearchTool;
   private final ResumeReadTool resumeReadTool;
-  private final GithubProfileTool githubProfileTool;
   private final RedisChatMemoryStore chatMemoryStore;
 
   private final ConcurrentHashMap<ChatModel, PlannerAiService> plannerCache = new ConcurrentHashMap<>();
@@ -58,7 +56,7 @@ public class AgentAiServiceFactory {
     return interviewerCache.computeIfAbsent(chatModel, model ->
         AiServices.builder(InterviewerAiService.class)
             .chatModel(model)
-            .tools(knowledgeBaseSearchTool, resumeReadTool, githubProfileTool)
+            .tools(knowledgeBaseSearchTool, resumeReadTool)
             .chatMemoryProvider(memoryId -> MessageWindowChatMemory.builder()
                 .id(memoryId)
                 .maxMessages(Math.max(2, properties.getMemoryWindow()))

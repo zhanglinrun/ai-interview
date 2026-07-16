@@ -9,8 +9,8 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DevOps = Join-Path $Root "dev-ops"
 $EnvFile = Join-Path $Root ".env"
 
-if (Test-Path $EnvFile) {
-  foreach ($RawLine in Get-Content $EnvFile) {
+if (Test-Path -LiteralPath $EnvFile) {
+  foreach ($RawLine in Get-Content -LiteralPath $EnvFile -Encoding UTF8) {
     $Line = $RawLine.Trim()
     if ([string]::IsNullOrWhiteSpace($Line) -or $Line.StartsWith("#")) {
       continue

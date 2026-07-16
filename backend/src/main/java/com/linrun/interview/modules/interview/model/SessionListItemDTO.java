@@ -18,6 +18,10 @@ public record SessionListItemDTO(
     AsyncTaskStatus evaluateStatus,
     String evaluateError,
     Integer overallScore,
+    boolean jobInterview,
+    Long jobDescriptionId,
+    String currentStage,
+    Long sessionVersion,
     LocalDateTime createdAt,
     LocalDateTime completedAt
 ) {
@@ -32,6 +36,10 @@ public record SessionListItemDTO(
             e.getEvaluateStatus(),
             e.getEvaluateError(),
             e.getOverallScore(),
+            e.getPreparationRunId() != null && !e.getPreparationRunId().isBlank(),
+            e.getJobDescriptionId(),
+            e.getCurrentStage(),
+            e.getSessionVersion(),
             e.getCreatedAt(),
             e.getCompletedAt()
         );

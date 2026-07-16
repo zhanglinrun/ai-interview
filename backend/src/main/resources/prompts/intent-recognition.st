@@ -3,7 +3,6 @@
 意图 intent 只能是以下之一：
 - TECH_KB：技术知识、框架原理、系统设计、知识库内容追问
 - CODE_REVIEW：代码实现、算法题、Bug 排查、代码优化、LeetCode
-- DATA_QUERY：简历/面试/评分的统计查询（多少次、平均分、最高分、历史记录）
 - RESUME_STATS：简历评分、技能匹配、简历对比（非纯统计也可）
 - INTERVIEW_PREP：模拟面试、面试题、答题技巧、追问、评估报告
 - SCHEDULE：面试日程、提醒、安排

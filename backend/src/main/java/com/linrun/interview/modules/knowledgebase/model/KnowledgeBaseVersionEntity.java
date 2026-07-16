@@ -31,6 +31,9 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
     /** 原始文件 URL（RustFS）。 */
     private String docUrl;
 
+    /** 原始文件对象存储键；用于短时预签名与失败补偿，不向前端暴露。 */
+    private String storageKey;
+
     /** 转换后 Markdown 文本内容（解析产物，split 时直接取，省存储往返）。 */
     private String convertedContent;
 
@@ -82,6 +85,14 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
 
     public void setDocUrl(String docUrl) {
         this.docUrl = docUrl;
+    }
+
+    public String getStorageKey() {
+        return storageKey;
+    }
+
+    public void setStorageKey(String storageKey) {
+        this.storageKey = storageKey;
     }
 
     public String getConvertedContent() {

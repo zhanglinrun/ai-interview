@@ -60,26 +60,30 @@ class LlmProviderRegistryUserTest {
   class Configured {
 
     @Test
-    @DisplayName("getUserChatModel 返回 SafeGuard 包装的 ChatModel")
+    @DisplayName("getUserChatModel 返回带用量兜底且保留 SafeGuard 的模型")
     void returnsChatModelWhenConfigured() {
       when(userLlmProviderMapper.selectById(1L)).thenReturn(userEntity(1L, "gpt-test"));
       when(encryptionService.decrypt(any(), any())).thenReturn("sk-user-1");
 
       ChatModel model = registry.getUserChatModel(1L);
 
-      assertThat(model).isInstanceOf(SafeGuardChatModel.class);
+      assertThat(model).isInstanceOf(UserScopedUsageChatModel.class);
+      assertThat(((UserScopedUsageChatModel) model).delegate())
+          .isInstanceOf(SafeGuardChatModel.class);
       verify(encryptionService).decrypt("nonce-1", "cipher-1");
     }
 
     @Test
-    @DisplayName("getUserStreamingChatModel 返回 SafeGuard 流式模型")
+    @DisplayName("getUserStreamingChatModel 返回带用量兜底且保留 SafeGuard 的流式模型")
     void returnsStreamingModelWhenConfigured() {
       when(userLlmProviderMapper.selectById(1L)).thenReturn(userEntity(1L, "gpt-test"));
       when(encryptionService.decrypt(any(), any())).thenReturn("sk-user-1");
 
       StreamingChatModel model = registry.getUserStreamingChatModel(1L);
 
-      assertThat(model).isInstanceOf(SafeGuardStreamingChatModel.class);
+      assertThat(model).isInstanceOf(UserScopedUsageStreamingChatModel.class);
+      assertThat(((UserScopedUsageStreamingChatModel) model).delegate())
+          .isInstanceOf(SafeGuardStreamingChatModel.class);
     }
 
     @Test

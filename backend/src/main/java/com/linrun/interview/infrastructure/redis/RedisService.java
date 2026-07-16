@@ -405,21 +405,7 @@ public class RedisService {
     }
 
     /**
-     * 幂等去重：尝试将任务标记为"处理中"。
-     * <p>
-     * 基于 {@code setIfAbsent} 的占位语义：只有首次设置成功的消费者才真正执行业务。
-     * 若键已存在且为 DONE，说明该任务已完成，应直接跳过；若为 PROCESSING，说明有其他消费者
-     * 正在处理或上一次处理中途崩溃（PROCESSING 带较短 TTL，过期后可被重新占用）。
-     *
-     * @return true 表示占位成功（本消费者应执行业务）；false 表示已被占位或已完成（应跳过）
-     */
-    public boolean tryAcquireIdempotency(String dedupKey, Duration processingTtl) {
-        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
-        return bucket.setIfAbsent(AsyncTaskStreamConstants.DEDUP_STATE_PROCESSING, processingTtl);
-    }
-
-    /**
-     * 查询幂等键当前状态，可能为 PROCESSING / DONE / null（不存在）。
+     * 查询幂等键当前状态，可能为 DONE / null（不存在）。
      */
     public String getIdempotencyState(String dedupKey) {
         RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
@@ -432,17 +418,6 @@ public class RedisService {
     public void markIdempotencyDone(String dedupKey, Duration doneTtl) {
         RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
         bucket.set(AsyncTaskStreamConstants.DEDUP_STATE_DONE, doneTtl);
-    }
-
-    /**
-     * 释放处理中占位（业务失败需要重试时调用），让消息重新入队后能再次被占用执行。
-     * 用 compareAndSet 原子地"当前值为 PROCESSING 才删除"，避免读取与删除之间
-     * 占位过期、被其他消费者重新抢占后误删他人的占位或已完成标记。
-     */
-    public void releaseIdempotencyIfProcessing(String dedupKey) {
-        RBucket<String> bucket = redissonClient.getBucket(dedupKey, StringCodec.INSTANCE);
-        // update 传 null 表示匹配时删除键，Redisson 在服务端以 Lua 原子执行
-        bucket.compareAndSet(AsyncTaskStreamConstants.DEDUP_STATE_PROCESSING, null);
     }
 
     // ==================== 原子计数器 ====================

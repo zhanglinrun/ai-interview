@@ -48,7 +48,10 @@ public class InterviewParseService {
     private static final Pattern LINK_PATTERN_FEISHU = Pattern.compile("https://meeting\\.feishu\\.cn/[^\\s\\n]+");
     private static final Pattern COMPANY_PATTERN_FEISHU = Pattern.compile("(?:公司|单位|组织)[：:]\\s*([^\\s\\n]{1,50})");
     private static final Pattern POSITION_PATTERN_FEISHU = Pattern.compile("(?:岗位|职位|职务)[：:]\\s*([^\\s\\n]{1,50})");
-    private static final Pattern ROUND_PATTERN_FEISHU = Pattern.compile("第\\s*[一二三四五六七八九十\\d]+\\s*[轮场]");
+    private static final Pattern ROUND_PATTERN_FEISHU = Pattern.compile(
+        "(?:第\\s*[一二三四五六七八九十\\d]+\\s*[轮场面]|"
+            + "[一二三四五六七八九十\\d]+\\s*面)"
+    );
 
     // Tencent meeting patterns
     private static final Pattern TIME_PATTERN_TENCENT = Pattern.compile("(\\d{4}[-/]\\d{2}[-/]\\d{2})\\s+(\\d{2}:\\d{2})");
@@ -63,7 +66,8 @@ public class InterviewParseService {
     private static final Pattern HOUR_PATTERN_ZOOM = Pattern.compile("(\\d{1,2}:\\d{2})");
 
     // Round number pattern
-    private static final Pattern ROUND_NUMBER_PATTERN = Pattern.compile("[一二三四五六七八九十]|\\d");
+    private static final Pattern ROUND_NUMBER_PATTERN =
+        Pattern.compile("[一二三四五六七八九十]+|\\d+");
 
     private static final String PARSE_PROMPT = """
         你是一个专业的面试邀约信息提取助手。请仔细分析以下文本，提取面试相关信息。
@@ -412,21 +416,24 @@ public class InterviewParseService {
         }
     }
 
-    private int parseRoundNumber(String text) {
-        if (text == null) return 1;
-
-        text = text.trim();
-
-        if (text.matches("\\d+")) {
-            return Integer.parseInt(text);
+    int parseRoundNumber(String text) {
+        if (text == null || text.isBlank()) {
+            return 1;
         }
 
-        Matcher matcher = ROUND_NUMBER_PATTERN.matcher(text);
-        if (matcher.find()) {
-            String num = matcher.group();
-            return CHINESE_NUMBERS.getOrDefault(num, Integer.parseInt(num.replaceAll("\\D", "")));
+        Matcher matcher = ROUND_NUMBER_PATTERN.matcher(text.trim());
+        while (matcher.find()) {
+            String token = matcher.group();
+            Integer chineseNumber = CHINESE_NUMBERS.get(token);
+            if (chineseNumber != null) {
+                return chineseNumber;
+            }
+            try {
+                return Integer.parseInt(token);
+            } catch (NumberFormatException ignored) {
+                // 超长数字或不支持的中文组合继续按默认第一轮处理，不中断邀约解析。
+            }
         }
-
         return 1;
     }
 

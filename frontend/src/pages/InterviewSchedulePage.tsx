@@ -183,7 +183,16 @@ export const InterviewSchedulePage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="mx-auto max-w-7xl space-y-5">
+      <header>
+        <h1 className="text-2xl font-semibold text-stone-900 dark:text-stone-50">
+          面试日程
+        </h1>
+        <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+          记录已确认的面试安排，避免错过时间和会议入口。
+        </p>
+      </header>
+
       <ScheduleHeader
         view={view}
         onViewChange={setView}
@@ -233,7 +242,7 @@ export const InterviewSchedulePage: React.FC = () => {
       <ConfirmDialog
         open={isConfirmOpen}
         title="确认调整面试时间"
-        message={`您调整了 ${pendingChanges.size} 个面试的时间,确认保存吗?`}
+        message={`已调整 ${pendingChanges.size} 场面试的时间，是否保存？`}
         onConfirm={handleConfirmChanges}
         onCancel={handleCancelChanges}
       />
@@ -242,7 +251,7 @@ export const InterviewSchedulePage: React.FC = () => {
         open={isDeleteConfirmOpen}
         item={interviewToDelete ? { id: interviewToDelete } : null}
         itemType="面试"
-        customMessage="确定要删除这个面试吗?此操作无法撤销。"
+        customMessage="确定删除这场面试吗？删除后无法恢复。"
         onConfirm={handleConfirmDelete}
         onCancel={() => {
           setIsDeleteConfirmOpen(false);

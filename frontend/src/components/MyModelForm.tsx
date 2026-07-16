@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
 import { CheckCircle, Eye, EyeOff, KeyRound, Plug, Trash2, XCircle } from 'lucide-react';
 import { userLlmProviderApi } from '../api/userLlmProvider';
 import { getErrorMessage } from '../api/request';
@@ -33,10 +32,7 @@ const BASE_URL_PRESETS: { label: string; baseUrl: string; model: string }[] = [
   { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
 ];
 
-const INPUT_CLASS = `w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600
-  bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-white
-  placeholder:text-slate-400 focus:outline-none focus:ring-2
-  focus:ring-primary-500/50 focus:border-primary-400 transition-shadow`;
+const INPUT_CLASS = 'dark-input w-full px-3 py-2.5 text-sm';
 
 const LABEL_CLASS = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5';
 
@@ -45,8 +41,21 @@ function parseTemperature(raw: string): number | undefined {
   if (!trimmed) {
     return undefined;
   }
-  const value = Number.parseFloat(trimmed);
+  const value = Number(trimmed);
   return Number.isFinite(value) ? value : undefined;
+}
+
+function isTemperatureValid(raw: string): boolean {
+  if (!raw.trim()) return true;
+  const value = parseTemperature(raw);
+  return value !== undefined && value >= 0 && value <= 2;
+}
+
+export function formatTemperatureInput(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return '';
+  }
+  return String(Math.round((value + Number.EPSILON) * 1_000) / 1_000);
 }
 
 export default function MyModelForm({
@@ -61,9 +70,7 @@ export default function MyModelForm({
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '');
   const [apiKey, setApiKey] = useState('');
   const [chatModel, setChatModel] = useState(initial?.chatModel ?? '');
-  const [temperature, setTemperature] = useState(
-    initial?.temperature != null ? String(initial.temperature) : '',
-  );
+  const [temperature, setTemperature] = useState(formatTemperatureInput(initial?.temperature));
   const [showApiKey, setShowApiKey] = useState(false);
   const [configured, setConfigured] = useState(Boolean(initial?.configured));
   const [maskedApiKey, setMaskedApiKey] = useState(initial?.maskedApiKey ?? '');
@@ -91,6 +98,10 @@ export default function MyModelForm({
     const trimmedModel = chatModel.trim();
     if (!trimmedBaseUrl || !trimmedModel) {
       setError('请填写 Base URL 与 聊天模型');
+      return null;
+    }
+    if (!isTemperatureValid(temperature)) {
+      setError('随机性需填写 0 到 2 之间的数字');
       return null;
     }
     // 已配置后仅改 baseUrl/模型名时 Key 可留空（后端保留原 Key）；首次配置必须填写。
@@ -143,6 +154,10 @@ export default function MyModelForm({
       setError('请先填写 Base URL 与 聊天模型');
       return;
     }
+    if (!isTemperatureValid(temperature)) {
+      setError('随机性需填写 0 到 2 之间的数字');
+      return;
+    }
     // /mine/test 测的是「已保存」的配置。未配置且未填 Key 无从测起，先提示。
     if (!trimmedApiKey && !configured) {
       setError('请先输入 API Key');
@@ -193,7 +208,7 @@ export default function MyModelForm({
       {configured && (
         <div className="flex items-center gap-2 rounded-lg bg-primary-50 dark:bg-primary-900/20 px-3 py-2 text-xs font-medium text-primary-700 dark:text-primary-300">
           <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>已配置模型 Key{maskedApiKey ? `：${maskedApiKey}` : ''}，修改其他字段时 Key 可留空保持不变。</span>
+          <span>模型 Key 已保存{maskedApiKey ? `：${maskedApiKey}` : ''}。只修改其他字段时，Key 可以留空。</span>
         </div>
       )}
 
@@ -204,7 +219,7 @@ export default function MyModelForm({
             key={preset.label}
             type="button"
             onClick={() => applyPreset(preset)}
-            className="inline-flex items-center rounded-full border border-slate-200 dark:border-slate-600
+            className="inline-flex items-center rounded-md border border-slate-200 dark:border-slate-600
               px-3 py-1 text-xs font-medium text-slate-600 dark:text-slate-300
               hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors"
           >
@@ -273,13 +288,16 @@ export default function MyModelForm({
       {/* Temperature */}
       <div>
         <label className={LABEL_CLASS}>
-          Temperature <span className="text-slate-400 font-normal">(可选, 默认 0.2)</span>
+          回答随机性 <span className="text-slate-400 font-normal">（0-2，可选，默认 0.2）</span>
         </label>
         <input
-          type="text"
+          type="number"
+          min={0}
+          max={2}
+          step={0.1}
           value={temperature}
           onChange={(e) => setTemperature(e.target.value)}
-          placeholder="例如: 0.2, 0.7, 1"
+          placeholder="例如 0.2"
           className={INPUT_CLASS}
         />
       </div>
@@ -289,9 +307,7 @@ export default function MyModelForm({
 
       {/* 测试结果 */}
       {testResult && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
+        <div
           className={`px-3 py-2 rounded-lg text-xs font-medium ${
             testResult.success
               ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
@@ -304,38 +320,30 @@ export default function MyModelForm({
               : <XCircle className="h-3.5 w-3.5 flex-shrink-0" />}
             <span>{testResult.message}</span>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* 操作按钮 */}
       <div className="flex flex-wrap items-center gap-3 pt-1">
-        <motion.button
+        <button
           type="button"
           onClick={handleTest}
           disabled={busy}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
-            border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300
-            hover:bg-slate-50 dark:hover:bg-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <LoadingButtonContent loading={testing} loadingText="测试中...">
+          <LoadingButtonContent loading={testing} loadingText="保存并测试中...">
             <span className="inline-flex items-center gap-2">
               <Plug className="h-4 w-4" />
-              测试连通
+              保存并测试
             </span>
           </LoadingButtonContent>
-        </motion.button>
+        </button>
 
-        <motion.button
+        <button
           type="button"
           onClick={handleSave}
           disabled={busy}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
-            text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg shadow-primary-500/25
-            hover:from-primary-600 hover:to-primary-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <LoadingButtonContent loading={saving} loadingText={savingLabel}>
             <span className="inline-flex items-center gap-2">
@@ -343,14 +351,14 @@ export default function MyModelForm({
               {saveLabel}
             </span>
           </LoadingButtonContent>
-        </motion.button>
+        </button>
 
         {showDelete && configured && (
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={busy}
-            className="ml-auto inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium
+            className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
               text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20
               transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="删除我的模型配置"
@@ -364,7 +372,7 @@ export default function MyModelForm({
       <ConfirmDialog
         open={confirmDelete}
         title="删除「我的模型」配置"
-        message="删除后你将无法使用 RAG 问答、出题、面试评估等 AI 功能，直到重新配置模型 Key。确定删除吗？"
+        message="删除后，知识问答、面试出题和评估将暂时不可用，重新填写模型 Key 后即可恢复。确定删除吗？"
         confirmText="确定删除"
         cancelText="取消"
         confirmVariant="danger"

@@ -1,5 +1,4 @@
 import type {ComponentType, ReactNode} from 'react';
-import {motion} from 'framer-motion';
 import {AlertCircle, Loader2} from 'lucide-react';
 
 interface LoadingStateProps {
@@ -22,7 +21,7 @@ export function LoadingState({
   compact = false,
 }: LoadingStateProps) {
   const resolvedClassName = className
-    ?? (compact ? 'text-center py-6' : 'flex flex-col items-center justify-center py-20 gap-3');
+    ?? (compact ? 'text-center py-6' : 'flex flex-col items-center justify-center py-12 gap-3');
   const resolvedSpinnerClassName = spinnerClassName
     ?? (compact
       ? 'w-5 h-5 text-primary-500 animate-spin mx-auto'
@@ -55,22 +54,18 @@ export function EmptyState({
   title,
   description,
   action,
-  className = 'text-center py-20 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700',
-  iconClassName = 'w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4',
-  titleClassName = 'text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2',
-  descriptionClassName = 'text-slate-500 dark:text-slate-400',
+  className = 'surface-card px-5 py-12 text-center',
+  iconClassName = 'mx-auto mb-3 h-10 w-10 text-stone-300 dark:text-stone-600',
+  titleClassName = 'mb-1 text-base font-semibold text-stone-700 dark:text-stone-300',
+  descriptionClassName = 'text-sm text-stone-500 dark:text-stone-400',
 }: EmptyStateProps) {
   return (
-    <motion.div
-      className={className}
-      initial={{opacity: 0, scale: 0.95}}
-      animate={{opacity: 1, scale: 1}}
-    >
+    <div className={className}>
       {iconNode ?? (Icon ? <Icon className={iconClassName} /> : null)}
       {title && <h3 className={titleClassName}>{title}</h3>}
       {description && <p className={descriptionClassName}>{description}</p>}
       {action}
-    </motion.div>
+    </div>
   );
 }
 

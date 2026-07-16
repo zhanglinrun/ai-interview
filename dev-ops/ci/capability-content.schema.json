@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-interview.local/schemas/capability-content-v1.json",
+  "title": "AI Interview capability content catalog",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "contentVersion",
+    "effectiveDate",
+    "source",
+    "checksum",
+    "atoms",
+    "templates",
+    "questionTemplates",
+    "rubrics",
+    "platformKnowledge"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "contentVersion": { "type": "string", "minLength": 1 },
+    "effectiveDate": { "type": "string", "format": "date" },
+    "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "source": {
+      "type": "object",
+      "required": ["name", "locator"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "atoms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["atomId", "version", "name", "capabilityDomain", "jobTracks"],
+        "properties": {
+          "atomId": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+          "version": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "capabilityDomain": { "type": "string", "minLength": 1 },
+          "jobTracks": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "templates": { "type": "array", "minItems": 1 },
+    "questionTemplates": { "type": "array", "minItems": 1 },
+    "rubrics": { "type": "array", "minItems": 1 },
+    "platformKnowledge": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidenceId",
+          "resourceId",
+          "resourceVersion",
+          "title",
+          "summary",
+          "sourceType",
+          "sourceLocator",
+          "contentHash",
+          "capabilityAtomIds"
+        ],
+        "properties": {
+          "contentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "capabilityAtomIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

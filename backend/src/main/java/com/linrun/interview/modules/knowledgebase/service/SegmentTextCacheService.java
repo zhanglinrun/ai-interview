@@ -51,4 +51,9 @@ public class SegmentTextCacheService {
       }
     }
   }
+
+  /** 源资料物理删除后清除所有正文缓存，避免历史片段继续进入上下文。 */
+  public void evictAll() {
+    redisService.deleteByPattern(KEY_PREFIX + "*");
+  }
 }

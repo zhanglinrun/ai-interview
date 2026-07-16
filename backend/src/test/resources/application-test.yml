@@ -23,6 +23,12 @@ spring:
           address: "redis://localhost:6379"
           database: 0
 
+  rabbitmq:
+    dynamic: false
+    listener:
+      simple:
+        auto-startup: false
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -42,17 +48,14 @@ minio:
   bucketName: ai-interview
   endpoint: http://localhost:9000
 
-neo4j:
-  uri: bolt://localhost:7687
-  username: neo4j
-  password: neo4j666
-
-
 app:
-  # 单元测试为纯 Mockito 测试，不加载 Spring 上下文，故此处引擎值不影响普通构建；
-  # 引擎取默认 rocketmq（如需跑加载完整上下文的 @SpringBootTest，应另起 broker 或桩化 TaskQueueChannel）。
-  async:
-    engine: rocketmq
+  capability-content:
+    auto-import: false
+  algorithm-content:
+    auto-import: false
+  algorithm:
+    judge0:
+      enabled: false
   ai:
     default-provider: dashscope
     embedding-dimensions: 1536
@@ -99,66 +102,3 @@ app:
       - text/plain
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:80
-  voice-interview:
-    llm-provider: dashscope
-    phase:
-      intro:
-        min-duration: 3
-        suggested-duration: 5
-        max-duration: 8
-        min-questions: 2
-        max-questions: 5
-      tech:
-        min-duration: 8
-        suggested-duration: 10
-        max-duration: 15
-        min-questions: 3
-        max-questions: 8
-      project:
-        min-duration: 8
-        suggested-duration: 10
-        max-duration: 15
-        min-questions: 2
-        max-questions: 5
-      hr:
-        min-duration: 3
-        suggested-duration: 5
-        max-duration: 8
-        min-questions: 2
-        max-questions: 5
-    tts:
-      default-voice: siyue
-    qwen:
-      asr:
-        url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
-        model: qwen3-asr-flash-realtime
-        api-key: test-api-key
-        language: zh
-        format: pcm
-        sample-rate: 16000
-        enable-turn-detection: true
-        turn-detection-type: server_vad
-        turn-detection-threshold: 0.0
-        turn-detection-silence-duration-ms: 1000
-      tts:
-        url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
-        model: qwen3-tts-flash-realtime
-        api-key: test-api-key
-        voice: Cherry
-        format: pcm
-        sample-rate: 16000
-        mode: server_commit
-        language-type: Chinese
-        speech-rate: 1.0
-        volume: 60
-    user-utterance-debounce-ms: 1600
-    rate-limit:
-      max-per-session: 10
-      max-per-ip: 3
-      max-concurrent: 50
-    audio:
-      codec: opus
-      sample-rate: 16000
-      bit-rate: 24000
-      channels: 1
-      chunk-duration: 2000

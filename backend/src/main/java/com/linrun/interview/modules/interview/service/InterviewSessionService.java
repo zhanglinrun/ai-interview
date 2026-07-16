@@ -30,8 +30,8 @@ import com.linrun.interview.modules.interview.model.InterviewSessionEntity;
 import com.linrun.interview.modules.interview.model.SubmitAnswerRequest;
 import com.linrun.interview.modules.interview.model.SubmitAnswerResponse;
 import com.linrun.interview.modules.interview.model.InterviewSessionDTO.SessionStatus;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -74,7 +74,7 @@ public class InterviewSessionService {
     private final EvaluateStreamProducer evaluateStreamProducer;
     private final LlmProviderRegistry llmProviderRegistry;
     private final KnowledgeBaseListService knowledgeBaseListService;
-    private final InterviewSkillService skillService;
+    private final InterviewTopicCatalog topicCatalog;
     private final InterviewOrchestrator orchestrator;
     private final AgentOrchestrationProperties agentProperties;
     private final RedisChatMemoryStore chatMemoryStore;
@@ -120,14 +120,14 @@ public class InterviewSessionService {
         }
 
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        String skillId = request.skillId() != null ? request.skillId() : InterviewDefaults.SKILL_ID;
+        String topicId = request.skillId() != null ? request.skillId() : InterviewDefaults.SKILL_ID;
         String difficulty = request.difficulty() != null ? request.difficulty() : InterviewDefaults.DIFFICULTY;
 
         // 校验关联知识库归属当前用户（越权/不存在直接失败，避免静默丢弃用户选择）
         List<Long> knowledgeBaseIds = validateKnowledgeBases(request.knowledgeBaseIds());
 
-        log.info("创建新面试会话: {}, skill: {}, difficulty: {}, questionCount: {}, resumeId: {}, kbIds: {}",
-            sessionId, skillId, difficulty, request.questionCount(), request.resumeId(), knowledgeBaseIds);
+        log.info("创建新面试会话: {}, topic: {}, difficulty: {}, questionCount: {}, resumeId: {}, kbIds: {}",
+            sessionId, topicId, difficulty, request.questionCount(), request.resumeId(), knowledgeBaseIds);
 
         // Multi-Agent 编排路径：Planner 出大纲 + Interviewer/Critic 出首题，后续题目答题时动态生成
         boolean agentMode = agentProperties.isEnabled();
@@ -136,15 +136,15 @@ public class InterviewSessionService {
         int plannedTotal = request.questionCount();
         if (agentMode) {
             try {
-                SkillDTO skill = resolveSkill(skillId, request);
+                InterviewTopic topic = resolveTopic(topicId, request);
                 InterviewPlan plan = orchestrator.plan(new InterviewOrchestrator.PlanRequest(
-                    sessionId, userId, request.llmProvider(), skill, difficulty,
+                    sessionId, userId, request.llmProvider(), topic, difficulty,
                     request.questionCount(), request.resumeText(), knowledgeBaseIds));
                 planJson = objectMapper.writeValueAsString(plan);
 
                 GeneratedQuestion first = orchestrator.nextQuestion(
                     new InterviewOrchestrator.NextQuestionRequest(
-                        sessionId, userId, request.llmProvider(), skillId, difficulty,
+                        sessionId, userId, request.llmProvider(), topicId, difficulty,
                         0, plannedTotal, plan, null, List.of(),
                         request.resumeId(), knowledgeBaseIds));
                 questions = new ArrayList<>();
@@ -157,14 +157,14 @@ public class InterviewSessionService {
         }
 
         if (!agentMode) {
-            // 获取历史问题（通用模式按 skillId 查询，有简历时按 resumeId + skillId 精确匹配）
+            // 历史字段 skillId 仅作为主题兼容键；有简历时再按 resumeId 精确匹配。
             List<HistoricalQuestion> historicalQuestions =
-                persistenceService.getHistoricalQuestions(skillId, request.resumeId());
+                persistenceService.getHistoricalQuestions(topicId, request.resumeId());
 
-            // 基于 Skill 生成面试问题（关联知识库时按 Skill 主题词 RAG 检索注入出题 prompt）
-            questions = questionService.generateQuestionsBySkill(
+            // 基于版本化能力模板生成问题；有关联资料时通过 RAG 证据注入出题 Prompt。
+            questions = questionService.generateQuestionsForTopic(
                 userId,
-                skillId,
+                topicId,
                 difficulty,
                 request.resumeText(),
                 request.questionCount(),
@@ -192,7 +192,7 @@ public class InterviewSessionService {
         // 保存到数据库
         try {
             persistenceService.saveSession(sessionId, request.resumeId(),
-                plannedTotal, questions, request.llmProvider(), skillId, difficulty,
+                plannedTotal, questions, request.llmProvider(), topicId, difficulty,
                 knowledgeBaseIds, planJson);
         } catch (Exception e) {
             log.warn("保存面试会话到数据库失败: {}", e.getMessage(), e);
@@ -208,13 +208,13 @@ public class InterviewSessionService {
         );
     }
 
-    private SkillDTO resolveSkill(String skillId, CreateInterviewRequest request) {
-        if (InterviewSkillService.CUSTOM_SKILL_ID.equals(skillId)
+    private InterviewTopic resolveTopic(String topicId, CreateInterviewRequest request) {
+        if (InterviewTopicCatalog.CUSTOM_TOPIC_ID.equals(topicId)
                 && request.customCategories() != null && !request.customCategories().isEmpty()) {
-            return skillService.buildCustomSkill(request.customCategories(),
+            return topicCatalog.buildCustomTopic(request.customCategories(),
                 request.jdText() != null ? request.jdText() : "");
         }
-        return skillService.getSkill(skillId);
+        return topicCatalog.getTopic(topicId);
     }
 
     /** 编排产出转题目 DTO：追问挂到上一道主问题 */
@@ -357,9 +357,14 @@ public class InterviewSessionService {
     private SessionStatus convertStatus(InterviewSessionEntity.SessionStatus status) {
         return switch (status) {
             case CREATED -> SessionStatus.CREATED;
+            case READY -> SessionStatus.READY;
             case IN_PROGRESS -> SessionStatus.IN_PROGRESS;
+            case PAUSED -> SessionStatus.PAUSED;
+            case COMPLETING -> SessionStatus.COMPLETING;
             case COMPLETED -> SessionStatus.COMPLETED;
             case EVALUATED -> SessionStatus.EVALUATED;
+            case ABORTED -> SessionStatus.ABORTED;
+            case FAILED -> SessionStatus.FAILED;
         };
     }
 
@@ -737,7 +742,6 @@ public class InterviewSessionService {
     }
 
     public void deleteSession(String sessionId) {
-        getOrRestoreSession(sessionId);
         persistenceService.deleteSessionBySessionId(sessionId);
         sessionCache.deleteSession(sessionId);
     }

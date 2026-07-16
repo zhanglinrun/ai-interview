@@ -12,7 +12,6 @@ import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseListItemDTO
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseStatsDTO;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseVersionDTO;
 import com.linrun.interview.modules.knowledgebase.constant.DocumentAccessScope;
-import com.linrun.interview.modules.knowledgebase.constant.KnowledgeBaseType;
 import com.linrun.interview.modules.knowledgebase.model.RagDatasetResult;
 import com.linrun.interview.modules.knowledgebase.service.RagDatasetService;
 import com.linrun.interview.modules.knowledgebase.model.DocumentSplitParam;
@@ -26,7 +25,6 @@ import com.linrun.interview.modules.knowledgebase.model.RagQueryTraceDTO;
 import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.modules.knowledgebase.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.modules.knowledgebase.service.DocumentProcessService;
-import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseDataTableService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseListService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
@@ -71,7 +69,6 @@ public class KnowledgeBaseController {
     private final KnowledgeBaseQueryService queryService;
     private final RagEvaluationService ragEvaluationService;
     private final RagQueryTraceService ragQueryTraceService;
-    private final KnowledgeBaseDataTableService dataTableService;
     private final RagDatasetService ragDatasetService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
@@ -210,14 +207,17 @@ public class KnowledgeBaseController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "category", required = false) String category,
-            @RequestParam(value = "knowledgeBaseType", required = false, defaultValue = "DOCUMENT_SEARCH")
-            String knowledgeBaseType,
+            @RequestParam(value = "knowledgeBaseType", required = false) String knowledgeBaseType,
             @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy,
             @RequestParam(value = "expireDate", required = false) String expireDate) {
-        KnowledgeBaseType type = parseKnowledgeBaseType(knowledgeBaseType);
+        if (knowledgeBaseType != null && !knowledgeBaseType.isBlank()
+            && !"DOCUMENT_SEARCH".equalsIgnoreCase(knowledgeBaseType.trim())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "仅支持文档语义检索，DATA_QUERY 数据查询模式已下线");
+        }
         DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
         LocalDate expire = parseExpireDate(expireDate);
-        return Result.success(uploadSingle(file, name, category, type, scope, expire));
+        return Result.success(uploadSingle(file, name, category, scope, expire));
     }
 
     /**
@@ -245,7 +245,7 @@ public class KnowledgeBaseController {
         for (MultipartFile file : files) {
             String fileName = file != null ? file.getOriginalFilename() : null;
             try {
-                Map<String, Object> result = uploadSingle(file, null, category, KnowledgeBaseType.DOCUMENT_SEARCH, scope, null);
+                Map<String, Object> result = uploadSingle(file, null, category, scope, null);
                 Object kbObj = result.get("knowledgeBase");
                 if (kbObj instanceof Map<?, ?> kbMap) {
                     Object idObj = kbMap.get("id");
@@ -284,14 +284,6 @@ public class KnowledgeBaseController {
         ));
     }
 
-    @GetMapping("/api/knowledgebase/{id}/data/preview")
-    public Result<KnowledgeBaseDataTableService.PreviewResponse> previewDataTable(
-            @PathVariable Long id,
-            @RequestParam(value = "page", required = false, defaultValue = "1") int page,
-            @RequestParam(value = "size", required = false, defaultValue = "50") int size) {
-        return Result.success(dataTableService.preview(UserContext.requireUserId(), id, page, size));
-    }
-
     @GetMapping("/api/knowledgebase/dataset/generate")
     public Result<RagDatasetResult> generateDataset(
             @RequestParam("question") String question,
@@ -314,21 +306,14 @@ public class KnowledgeBaseController {
      * 单文件上传内部逻辑：仅 upload（解析落库至 CONVERTED），不自动 split。
      */
     private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
-                                             KnowledgeBaseType knowledgeBaseType) {
-        return uploadSingle(file, name, category, knowledgeBaseType,
-            DocumentAccessScope.PRIVATE, null);
-    }
-
-    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
-                                             KnowledgeBaseType knowledgeBaseType,
                                              DocumentAccessScope accessScope,
                                              LocalDate expireDate) {
         String fileName = file.getOriginalFilename();
-        log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, type={}, access={}, expire={}",
-            fileName, file.getSize(), category, knowledgeBaseType, accessScope, expireDate);
+        log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, access={}, expire={}",
+            fileName, file.getSize(), category, accessScope, expireDate);
 
         Long docId = documentProcessService.upload(
-            file, name, category, knowledgeBaseType, accessScope, expireDate);
+            file, name, category, accessScope, expireDate);
 
         KnowledgeBaseEntity entity = EntityQueries.byUserAndId(
             knowledgeBaseEntityMapper, UserContext.requireUserId(), docId,
@@ -475,18 +460,6 @@ public class KnowledgeBaseController {
     public Result<Void> activateVersion(@PathVariable Long id, @PathVariable Long versionId) {
         knowledgeDocumentService.activateVersion(versionId);
         return Result.success(null);
-    }
-
-    private static KnowledgeBaseType parseKnowledgeBaseType(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return KnowledgeBaseType.DOCUMENT_SEARCH;
-        }
-        try {
-            return KnowledgeBaseType.valueOf(raw.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "无效的知识库类型: " + raw + "，可选 DOCUMENT_SEARCH / DATA_QUERY");
-        }
     }
 
     private static LocalDate parseExpireDate(String raw) {

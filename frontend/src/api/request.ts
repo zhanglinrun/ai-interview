@@ -39,7 +39,7 @@ export class ApiError extends Error {
 
 /**
  * 若响应命中「未配置模型 Key」（code 7006，或消息含该提示），派发全局事件。
- * 覆盖 RAG 问答/出题/评估/语音等所有走统一 Result 的 chat 入口；返回是否命中。
+ * 覆盖 RAG 问答、出题与评估等所有走统一 Result 的 chat 入口；返回是否命中。
  */
 export function notifyIfUserLlmNotConfigured(code?: number, message?: string): boolean {
   const matched = code === USER_LLM_NOT_CONFIGURED_CODE

@@ -51,10 +51,6 @@
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-websocket</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
     <dependency>
@@ -142,63 +138,7 @@
       <artifactId>onnxruntime</artifactId>
       <version>${onnxruntime.version}</version>
     </dependency>
-    <!-- Text2SQL（面试记录/评分/简历结构化数据检索） -->
-    <dependency>
-      <groupId>dev.langchain4j</groupId>
-      <artifactId>langchain4j-experimental-sql</artifactId>
-      <version>${langchain4j-beta.version}</version>
-    </dependency>
-    <!-- MCP Client（LangChain4j 原生，McpToolProvider 把外部 MCP 工具挂进 AiServices） -->
-    <dependency>
-      <groupId>dev.langchain4j</groupId>
-      <artifactId>langchain4j-mcp</artifactId>
-      <version>${langchain4j-beta.version}</version>
-    </dependency>
-    <!-- Neo4j Text2Cypher（面试知识点关系图谱） -->
-    <dependency>
-      <groupId>dev.langchain4j</groupId>
-      <artifactId>langchain4j-community-neo4j</artifactId>
-      <version>${langchain4j-beta.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>dev.langchain4j</groupId>
-      <artifactId>langchain4j-community-neo4j-spring-boot-starter</artifactId>
-      <version>${langchain4j-beta.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>dev.langchain4j</groupId>
-      <artifactId>langchain4j-community-neo4j-retriever</artifactId>
-      <version>${langchain4j-beta.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-data-neo4j</artifactId>
-    </dependency>
-
-    <!-- ===== Spring AI MCP Server（SSE transport，业务能力 MCP 化）=====
-         Server 侧选 Spring AI starter：要 SSE/Streamable-HTTP transport + Servlet Filter 鉴权，
-         Spring 生态开箱；Client 侧用 langchain4j-mcp：要进 LC4j AiServices 工具链（见上）。 -->
-    <dependency>
-      <groupId>org.springframework.ai</groupId>
-      <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
-    </dependency>
-
-    <!-- ===== RocketMQ（默认异步任务引擎）=====
-         app.async.engine=rocketmq（默认）时启用：事务消息 + broker 重试 + 原生死信队列。
-         Starter 2.3.x 用旧版 spring.factories，Spring Boot 3 不识别，故由
-         common/async/RocketMqEngineConfig 以 @ConditionalOnProperty(matchIfMissing=true) 显式
-         @Import(RocketMQAutoConfiguration)；切 rabbitmq 引擎时整段不装配、不连 broker。 -->
-    <dependency>
-      <groupId>org.apache.rocketmq</groupId>
-      <artifactId>rocketmq-spring-boot-starter</artifactId>
-      <version>${rocketmq-spring.version}</version>
-    </dependency>
-
-    <!-- ===== RabbitMQ（可选异步任务引擎，app.async.engine=rabbitmq 时启用）=====
-         Windows/WSL2 本机开发下 RocketMQ 容器 9876 常连不通，改用 RabbitMQ 作为真正的消息队列
-         （非 redis-stream）。RabbitAutoConfiguration 由 spring.autoconfigure.exclude 默认排除，
-         仅 common/async/RabbitMqEngineConfig 以 @ConditionalOnProperty(engine=rabbitmq) 显式
-         @Import 装配：direct exchange + 每管道队列 + DLX/DLQ + 重试建议链。 -->
+    <!-- ===== RabbitMQ（唯一异步任务引擎）===== -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-amqp</artifactId>
@@ -267,18 +207,6 @@
       <artifactId>font-asian</artifactId>
       <version>${itext.version}</version>
     </dependency>
-    <dependency>
-      <groupId>com.alibaba</groupId>
-      <artifactId>dashscope-sdk-java</artifactId>
-      <version>${dashscope.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-simple</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
     <dependency>
       <groupId>jakarta.annotation</groupId>
       <artifactId>jakarta.annotation-api</artifactId>

@@ -44,6 +44,7 @@ public class InterviewEvaluationCompensationJob {
                 .eq(InterviewSessionEntity::getStatus, InterviewSessionEntity.SessionStatus.COMPLETED)
                 .and(w -> w.eq(InterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.PENDING)
                     .or().isNull(InterviewSessionEntity::getEvaluateStatus))
+                .isNull(InterviewSessionEntity::getPreparationRunId)
                 .lt(InterviewSessionEntity::getCompletedAt, LocalDateTime.now().minusMinutes(STALE_MINUTES))
                 .last("LIMIT " + BATCH_LIMIT));
         if (staleSessions.isEmpty()) {
@@ -53,6 +54,10 @@ public class InterviewEvaluationCompensationJob {
         int requeued = 0;
         for (InterviewSessionEntity session : staleSessions) {
             try {
+                if (session.getPreparationRunId() != null) {
+                    log.warn("旧评估补偿跳过岗位实战会话: sessionId={}", session.getSessionId());
+                    continue;
+                }
                 if (session.getEvaluateStatus() == null) {
                     session.setEvaluateStatus(AsyncTaskStatus.PENDING);
                     MapperUtils.save(sessionMapper, session);

@@ -1,0 +1,293 @@
+{
+  "schemaVersion": "1.0",
+  "contentVersion": "2026.07.2",
+  "source": {
+    "name": "ai-interview-reviewed-catalog",
+    "locator": "classpath:capability-content/catalog-v1.json"
+  },
+  "effectiveDate": "2026-07-15",
+  "checksum": "sha256:f473b361c99b0912921450cbecb3140b60298d457e6d93c8bd8fe4d3e70e8cd4",
+  "atoms": [
+    {
+      "atomId": "JAVA_LANGUAGE_FOUNDATION",
+      "version": "1.0.0",
+      "name": "Java 语言与并发基础",
+      "description": "JVM 语义、集合、并发原语、线程模型与 Java 21 实践",
+      "capabilityDomain": "LANGUAGE",
+      "jobTracks": ["JAVA_BACKEND"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "SPRING_APPLICATION",
+      "version": "1.0.0",
+      "name": "Spring 应用开发",
+      "description": "IoC、AOP、事务、MVC 以及 Spring Boot 工程实践",
+      "capabilityDomain": "FRAMEWORK",
+      "jobTracks": ["JAVA_BACKEND"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "DATABASE_TRANSACTION",
+      "version": "1.0.0",
+      "name": "数据库与事务",
+      "description": "索引、执行计划、隔离级别、锁与一致性设计",
+      "capabilityDomain": "DATA",
+      "jobTracks": ["JAVA_BACKEND"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "CACHE_DISTRIBUTED",
+      "version": "1.0.0",
+      "name": "缓存与分布式协调",
+      "description": "Redis 数据结构、缓存一致性、分布式锁与故障降级",
+      "capabilityDomain": "DISTRIBUTED_SYSTEM",
+      "jobTracks": ["JAVA_BACKEND"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "MESSAGE_RELIABILITY",
+      "version": "1.0.0",
+      "name": "消息可靠性",
+      "description": "RabbitMQ 投递语义、幂等消费、重试与死信治理",
+      "capabilityDomain": "MIDDLEWARE",
+      "jobTracks": ["JAVA_BACKEND", "AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "BACKEND_SYSTEM_DESIGN",
+      "version": "1.0.0",
+      "name": "后端系统设计",
+      "description": "从约束出发完成接口、数据、可靠性与可观测性设计",
+      "capabilityDomain": "SYSTEM_DESIGN",
+      "jobTracks": ["JAVA_BACKEND", "AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "PROJECT_TROUBLESHOOTING",
+      "version": "1.0.0",
+      "name": "项目深挖与故障定位",
+      "description": "结合真实调用链解释取舍、边界、故障证据与修复过程",
+      "capabilityDomain": "PROJECT",
+      "jobTracks": ["JAVA_BACKEND", "AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "RAG_DOCUMENT_PIPELINE",
+      "version": "1.0.0",
+      "name": "RAG 文档处理链路",
+      "description": "解析、切块、父子上下文、向量化状态与一致性",
+      "capabilityDomain": "RAG",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "RAG_RETRIEVAL",
+      "version": "1.0.0",
+      "name": "检索与证据编排",
+      "description": "混合检索、RRF、Rerank、Query Decomposition、CRAG 与证据边界",
+      "capabilityDomain": "RAG",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "RAG_EVALUATION",
+      "version": "1.0.0",
+      "name": "RAG 评测",
+      "description": "检索指标、RAGAS、坏例集、版本对比与可复现评估",
+      "capabilityDomain": "EVALUATION",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "AGENT_ORCHESTRATION",
+      "version": "1.0.0",
+      "name": "Agent 编排",
+      "description": "显式状态机、Plan-and-Execute、Reflection、工具权限与恢复",
+      "capabilityDomain": "AGENT",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "LLM_APPLICATION_ENGINEERING",
+      "version": "1.0.0",
+      "name": "LLM 应用工程",
+      "description": "结构化输出、Prompt Injection 防御、BYOK、Token 与降级治理",
+      "capabilityDomain": "LLM_ENGINEERING",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    },
+    {
+      "atomId": "AI_APPLICATION_RELIABILITY",
+      "version": "1.0.0",
+      "name": "AI 应用可靠性",
+      "description": "异步任务、外部模型超时、幂等、补偿、审计与隐私保护",
+      "capabilityDomain": "RELIABILITY",
+      "jobTracks": ["AI_RAG_AGENT"],
+      "parentAtomId": null
+    }
+  ],
+  "templates": [
+    {
+      "templateCode": "JAVA_BACKEND_BASELINE",
+      "jobTrack": "JAVA_BACKEND",
+      "version": "1.0.0",
+      "status": "PUBLISHED",
+      "capabilities": [
+        {"atomId": "JAVA_LANGUAGE_FOUNDATION", "atomVersion": "1.0.0", "defaultWeight": 0.14, "minimumCoverage": 1, "questionTypes": ["CONCEPT", "SCENARIO"]},
+        {"atomId": "SPRING_APPLICATION", "atomVersion": "1.0.0", "defaultWeight": 0.17, "minimumCoverage": 1, "questionTypes": ["CONCEPT", "PROJECT"]},
+        {"atomId": "DATABASE_TRANSACTION", "atomVersion": "1.0.0", "defaultWeight": 0.16, "minimumCoverage": 1, "questionTypes": ["CONCEPT", "SCENARIO"]},
+        {"atomId": "CACHE_DISTRIBUTED", "atomVersion": "1.0.0", "defaultWeight": 0.13, "minimumCoverage": 1, "questionTypes": ["SCENARIO"]},
+        {"atomId": "MESSAGE_RELIABILITY", "atomVersion": "1.0.0", "defaultWeight": 0.12, "minimumCoverage": 1, "questionTypes": ["SCENARIO", "PROJECT"]},
+        {"atomId": "BACKEND_SYSTEM_DESIGN", "atomVersion": "1.0.0", "defaultWeight": 0.15, "minimumCoverage": 1, "questionTypes": ["SYSTEM_DESIGN"]},
+        {"atomId": "PROJECT_TROUBLESHOOTING", "atomVersion": "1.0.0", "defaultWeight": 0.13, "minimumCoverage": 1, "questionTypes": ["PROJECT", "TROUBLESHOOTING"]}
+      ]
+    },
+    {
+      "templateCode": "AI_RAG_AGENT_BASELINE",
+      "jobTrack": "AI_RAG_AGENT",
+      "version": "1.0.0",
+      "status": "PUBLISHED",
+      "capabilities": [
+        {"atomId": "RAG_DOCUMENT_PIPELINE", "atomVersion": "1.0.0", "defaultWeight": 0.15, "minimumCoverage": 1, "questionTypes": ["CONCEPT", "PROJECT"]},
+        {"atomId": "RAG_RETRIEVAL", "atomVersion": "1.0.0", "defaultWeight": 0.19, "minimumCoverage": 1, "questionTypes": ["CONCEPT", "SCENARIO"]},
+        {"atomId": "RAG_EVALUATION", "atomVersion": "1.0.0", "defaultWeight": 0.13, "minimumCoverage": 1, "questionTypes": ["PROJECT", "SCENARIO"]},
+        {"atomId": "AGENT_ORCHESTRATION", "atomVersion": "1.0.0", "defaultWeight": 0.17, "minimumCoverage": 1, "questionTypes": ["PROJECT", "SYSTEM_DESIGN"]},
+        {"atomId": "LLM_APPLICATION_ENGINEERING", "atomVersion": "1.0.0", "defaultWeight": 0.12, "minimumCoverage": 1, "questionTypes": ["SCENARIO"]},
+        {"atomId": "AI_APPLICATION_RELIABILITY", "atomVersion": "1.0.0", "defaultWeight": 0.10, "minimumCoverage": 1, "questionTypes": ["TROUBLESHOOTING", "SYSTEM_DESIGN"]},
+        {"atomId": "MESSAGE_RELIABILITY", "atomVersion": "1.0.0", "defaultWeight": 0.06, "minimumCoverage": 0, "questionTypes": ["SCENARIO"]},
+        {"atomId": "BACKEND_SYSTEM_DESIGN", "atomVersion": "1.0.0", "defaultWeight": 0.04, "minimumCoverage": 0, "questionTypes": ["SYSTEM_DESIGN"]},
+        {"atomId": "PROJECT_TROUBLESHOOTING", "atomVersion": "1.0.0", "defaultWeight": 0.04, "minimumCoverage": 1, "questionTypes": ["PROJECT"]}
+      ]
+    }
+  ],
+  "questionTemplates": [
+    {"questionCode": "JAVA_LANGUAGE_SCENARIO", "version": "1.0.0", "status": "PUBLISHED", "atomId": "JAVA_LANGUAGE_FOUNDATION", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "POSITION_TECH", "promptSkeleton": "给出一个与目标岗位相关的 Java 并发或语言语义场景，要求候选人说明行为、边界与验证方式。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "SPRING_PROJECT_DEEP_DIVE", "version": "1.0.0", "status": "PUBLISHED", "atomId": "SPRING_APPLICATION", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "PROJECT_DEEP_DIVE", "promptSkeleton": "结合候选人项目证据，追问一个 Spring 调用链、事务或 AOP 设计，并要求说明失效路径。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "DATABASE_CONSISTENCY_SCENARIO", "version": "1.0.0", "status": "PUBLISHED", "atomId": "DATABASE_TRANSACTION", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "POSITION_TECH", "promptSkeleton": "构造一个事务、索引或并发写入场景，要求候选人从 SQL、锁和业务一致性三个层面分析。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "CACHE_FAILURE_SCENARIO", "version": "1.0.0", "status": "PUBLISHED", "atomId": "CACHE_DISTRIBUTED", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "ENGINEERING_SCENARIO", "promptSkeleton": "给出缓存一致性或分布式锁故障，要求说明时序、失效条件、降级和监控证据。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "MQ_RELIABILITY_SCENARIO", "version": "1.0.0", "status": "PUBLISHED", "atomId": "MESSAGE_RELIABILITY", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "ENGINEERING_SCENARIO", "promptSkeleton": "给出消息重复、丢失或乱序场景，要求候选人设计生产、消费、重试和补偿链路。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "BACKEND_SYSTEM_DESIGN", "version": "1.0.0", "status": "PUBLISHED", "atomId": "BACKEND_SYSTEM_DESIGN", "atomVersion": "1.0.0", "difficulty": "HARD", "stage": "ENGINEERING_SCENARIO", "promptSkeleton": "根据 JD 的业务约束提出一个小型系统设计题，要求覆盖接口、数据、可靠性、安全与可观测性。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "PROJECT_INCIDENT_DEEP_DIVE", "version": "1.0.0", "status": "PUBLISHED", "atomId": "PROJECT_TROUBLESHOOTING", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "PROJECT_DEEP_DIVE", "promptSkeleton": "从简历或代码证据选择一个真实模块，追问调用链、关键取舍、故障证据和验证方式；证据不足时使用中性问题。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "RAG_PIPELINE_DEEP_DIVE", "version": "1.0.0", "status": "PUBLISHED", "atomId": "RAG_DOCUMENT_PIPELINE", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "PROJECT_DEEP_DIVE", "promptSkeleton": "结合项目证据追问文档从上传到可检索的状态变化、一致性与失败恢复。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "RAG_RETRIEVAL_DESIGN", "version": "1.0.0", "status": "PUBLISHED", "atomId": "RAG_RETRIEVAL", "atomVersion": "1.0.0", "difficulty": "HARD", "stage": "POSITION_TECH", "promptSkeleton": "给出复杂查询，要求候选人设计分域召回、融合、重排、证据不足和冲突处理。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "RAG_EVALUATION_EXPERIMENT", "version": "1.0.0", "status": "PUBLISHED", "atomId": "RAG_EVALUATION", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "POSITION_TECH", "promptSkeleton": "要求候选人设计一个可复现的 RAG 对比实验，说明数据集、指标、坏例和结论边界。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "AGENT_STATE_MACHINE", "version": "1.0.0", "status": "PUBLISHED", "atomId": "AGENT_ORCHESTRATION", "atomVersion": "1.0.0", "difficulty": "HARD", "stage": "POSITION_TECH", "promptSkeleton": "给出一个 Agent 任务，要求候选人用显式状态、工具权限、重试与恢复解释编排设计。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "LLM_SECURITY_SCENARIO", "version": "1.0.0", "status": "PUBLISHED", "atomId": "LLM_APPLICATION_ENGINEERING", "atomVersion": "1.0.0", "difficulty": "MEDIUM", "stage": "ENGINEERING_SCENARIO", "promptSkeleton": "给出结构化输出失败或 Prompt Injection 场景，要求说明信任边界、校验、重试和降级。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"},
+    {"questionCode": "AI_RELIABILITY_INCIDENT", "version": "1.0.0", "status": "PUBLISHED", "atomId": "AI_APPLICATION_RELIABILITY", "atomVersion": "1.0.0", "difficulty": "HARD", "stage": "ENGINEERING_SCENARIO", "promptSkeleton": "给出模型或外部解析服务超时的事故场景，要求说明事务边界、幂等、补偿、审计和用户可见降级。", "rubricCode": "TECHNICAL_ANSWER", "rubricVersion": "1.0.0"}
+  ],
+  "rubrics": [
+    {
+      "rubricCode": "TECHNICAL_ANSWER",
+      "version": "1.0.0",
+      "status": "PUBLISHED",
+      "dimensions": [
+        {"code": "CORRECTNESS", "name": "技术正确性", "weight": 0.35, "criteria": "核心原理、事实和因果关系正确，不用未经证实的结论替代证据。"},
+        {"code": "COMPLETENESS", "name": "完整性", "weight": 0.20, "criteria": "覆盖题目要求的主链路、状态变化和关键依赖。"},
+        {"code": "BOUNDARY", "name": "边界意识", "weight": 0.15, "criteria": "能说明权限、输入、规模、并发和证据不足等适用边界。"},
+        {"code": "TRADEOFF", "name": "取舍", "weight": 0.15, "criteria": "能从约束出发比较收益、代价和可行替代方案。"},
+        {"code": "FAILURE_HANDLING", "name": "故障处理", "weight": 0.15, "criteria": "能解释失败表现、应收集证据、恢复、降级与防复发措施。"}
+      ]
+    }
+  ],
+  "platformKnowledge": [
+    {
+      "evidenceId": "platform-java-virtual-threads-summary-v1",
+      "resourceId": "oracle-java-21-virtual-threads",
+      "resourceVersion": "2026-07-15",
+      "title": "Java 21 Virtual Threads 官方资料摘要",
+      "summary": "虚拟线程适合大量阻塞式 I/O 任务；它提高吞吐能力而非单任务执行速度，并要求避免长期 pinning 与无界资源使用。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html",
+      "contentHash": "1908771e164f0b414a978a5fb670d34ac24a1d9175ce7a2339fc30f2296bd52c",
+      "capabilityAtomIds": ["JAVA_LANGUAGE_FOUNDATION", "BACKEND_SYSTEM_DESIGN"]
+    },
+    {
+      "evidenceId": "platform-spring-tx-summary-v1",
+      "resourceId": "spring-transaction-management",
+      "resourceVersion": "2026-07-15",
+      "title": "Spring 事务管理官方资料摘要",
+      "summary": "声明式事务通常通过 AOP 代理应用；需要关注代理边界、自调用、回滚规则与外部调用不应占用长事务。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://docs.spring.io/spring-framework/reference/data-access/transaction.html",
+      "contentHash": "75329648120026561e710169bdec09aa5d3ae0a0b8d926dd8fcc15ee65febaed",
+      "capabilityAtomIds": ["SPRING_APPLICATION", "DATABASE_TRANSACTION"]
+    },
+    {
+      "evidenceId": "platform-langchain4j-rag-summary-v1",
+      "resourceId": "langchain4j-rag-tutorial",
+      "resourceVersion": "2026-07-15",
+      "title": "LangChain4j RAG 官方资料摘要",
+      "summary": "RAG 将检索到的外部信息注入模型上下文；生产实现仍需显式处理数据隔离、召回质量、引用与失败降级。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://docs.langchain4j.dev/tutorials/rag/",
+      "contentHash": "49aab6f6b1a25fdcd070e4c52f0864a8a157b7b4f50d61899a30737a9a884da7",
+      "capabilityAtomIds": ["RAG_DOCUMENT_PIPELINE", "RAG_RETRIEVAL", "RAG_EVALUATION"]
+    },
+    {
+      "evidenceId": "platform-redis-distributed-lock-summary-v1",
+      "resourceId": "redis-distributed-locks",
+      "resourceVersion": "2026-07-15",
+      "title": "Redis 分布式锁官方资料摘要",
+      "summary": "Redis 分布式锁应使用带随机值的原子加锁和仅删除自身锁的原子释放；锁的有效期、故障转移与多数节点算法会改变安全性和可用性取舍。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/",
+      "contentHash": "7c97819dea1813fd95f778ca4b143f87ea2a87dc30b3d3191c6a1398c34d772f",
+      "capabilityAtomIds": ["CACHE_DISTRIBUTED", "BACKEND_SYSTEM_DESIGN"]
+    },
+    {
+      "evidenceId": "platform-rabbitmq-reliability-summary-v1",
+      "resourceId": "rabbitmq-reliability",
+      "resourceVersion": "2026-07-15",
+      "title": "RabbitMQ 可靠性官方资料摘要",
+      "summary": "RabbitMQ 的可靠投递需要区分 Publisher Confirm、持久化、Consumer Acknowledgement 与幂等消费；重试和死信负责失败收敛，不能把 Broker 确认等同于业务处理成功。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://www.rabbitmq.com/docs/reliability",
+      "contentHash": "6827f1177204a16789bde3f62227f833768e234a815a8cbe400f2c47e44164cb",
+      "capabilityAtomIds": ["MESSAGE_RELIABILITY"]
+    },
+    {
+      "evidenceId": "platform-opentelemetry-troubleshooting-summary-v1",
+      "resourceId": "opentelemetry-observability-primer",
+      "resourceVersion": "2026-07-15",
+      "title": "OpenTelemetry 可观测性官方资料摘要",
+      "summary": "故障定位应从可复现现象和调用链假设出发，关联 Trace、Metric 与 Log 证据缩小范围，再通过对照实验验证根因和修复，避免只凭单条日志下结论。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://opentelemetry.io/docs/concepts/observability-primer/",
+      "contentHash": "dcbd9451194d6c5d0b371e9adbeb136fe5fd9423121c96061efbf0c88d786546",
+      "capabilityAtomIds": ["PROJECT_TROUBLESHOOTING", "BACKEND_SYSTEM_DESIGN", "AI_APPLICATION_RELIABILITY"]
+    },
+    {
+      "evidenceId": "platform-microsoft-agent-orchestration-summary-v1",
+      "resourceId": "microsoft-ai-agent-orchestration-patterns",
+      "resourceVersion": "2026-07-15",
+      "title": "Microsoft AI Agent 编排模式官方资料摘要",
+      "summary": "Agent 编排模式需要根据任务依赖选择顺序、并发、路由或交接，并明确状态所有权、停止条件和失败恢复；复杂编排只有在单 Agent 与确定性流程不足时才值得引入。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns",
+      "contentHash": "af59e3388c676305e00758d9128b6fb11dcb6ff02c62b9e33c32b30550de044a",
+      "capabilityAtomIds": ["AGENT_ORCHESTRATION", "LLM_APPLICATION_ENGINEERING"]
+    },
+    {
+      "evidenceId": "platform-owasp-prompt-injection-summary-v1",
+      "resourceId": "owasp-llm-prompt-injection",
+      "resourceVersion": "2026-07-15",
+      "title": "OWASP Prompt Injection 风险官方资料摘要",
+      "summary": "LLM 应用必须把外部内容视为不可信数据，使用最小权限工具、结构化边界、输入输出校验和人工确认限制提示注入影响；仅依赖提示词无法形成完整安全边界。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://genai.owasp.org/llmrisk/llm01-prompt-injection/",
+      "contentHash": "699f9e9e4ccbc91c72adf143b56beb8c4a4cd09297df2fa4ecaf84358b5c607a",
+      "capabilityAtomIds": ["LLM_APPLICATION_ENGINEERING", "AI_APPLICATION_RELIABILITY"]
+    },
+    {
+      "evidenceId": "platform-aws-retry-backoff-summary-v1",
+      "resourceId": "aws-timeouts-retries-backoff-jitter",
+      "resourceVersion": "2026-07-15",
+      "title": "AWS 超时重试与退避官方资料摘要",
+      "summary": "外部模型和解析服务调用需要有界超时、有限重试、指数退避与抖动、幂等和并发控制；重试会放大下游压力，因此应配合降级、可观测状态与补偿。",
+      "sourceType": "OFFICIAL_DOCUMENTATION",
+      "sourceLocator": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/",
+      "contentHash": "edac43a8d814f367e77c3f48b6354234c4939a63748e6c948041a8199c494860",
+      "capabilityAtomIds": ["AI_APPLICATION_RELIABILITY", "LLM_APPLICATION_ENGINEERING", "MESSAGE_RELIABILITY"]
+    }
+  ]
+}

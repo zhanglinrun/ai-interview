@@ -47,7 +47,7 @@ class EvaluateStreamConsumerTest {
     when(fixture.persistenceService.loadStoredReportInternal("session-1"))
         .thenReturn(Optional.of(report));
 
-    fixture.consumer.processBusiness(new EvaluateStreamConsumer.EvaluatePayload("session-1"));
+    fixture.consumer.processBusiness(new EvaluateStreamConsumer.EvaluatePayload("session-1", 1L));
 
     verify(fixture.candidateMemoryService)
         .extractAndSave(eq(session), eq(report), eq(List.of(question)));
@@ -81,7 +81,7 @@ class EvaluateStreamConsumerTest {
         .extractAndSave(eq(session), eq(report), any());
 
     assertThatThrownBy(() -> fixture.consumer.processBusiness(
-        new EvaluateStreamConsumer.EvaluatePayload("session-1")))
+        new EvaluateStreamConsumer.EvaluatePayload("session-1", 1L)))
         .isSameAs(failure);
 
     InOrder order = inOrder(fixture.persistenceService, fixture.candidateMemoryService);
@@ -119,8 +119,8 @@ class EvaluateStreamConsumerTest {
 
   private InterviewQuestionDTO question() {
     return InterviewQuestionDTO.createAgent(
-        0, "如何保证缓存一致性？", "skill:java-backend:redis", "Redis",
-        "Redis", false, null, "skill:java-backend:redis", "SWITCH_TOPIC",
+        0, "如何保证缓存一致性？", "template:java-backend:redis", "Redis",
+        "Redis", false, null, "template:java-backend:redis", "SWITCH_TOPIC",
         List.of("chunk:101"));
   }
 

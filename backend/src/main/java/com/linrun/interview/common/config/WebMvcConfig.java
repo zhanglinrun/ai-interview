@@ -1,8 +1,10 @@
 package com.linrun.interview.common.config;
 
 import com.linrun.interview.common.security.JwtInterceptor;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -10,10 +12,22 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Web MVC 配置：注册 JWT 拦截器，排除认证接口和公开端点。
  */
 @Configuration
-@RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final JwtInterceptor jwtInterceptor;
+    private final AsyncTaskExecutor questionExecutor;
+
+    public WebMvcConfig(
+            JwtInterceptor jwtInterceptor,
+            @Qualifier("questionExecutor") AsyncTaskExecutor questionExecutor) {
+        this.jwtInterceptor = jwtInterceptor;
+        this.questionExecutor = questionExecutor;
+    }
+
+    @Override
+    public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
+        configurer.setTaskExecutor(questionExecutor);
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {

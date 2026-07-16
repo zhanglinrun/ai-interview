@@ -30,7 +30,16 @@ public class CorrectiveRetrievalGrader {
     public enum Grade { CORRECT, AMBIGUOUS, INCORRECT }
 
     /** 打分结果：grade + 原因 + ambiguous 时的纠正查询。 */
-    public record GradeResult(Grade grade, String reasoning, String correctedQuery) {}
+    public record GradeResult(
+        Grade grade,
+        String reasoning,
+        String correctedQuery,
+        boolean degraded
+    ) {
+        public GradeResult(Grade grade, String reasoning, String correctedQuery) {
+            this(grade, reasoning, correctedQuery, false);
+        }
+    }
 
     private final ChatModel chatModel;
     private final PromptTemplate promptTemplate;
@@ -54,11 +63,12 @@ public class CorrectiveRetrievalGrader {
             Grade grade = parseGrade(node.path("grade").asText(""));
             String reasoning = node.path("reasoning").asText("");
             String correctedQuery = node.path("correctedQuery").asText("").trim();
-            log.info("[CorrectiveRetrievalGrader] CRAG 打分: grade={}, reasoning={}", grade, reasoning);
+            log.info("[CorrectiveRetrievalGrader] CRAG 打分: grade={}", grade);
+            log.debug("[CorrectiveRetrievalGrader] CRAG 打分原因: {}", reasoning);
             return new GradeResult(grade, reasoning, correctedQuery);
         } catch (Exception e) {
             log.warn("[CorrectiveRetrievalGrader] 打分失败，按 correct 兜底不阻断: {}", e.getMessage(), e);
-            return new GradeResult(Grade.CORRECT, "打分失败兜底", "");
+            return new GradeResult(Grade.CORRECT, "打分失败兜底", "", true);
         }
     }
 

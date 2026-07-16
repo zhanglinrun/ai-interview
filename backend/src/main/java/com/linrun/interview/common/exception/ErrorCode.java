@@ -36,6 +36,13 @@ public enum ErrorCode {
     INTERVIEW_QUESTION_GENERATION_FAILED(3006, "面试问题生成失败"),
     INTERVIEW_NOT_COMPLETED(3007, "面试尚未完成"),
     INTERVIEW_ANSWER_SAVE_FAILED(3008, "答案保存失败，请重试"),
+    INTERVIEW_PREPARATION_NOT_READY(3009, "岗位实战尚未准备完成"),
+    INTERVIEW_SESSION_VERSION_CONFLICT(3010, "面试会话版本冲突，请刷新后重试"),
+    INTERVIEW_COMMAND_IN_PROGRESS(3011, "当前面试指令仍在处理中"),
+    INTERVIEW_INVALID_STATE(3012, "当前面试状态不允许该操作"),
+    INTERVIEW_RESUME_LIMIT_REACHED(3013, "该面试已超过续面次数或恢复期限"),
+    INTERVIEW_REPORT_NOT_FOUND(3014, "面试复盘不存在"),
+    INTERVIEW_REPORT_RETRY_NOT_ALLOWED(3015, "当前复盘状态不允许重试"),
     
     // ========== 存储模块错误 4xxx ==========
     STORAGE_UPLOAD_FAILED(4001, "文件上传失败"),
@@ -66,11 +73,6 @@ public enum ErrorCode {
     // ========== 面试日程模块错误 9xxx ==========
     INTERVIEW_SCHEDULE_NOT_FOUND(9001, "面试日程不存在"),
 
-    // ========== 语音面试模块错误 10xxx ==========
-    VOICE_SESSION_NOT_FOUND(10001, "语音面试会话不存在"),
-    VOICE_EVALUATION_FAILED(10004, "语音面试评估失败"),
-    VOICE_EVALUATION_NOT_FOUND(10006, "语音面试评估结果不存在"),
-
     // ========== Provider管理模块错误 11xxx ==========
     PROVIDER_NOT_FOUND(11001, "LLM Provider 不存在"),
     PROVIDER_ALREADY_EXISTS(11002, "LLM Provider 已存在"),
@@ -79,9 +81,23 @@ public enum ErrorCode {
     PROVIDER_TEST_FAILED(11006, "Provider 连通性测试失败"),
     PROVIDER_DEFAULT_CANNOT_DELETE(11007, "默认 Provider 不可删除"),
     MODULE_NOT_FOUND(11008, "模块不存在"),
-    VOICE_CONFIG_READ_FAILED(11009, "读取语音服务配置失败"),
-    VOICE_CONFIG_WRITE_FAILED(11010, "写入语音服务配置失败"),
-    VOICE_CONFIG_TEST_FAILED(11011, "语音服务连通性测试失败");
+
+    // ========== GitHub 代码证据模块错误 12xxx ==========
+    GITHUB_INVALID_REPOSITORY_URL(12001, "GitHub 仓库 URL 非法"),
+    GITHUB_REPOSITORY_NOT_FOUND(12002, "GitHub 仓库不存在"),
+    GITHUB_API_UNAVAILABLE(12003, "GitHub API 暂时不可用"),
+    GITHUB_RATE_LIMITED(12004, "GitHub API 调用频率受限"),
+    GITHUB_SYNC_LIMIT_EXCEEDED(12005, "GitHub 同步范围超过安全上限"),
+    GITHUB_REPOSITORY_NOT_READY(12006, "GitHub 仓库证据尚未就绪"),
+    GITHUB_EVIDENCE_NOT_FOUND(12007, "GitHub 代码证据不存在"),
+
+    // ========== 算法面试模块错误 13xxx ==========
+    CODING_PROBLEM_NOT_FOUND(13001, "算法题不存在"),
+    CODING_PROBLEM_NOT_ENABLED(13002, "算法题或所选语言尚未启用"),
+    CODING_ATTEMPT_NOT_FOUND(13003, "算法作答不存在"),
+    CODING_DRAFT_CONFLICT(13004, "草稿版本冲突，请先恢复最新草稿"),
+    JUDGE_SUBMISSION_NOT_FOUND(13005, "判题记录不存在"),
+    JUDGE_REJUDGE_NOT_ALLOWED(13006, "当前判题状态不允许补判");
 
     private final Integer code;
     private final String message;

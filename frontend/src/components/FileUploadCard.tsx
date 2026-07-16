@@ -1,4 +1,4 @@
-import {ChangeEvent, DragEvent, MouseEvent, useCallback, useState} from 'react';
+import {ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, useCallback, useState} from 'react';
 import {AlertCircle, FileText, Info, Upload, X} from 'lucide-react';
 import LoadingButtonContent from './LoadingButtonContent';
 import {formatFileSize} from '../utils/format';
@@ -93,6 +93,14 @@ export default function FileUploadCard({
     e.target.value = '';
   }, [applyFiles]);
 
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || uploading) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      document.getElementById(inputId)?.click();
+    }
+  }, [inputId, uploading]);
+
   const handleUpload = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -108,13 +116,13 @@ export default function FileUploadCard({
   const hasSelection = multiple ? selectedFiles.length > 0 : !!selectedFile;
 
   return (
-    <div className={isEmbedded ? '' : 'max-w-3xl mx-auto'}>
+    <div className={isEmbedded ? '' : 'max-w-2xl mx-auto'}>
       {!isEmbedded && (
-        <div className="text-center mb-8 pt-4">
-          <h1 className="text-3xl font-display font-semibold text-stone-900 dark:text-stone-50 tracking-tight">
+        <div className="mb-5">
+          <h1 className="text-2xl font-display font-semibold text-stone-900 dark:text-stone-50 tracking-tight">
             {title}
           </h1>
-          <p className="mt-2 text-stone-500 dark:text-stone-400">{subtitle}</p>
+          <p className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">{subtitle}</p>
         </div>
       )}
 
@@ -126,11 +134,16 @@ export default function FileUploadCard({
       )}
 
       <div
-        className={`dropzone relative p-8 md:p-10 cursor-pointer ${dragOver ? 'dropzone-active' : ''} ${isEmbedded ? 'surface-card' : ''}`}
+        className={`dropzone relative p-6 md:p-8 cursor-pointer ${dragOver ? 'dropzone-active' : ''} ${isEmbedded ? 'surface-card' : ''}`}
+        role="button"
+        tabIndex={uploading ? -1 : 0}
+        aria-disabled={uploading}
+        aria-label={multiple ? '选择多个文件上传' : '选择文件上传'}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => document.getElementById(inputId)?.click()}
+        onKeyDown={handleKeyDown}
       >
         <input
           type="file"
@@ -143,11 +156,11 @@ export default function FileUploadCard({
         />
 
         {!hasSelection ? (
-          <div className="text-center py-4">
-            <div className={`mx-auto mb-4 w-14 h-14 rounded-2xl flex items-center justify-center ${
+          <div className="text-center py-3">
+            <div className={`mx-auto mb-3 w-12 h-12 rounded-lg flex items-center justify-center ${
               dragOver ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/40' : 'bg-stone-100 text-stone-400 dark:bg-stone-800'
             }`}>
-              <Upload className="w-7 h-7" />
+              <Upload className="w-6 h-6" />
             </div>
             <p className="text-base font-medium text-stone-800 dark:text-stone-200">
               {multiple ? '拖拽多个文件到此处' : '拖拽文件到此处'}
@@ -174,7 +187,7 @@ export default function FileUploadCard({
                 {selectedFiles.map((file) => (
                   <div
                     key={`${file.name}-${file.size}`}
-                    className="flex items-center gap-3 rounded-xl bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3"
+                    className="flex items-center gap-3 rounded-lg bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3"
                   >
                     <FileText className="w-5 h-5 text-primary-600 shrink-0" />
                     <div className="min-w-0 flex-1">
@@ -183,6 +196,7 @@ export default function FileUploadCard({
                     </div>
                     <button
                       type="button"
+                      aria-label={`移除文件 ${file.name}`}
                       className="p-1.5 rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
                       onClick={() => setSelectedFiles((prev) => prev.filter((f) => f !== file))}
                     >
@@ -193,7 +207,7 @@ export default function FileUploadCard({
                 <p className="text-center text-xs text-stone-500">已选 {selectedFiles.length} 个文件</p>
               </>
             ) : selectedFile && (
-              <div className="flex items-center gap-3 rounded-xl bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3 max-w-md mx-auto">
+              <div className="flex items-center gap-3 rounded-lg bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3 max-w-md mx-auto">
                 <FileText className="w-5 h-5 text-primary-600 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-stone-900 dark:text-stone-100 truncate">{selectedFile.name}</p>
@@ -201,6 +215,7 @@ export default function FileUploadCard({
                 </div>
                 <button
                   type="button"
+                  aria-label={`移除文件 ${selectedFile.name}`}
                   className="p-1.5 rounded-lg text-stone-400 hover:text-red-500"
                   onClick={() => setSelectedFile(null)}
                 >
@@ -227,14 +242,14 @@ export default function FileUploadCard({
       )}
 
       {error && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-600 dark:text-red-400">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           <Info className="w-4 h-4 shrink-0" />
           {notice}
         </div>

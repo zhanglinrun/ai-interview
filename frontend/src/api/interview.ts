@@ -22,6 +22,10 @@ export interface TextSessionMeta {
   evaluateStatus: EvaluateStatus | null;
   evaluateError: string | null;
   overallScore: number | null;
+  jobInterview: boolean;
+  jobDescriptionId: number | null;
+  currentStage: string | null;
+  sessionVersion: number | null;
   createdAt: string;
   completedAt: string | null;
 }

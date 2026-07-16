@@ -12,8 +12,6 @@ export type DocStatus =
   | 'VECTOR_STORED'
   | 'STORED';
 
-export type KnowledgeBaseType = 'DOCUMENT_SEARCH' | 'DATA_QUERY';
-
 export type DocumentAccessScope = 'PRIVATE' | 'PUBLIC';
 
 export interface KnowledgeBaseItem {
@@ -29,9 +27,6 @@ export interface KnowledgeBaseItem {
   questionCount: number;
   docStatus: DocStatus;
   currentVersionId: number | null;
-  dataTableName: string | null;
-  dataRowCount: number | null;
-  knowledgeBaseType: KnowledgeBaseType | null;
   accessibleBy: DocumentAccessScope | null;
   expireDate: string | null;
   /** 当前用户是否为文档所有者（false 表示他人公开文档，只读） */
@@ -144,25 +139,10 @@ export interface RagEvalRetrievedSegment {
   score: number | null;
 }
 
-export interface DataTablePreview {
-  tableName: string;
-  logicalName: string;
-  total: number;
-  page: number;
-  size: number;
-  columns: Array<{ name: string; title: string }>;
-  rows: Array<Record<string, unknown>>;
-}
-
 export interface RagQueryTrace {
   traceId: string;
   question: string;
   rewrittenQuestion: string | null;
-  routeStrategy: string | null;
-  routeReasoning: string | null;
-  graphAttempted: boolean | null;
-  graphHit: boolean | null;
-  graphResult: string | null;
   retrievedJson: string | null;
   rerankedJson: string | null;
   finalSourcesJson: string | null;
@@ -271,7 +251,6 @@ export const knowledgeBaseApi = {
     file: File,
     name?: string,
     category?: string,
-    knowledgeBaseType: KnowledgeBaseType = 'DOCUMENT_SEARCH',
     options?: { accessibleBy?: DocumentAccessScope; expireDate?: string },
   ): Promise<UploadKnowledgeBaseResponse> {
     const formData = new FormData();
@@ -282,7 +261,6 @@ export const knowledgeBaseApi = {
     if (category) {
       formData.append('category', category);
     }
-    formData.append('knowledgeBaseType', knowledgeBaseType);
     if (options?.accessibleBy) {
       formData.append('accessibleBy', options.accessibleBy);
     }
@@ -423,10 +401,6 @@ export const knowledgeBaseApi = {
    */
   async revectorize(id: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/revectorize`);
-  },
-
-  async previewDataTable(id: number, page = 1, size = 50): Promise<DataTablePreview> {
-    return request.get<DataTablePreview>(`/api/knowledgebase/${id}/data/preview?page=${page}&size=${size}`);
   },
 
   async evaluateRetrieval(req: RagEvalRequest): Promise<RagEvalResponse> {

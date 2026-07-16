@@ -7,7 +7,6 @@ public enum InterviewIntent {
 
   TECH_KB("knowledgebase-query-system.st"),
   CODE_REVIEW("rag-intent-code-review.st"),
-  DATA_QUERY("rag-intent-data-query.st"),
   RESUME_STATS("rag-intent-resume-stats.st"),
   INTERVIEW_PREP("rag-intent-interview-prep.st"),
   SCHEDULE("rag-intent-schedule.st"),

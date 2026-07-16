@@ -41,6 +41,9 @@ export function getInterviewStatusText(
   if (isEvaluationCompleted(evaluateStatus, interviewStatus)) return '已完成';
   if (isActiveInterviewStatus(interviewStatus)) return '进行中';
   if (interviewStatus === 'PAUSED') return '已暂停';
-  if (isCompletedInterviewStatus(interviewStatus)) return '已提交';
+  if (interviewStatus === 'COMPLETING') return '报告生成中';
+  if (interviewStatus === 'ABORTED') return '已中止';
+  if (interviewStatus === 'FAILED') return '异常结束';
+  if (isCompletedInterviewStatus(interviewStatus)) return '已完成';
   return '已创建';
 }

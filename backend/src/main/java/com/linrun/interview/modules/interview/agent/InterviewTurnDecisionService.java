@@ -9,9 +9,9 @@ import com.linrun.interview.modules.interview.agent.model.TurnDecision;
 import com.linrun.interview.modules.interview.agent.model.TurnDecision.AnswerSignals;
 import com.linrun.interview.modules.interview.agent.model.TurnDecision.FollowUpAction;
 import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
-import com.linrun.interview.modules.interview.skill.InterviewSkillService.SkillDTO;
+import com.linrun.interview.modules.interview.topic.InterviewTopic;
+import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
+import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -45,7 +45,7 @@ public class InterviewTurnDecisionService {
       "不知道", "不清楚", "不会", "没了解", "不了解", "不确定", "记不清", "没用过",
       "don't know", "not sure");
 
-  private final InterviewSkillService skillService;
+  private final InterviewTopicCatalog topicCatalog;
   private final InterviewKnowledgeRetrievalService knowledgeRetrievalService;
 
   public TurnDecision decide(DecisionRequest request) {
@@ -56,7 +56,7 @@ public class InterviewTurnDecisionService {
     FollowUpAction action = chooseAction(request.questionIndex(), plannedTopic, previousTopic, signals);
     PlanTopic targetTopic = action == FollowUpAction.SWITCH_TOPIC || previousTopic == null
         ? plannedTopic : previousTopic;
-    CapabilityAtom atom = resolveCapability(request.skillId(), targetTopic);
+    CapabilityAtom atom = resolveCapability(request.topicId(), targetTopic);
     String evidenceQuery = buildEvidenceQuery(atom, action);
     Bundle evidence = knowledgeRetrievalService.retrieveEvidence(
         request.knowledgeBaseIds(), evidenceQuery);
@@ -95,27 +95,28 @@ public class InterviewTurnDecisionService {
         ? FollowUpAction.DEEPEN : FollowUpAction.SWITCH_TOPIC;
   }
 
-  private CapabilityAtom resolveCapability(String skillId, PlanTopic topic) {
+  private CapabilityAtom resolveCapability(String topicId, PlanTopic topic) {
     String topicName = topic != null && topic.name() != null && !topic.name().isBlank()
-        ? topic.name().strip() : fallbackLabel(skillId);
+        ? topic.name().strip() : fallbackLabel(topicId);
     String focus = topic != null && topic.focus() != null ? topic.focus().strip() : "综合能力考察";
-    Optional<SkillCategoryDTO> category = findSkillCategory(skillId, topicName, focus);
+    Optional<Category> category = findTopicCategory(topicId, topicName, focus);
     if (category.isPresent()) {
-      SkillCategoryDTO matched = category.get();
+      Category matched = category.get();
       return new CapabilityAtom(
-          "skill:" + safeIdPart(skillId) + ":" + safeIdPart(matched.key()),
+          "template:" + safeIdPart(topicId) + ":" + safeIdPart(matched.key()),
           matched.label(),
           focus,
-          Source.SKILL,
-          matched.priority());
+          Source.TEMPLATE,
+          matched.priority(),
+          matched.definitionVersion());
     }
 
-    Source source = InterviewSkillService.CUSTOM_SKILL_ID.equals(skillId) ? Source.JD : Source.PLAN;
+    Source source = InterviewTopicCatalog.CUSTOM_TOPIC_ID.equals(topicId) ? Source.JD : Source.PLAN;
     // JD/Planner 主题也必须跨会话稳定，否则画像永远无法积累到 VERIFIED。
-    // 同名 JD 能力有意跨岗位复用；普通大纲能力再用 skillId 隔离不同面试方向。
+    // 同名 JD 能力有意跨岗位复用；普通大纲能力再用主题 ID 隔离不同面试方向。
     String scope = source == Source.JD
         ? "jd"
-        : "plan:" + safeIdPart(skillId);
+        : "plan:" + safeIdPart(topicId);
     return new CapabilityAtom(
         scope + ":" + safeIdPart(topicName),
         topicName,
@@ -124,30 +125,30 @@ public class InterviewTurnDecisionService {
         null);
   }
 
-  private Optional<SkillCategoryDTO> findSkillCategory(String skillId, String topicName,
-                                                       String focus) {
-    if (skillId == null || skillId.isBlank()
-        || InterviewSkillService.CUSTOM_SKILL_ID.equals(skillId)) {
+  private Optional<Category> findTopicCategory(String topicId, String topicName,
+                                               String focus) {
+    if (topicId == null || topicId.isBlank()
+        || InterviewTopicCatalog.CUSTOM_TOPIC_ID.equals(topicId)) {
       return Optional.empty();
     }
     try {
-      SkillDTO skill = skillService.getSkill(skillId);
-      if (skill == null || skill.categories() == null) {
+      InterviewTopic topic = topicCatalog.getTopic(topicId);
+      if (topic == null || topic.categories() == null) {
         return Optional.empty();
       }
       String normalizedTopic = normalizeForMatch(topicName);
       String normalizedFocus = normalizeForMatch(focus);
-      return skill.categories().stream()
+      return topic.categories().stream()
           .max(Comparator.comparingInt(category -> matchScore(
               category, normalizedTopic, normalizedFocus)))
           .filter(category -> matchScore(category, normalizedTopic, normalizedFocus) > 0);
     } catch (Exception e) {
-      log.debug("能力原子未匹配到预设 Skill，退回会话级大纲原子: skillId={}", skillId);
+      log.debug("能力原子未匹配到能力模板，退回会话级大纲原子: topicId={}", topicId);
       return Optional.empty();
     }
   }
 
-  private int matchScore(SkillCategoryDTO category, String topic, String focus) {
+  private int matchScore(Category category, String topic, String focus) {
     String label = normalizeForMatch(category.label());
     String key = normalizeForMatch(category.key());
     if ((!label.isBlank() && topic.equals(label)) || (!key.isBlank() && topic.equals(key))) {
@@ -222,13 +223,13 @@ public class InterviewTurnDecisionService {
     return "topic-" + Integer.toUnsignedString(value.hashCode(), 36);
   }
 
-  private String fallbackLabel(String skillId) {
-    return skillId == null || skillId.isBlank() ? "综合能力" : skillId;
+  private String fallbackLabel(String topicId) {
+    return topicId == null || topicId.isBlank() ? "综合能力" : topicId;
   }
 
   public record DecisionRequest(
       String sessionId,
-      String skillId,
+      String topicId,
       int questionIndex,
       InterviewPlan plan,
       String lastAnswer,

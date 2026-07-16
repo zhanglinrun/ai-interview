@@ -6,6 +6,7 @@ import com.linrun.interview.common.constant.AsyncTaskStreamConstants;
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.common.mybatis.MapperUtils;
 import com.linrun.interview.modules.resume.mapper.ResumeEntityMapper;
+import com.linrun.interview.modules.resume.model.ResumeEntity;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -22,15 +23,20 @@ public class AnalyzeStreamProducer extends AbstractStreamProducer<AnalyzeStreamP
 
   private final ResumeEntityMapper resumeEntityMapper;
 
-  record AnalyzeTaskPayload(Long resumeId, String content) {}
+  record AnalyzeTaskPayload(Long resumeId, Long userId) {}
 
   public AnalyzeStreamProducer(TaskQueueChannel taskQueueChannel, ResumeEntityMapper resumeEntityMapper) {
     super(taskQueueChannel);
     this.resumeEntityMapper = resumeEntityMapper;
   }
 
-  public void sendAnalyzeTask(Long resumeId, String content) {
-    sendTask(new AnalyzeTaskPayload(resumeId, content));
+  public void sendAnalyzeTask(Long resumeId) {
+    ResumeEntity resume = resumeEntityMapper.selectById(resumeId);
+    if (resume == null || resume.getUserId() == null) {
+      throw new com.linrun.interview.common.exception.BusinessException(
+          com.linrun.interview.common.exception.ErrorCode.RESUME_NOT_FOUND, "简历不存在");
+    }
+    sendTask(new AnalyzeTaskPayload(resumeId, resume.getUserId()));
   }
 
   @Override
@@ -47,7 +53,7 @@ public class AnalyzeStreamProducer extends AbstractStreamProducer<AnalyzeStreamP
   protected Map<String, String> buildMessage(AnalyzeTaskPayload payload) {
     return Map.of(
         AsyncTaskStreamConstants.FIELD_RESUME_ID, payload.resumeId().toString(),
-        AsyncTaskStreamConstants.FIELD_CONTENT, payload.content(),
+        AsyncTaskStreamConstants.FIELD_USER_ID, payload.userId().toString(),
         AsyncTaskStreamConstants.FIELD_RETRY_COUNT, "0"
     );
   }

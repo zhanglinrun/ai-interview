@@ -21,9 +21,6 @@ public record KnowledgeBaseListItemDTO(
     Integer questionCount,
     DocumentStatus docStatus,
     Long currentVersionId,
-    String dataTableName,
-    Integer dataRowCount,
-    String knowledgeBaseType,
     String accessibleBy,
     java.time.LocalDate expireDate,
     /** 当前用户是否为文档所有者（false=他人公开文档，只读） */

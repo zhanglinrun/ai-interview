@@ -12,7 +12,7 @@ public record IntentRecognitionResult(
     String reason,
     @JsonPropertyDescription("用户问题是否与 AI 面试/技术/简历/求职场景相关")
     boolean related,
-    @JsonPropertyDescription("意图：TECH_KB/CODE_REVIEW/DATA_QUERY/RESUME_STATS/INTERVIEW_PREP/SCHEDULE/CAREER/OFF_TOPIC")
+    @JsonPropertyDescription("意图：TECH_KB/CODE_REVIEW/RESUME_STATS/INTERVIEW_PREP/SCHEDULE/CAREER/OFF_TOPIC")
     String intent,
     @JsonPropertyDescription("从用户输入中提取的关键实体")
     Entities entities,

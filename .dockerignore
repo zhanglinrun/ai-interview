@@ -63,7 +63,7 @@ Thumbs.db
 **/test-results/
 
 # Documentation is not needed in the backend image. Do not exclude backend
-# resource markdown files such as runtime skill definitions.
+# resource markdown files such as runtime reference resources.
 /docs/
 /study/
 /*.md

@@ -12,11 +12,8 @@ import java.util.UUID;
 /**
  * traceId 贯通过滤器（P5）。
  *
- * <p>读取前端注入的 {@value #HEADER}（无则生成），写入 {@link LangfuseContext} 与 MDC，
- * 使「前端一次操作 → 后端日志 → Langfuse trace」用同一个 id 串起来；并回写响应头，
- * 让前端拿到 traceId 后可在「查看完整链路」跳到 Langfuse trace 详情页。
- *
- * <p>与 Langfuse 开关无关：即使观测关闭，traceId 仍写入 MDC 供日志排查。
+ * <p>读取前端注入的 {@value #HEADER}（无则生成），写入 {@link TraceContext} 与 MDC，
+ * 并回写响应头，使一次前端操作与后端日志可通过同一个 traceId 关联。
  */
 public class TraceIdFilter extends OncePerRequestFilter {
 
@@ -32,12 +29,12 @@ public class TraceIdFilter extends OncePerRequestFilter {
     } else if (traceId.length() > MAX_LEN) {
       traceId = traceId.substring(0, MAX_LEN);
     }
-    LangfuseContext.setTraceId(traceId);
+    TraceContext.setTraceId(traceId);
     response.setHeader(HEADER, traceId);
     try {
       filterChain.doFilter(request, response);
     } finally {
-      LangfuseContext.clear();
+      TraceContext.clear();
     }
   }
 }

@@ -29,27 +29,9 @@ services:
       - "${MYSQL_HOST_PORT:-33306}:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      # 首次初始化的临时 server 只开放 Unix Socket；必须等正式 TCP 3306 ready。
+      test: ["CMD", "mysqladmin", "ping", "--protocol=TCP", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
       interval: 5s
-      timeout: 5s
-      retries: 10
-
-  neo4j:
-    image: neo4j:5.26-community
-    container_name: interview-neo4j
-    environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j666}
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*
-    ports:
-      - "${NEO4J_HTTP_HOST_PORT:-27474}:7474"
-      - "${NEO4J_BOLT_HOST_PORT:-27687}:7687"
-    volumes:
-      - neo4j_data:/data
-      - ../backend/src/main/resources/neo4j:/import:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
-      interval: 10s
       timeout: 5s
       retries: 10
 
@@ -117,42 +99,7 @@ services:
       /usr/bin/mc mb --ignore-existing myminio/$$MINIO_BUCKET
       "
 
-  rocketmq-namesrv:
-    image: apache/rocketmq:5.3.1
-    container_name: interview-rocketmq-namesrv
-    ports:
-      - "${ROCKETMQ_NAMESRV_HOST_PORT:-9876}:9876"
-    environment:
-      JAVA_OPT_EXT: "-server -Xms256m -Xmx256m -Xmn128m"
-    command: sh mqnamesrv
-
-  rocketmq-broker:
-    image: apache/rocketmq:5.3.1
-    container_name: interview-rocketmq-broker
-    depends_on:
-      - rocketmq-namesrv
-    ports:
-      - "10911:10911"
-      - "10909:10909"
-    environment:
-      JAVA_OPT_EXT: "-server -Xms512m -Xmx512m -Xmn256m"
-    volumes:
-      - ./rocketmq/broker-dev.conf:/etc/rocketmq/broker.conf:ro
-      - rocketmq_broker_data:/home/rocketmq/store
-    command: sh mqbroker -n rocketmq-namesrv:9876 -c /etc/rocketmq/broker.conf
-
-  rocketmq-dashboard:
-    image: apacherocketmq/rocketmq-dashboard:latest
-    container_name: interview-rocketmq-dashboard
-    depends_on:
-      - rocketmq-namesrv
-    ports:
-      - "${ROCKETMQ_DASHBOARD_HOST_PORT:-29888}:8080"
-    environment:
-      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876"
-
-  # RabbitMQ（APP_ASYNC_ENGINE=rabbitmq 时使用；Windows/WSL2 下比宿主机连容器 RocketMQ 更稳）。
-  # 管理台 http://localhost:15672（guest/guest）。默认引擎为 rocketmq 时此容器闲置不影响。
+  # RabbitMQ 是唯一异步任务引擎；管理台 http://localhost:15672（guest/guest）。
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: interview-rabbitmq
@@ -171,14 +118,11 @@ services:
       retries: 10
 
 # 宿主机端口（与 .env.example 一致）：
-#   MySQL 33306 | Redis 26379 | ES 29200 | MinIO 29000/29001 | Neo4j 27474/27687
-#   RocketMQ namesrv 9876 | broker 10911/10909 | dashboard 29888 | RabbitMQ 5672/15672
+#   MySQL 33306 | Redis 26379 | ES 29200 | MinIO 29000/29001 | RabbitMQ 5672/15672
 
 volumes:
   mysql_data:
-  neo4j_data:
   elasticsearch_data:
   redis_data:
   minio_data:
-  rocketmq_broker_data:
   rabbitmq_data:

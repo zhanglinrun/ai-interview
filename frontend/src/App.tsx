@@ -3,12 +3,12 @@ import Layout from './components/Layout';
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { historyApi, type InterviewDetail } from './api/history';
 import type { UploadKnowledgeBaseResponse } from './api/knowledgebase';
-import type { Difficulty } from './components/UnifiedInterviewModal';
-import type { CategoryDTO } from './api/skill';
+import type { CategoryDTO, Difficulty } from './types/interview';
 import { ErrorState, LoadingState } from './components/PageState';
 import { ROUTES } from './constants/routes';
 import { ArrowLeft } from 'lucide-react';
-import { formatShortId } from './utils/format';
+import RequireAuth from './components/RequireAuth';
+import {getInterviewViewPath} from './utils/interviewNavigation';
 
 // Lazy load components
 const UploadPage = lazy(() => import('./pages/UploadPage'));
@@ -19,15 +19,31 @@ const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
 const KnowledgeBaseQueryPage = lazy(() => import('./pages/KnowledgeBaseQueryPage'));
 const KnowledgeBaseUploadPage = lazy(() => import('./pages/KnowledgeBaseUploadPage'));
 const KnowledgeBaseManagePage = lazy(() => import('./pages/KnowledgeBaseManagePage'));
-const VoiceInterviewPage = lazy(() => import('./pages/VoiceInterviewPage'));
-const VoiceInterviewEvaluationPage = lazy(() => import('./pages/VoiceInterviewEvaluationPage'));
 const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage'));
-const InterviewHubPage = lazy(() => import('./pages/InterviewHubPage'));
 const EvalRunPage = lazy(() => import('./pages/EvalRunPage'));
-const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const JobPracticePage = lazy(() => import('./pages/JobPracticePage'));
+const JobInterviewRuntimePage = lazy(() => import('./pages/JobInterviewRuntimePage'));
+const JobInterviewReportPage = lazy(() => import('./pages/JobInterviewReportPage'));
+const TrainingPage = lazy(() => import('./pages/TrainingPage'));
+const AlgorithmPracticePage = lazy(() => import('./pages/AlgorithmPracticePage'));
+const RecruitmentRadarPage = lazy(() => import('./pages/RecruitmentRadarPage'));
+const CareerResourcesPage = lazy(() => import('./pages/CareerResourcesPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+
+function NotFoundPage() {
+  const navigate = useNavigate();
+  return (
+    <ErrorState
+      title="页面不存在"
+      description="这个地址可能已失效，或对应功能已经调整。"
+      action={<button onClick={() => navigate('/dashboard')} className="btn-primary px-4 py-2 text-sm">返回工作台</button>}
+    />
+  );
+}
 
 // Loading component
 const Loading = () => (
@@ -150,7 +166,7 @@ function InterviewWrapper() {
   if (loading) {
     return (
       <LoadingState
-        label="加载中..."
+        label="正在加载简历…"
         className="flex flex-col items-center justify-center min-h-screen gap-3"
         spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
       />
@@ -174,63 +190,72 @@ function App() {
     <BrowserRouter>
       <Suspense fallback={<Loading />}>
         <Routes>
-          <Route path="/" element={<Layout />}>
-            {/* 默认重定向到简历管理页面 */}
-            <Route index element={<Navigate to="/history" replace />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
 
-            {/* 上传页面 */}
-            <Route path="upload" element={<UploadPageWrapper />} />
+              {/* 面向求职者的七个一级入口 */}
+              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="job-practice" element={<JobPracticePage />} />
+              <Route path="job-practice/session/:sessionId" element={<JobInterviewRuntimePage />} />
+              <Route path="job-practice/report/:sessionId" element={<JobInterviewReportPage />} />
+              <Route path="training" element={<TrainingPage />} />
+              <Route path="training/algorithm/:problemVersionId" element={<AlgorithmPracticePage />} />
+              <Route path="recruitment" element={<RecruitmentRadarPage />} />
+              <Route path="resources" element={<CareerResourcesPage />} />
+              <Route path="profile" element={<ProfilePage />} />
 
-            {/* 历史记录列表（简历库） */}
-            <Route path="history" element={<HistoryPageWrapper />} />
+              {/* 上传页面 */}
+              <Route path="upload" element={<UploadPageWrapper />} />
 
-            {/* 简历详情 */}
-            <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
+              {/* 历史记录列表（简历库） */}
+              <Route path="history" element={<HistoryPageWrapper />} />
 
-            {/* 面试中心 */}
-            <Route path="interview-hub" element={<InterviewHubPage />} />
+              {/* 简历详情 */}
+              <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
 
-            {/* 面试记录列表 */}
-            <Route path="interviews" element={<InterviewHistoryWrapper />} />
+              {/* 面试中心 */}
+              <Route path="interview-hub" element={<Navigate to="/job-practice" replace />} />
 
-            {/* 面试详情报告 */}
-            <Route path="interviews/:sessionId" element={<InterviewDetailPageWrapper />} />
+              {/* 面试记录列表 */}
+              <Route path="interviews" element={<InterviewHistoryWrapper />} />
 
-            {/* 模拟面试（通用入口） */}
-            <Route path="interview" element={<InterviewWrapper />} />
+              {/* 面试详情报告 */}
+              <Route path="interviews/:sessionId" element={<InterviewDetailPageWrapper />} />
 
-            {/* 模拟面试 */}
-            <Route path="interview/:resumeId" element={<InterviewWrapper />} />
+              {/* 模拟面试（通用入口） */}
+              <Route path="interview" element={<InterviewWrapper />} />
 
-            {/* 语音面试 */}
-            <Route path="voice-interview" element={<VoiceInterviewPageWrapper />} />
+              {/* 模拟面试 */}
+              <Route path="interview/:resumeId" element={<InterviewWrapper />} />
 
-            {/* 语音面试评估报告 */}
-            <Route path="voice-interview/:sessionId/evaluation" element={<VoiceInterviewEvaluationPage />} />
+              {/* 已下线入口：旧链接安全回到文字面试中心 */}
+              <Route path="voice-interview/*" element={<Navigate to="/interview-hub" replace />} />
 
-            {/* 知识库管理 */}
-            <Route path="knowledgebase" element={<KnowledgeBaseManagePageWrapper />} />
+              {/* 知识库管理 */}
+              <Route path="knowledgebase" element={<KnowledgeBaseManagePageWrapper />} />
 
-            {/* 知识库上传 */}
-            <Route path="knowledgebase/upload" element={<KnowledgeBaseUploadPageWrapper />} />
+              {/* 知识库上传 */}
+              <Route path="knowledgebase/upload" element={<KnowledgeBaseUploadPageWrapper />} />
 
-            {/* 面试日程管理 */}
-            <Route path="interview-schedule" element={<InterviewSchedulePage />} />
+              {/* 面试日程管理 */}
+              <Route path="interview-schedule" element={<InterviewSchedulePage />} />
 
-            {/* 设置 */}
-            <Route path="settings" element={<SettingsPage />} />
+              {/* 设置 */}
+              <Route path="settings" element={<SettingsPage />} />
 
-            {/* 问答助手（知识库聊天） */}
-            <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
+              {/* 问答助手（知识库聊天） */}
+              <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
 
-            {/* 统一评测闭环 */}
-            <Route path="eval" element={<EvalRunPage />} />
+              {/* RAG 效果评测 */}
+              <Route path="eval" element={<EvalRunPage />} />
 
-            {/* 知识图谱可视化 */}
-            <Route path="knowledge-graph" element={<KnowledgeGraphPage />} />
-            <Route path="login" element={<LoginPage />} />
+              {/* 已下线入口：旧链接安全回到 RAG 问答 */}
+              <Route path="knowledge-graph" element={<Navigate to="/knowledgebase/chat" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
           </Route>
-
         </Routes>
       </Suspense>
     </BrowserRouter>
@@ -246,15 +271,24 @@ function InterviewHistoryWrapper() {
     navigate('/history');
   };
 
-  const handleViewInterview = async (sessionId: string, _resumeId?: number) => {
-    navigate(`/interviews/${sessionId}`);
+  const handleViewInterview = async (
+    sessionId: string,
+    _resumeId?: number,
+    jobInterview?: boolean,
+    status?: string,
+  ) => {
+    navigate(getInterviewViewPath(sessionId, jobInterview, status));
   };
 
   const handleRestartInterview = (resumeId: number) => {
     openInterviewModalWithResume(resumeId);
   };
 
-  const handleContinueInterview = (sessionId: string) => {
+  const handleContinueInterview = (sessionId: string, jobInterview?: boolean) => {
+    if (jobInterview) {
+      navigate(`/job-practice/session/${sessionId}`);
+      return;
+    }
     navigate('/interview', { state: { sessionIdToResume: sessionId } });
   };
 
@@ -298,7 +332,7 @@ function InterviewDetailPageWrapper() {
         action={
           <button
             onClick={() => navigate('/interviews')}
-            className="px-5 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
+            className="btn-primary px-5 py-2.5 text-sm"
           >
             返回面试记录
           </button>
@@ -308,17 +342,19 @@ function InterviewDetailPageWrapper() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="mx-auto max-w-4xl space-y-5">
+      <div className="flex items-center gap-3">
         <button
           onClick={() => navigate('/interviews')}
-          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          aria-label="返回面试记录"
+          className="rounded-lg p-2 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:hover:bg-stone-800 dark:hover:text-white"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-          面试详情 #{formatShortId(sessionId)}
-        </h1>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-stone-950 dark:text-white">面试复盘</h1>
+          <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">回看每道题的回答和改进建议。</p>
+        </div>
       </div>
       <InterviewDetailPanel interview={interview} />
     </div>
@@ -373,11 +409,6 @@ function KnowledgeBaseUploadPageWrapper() {
   };
 
   return <KnowledgeBaseUploadPage onUploadComplete={handleUploadComplete} onBack={handleBack} />;
-}
-
-// 语音面试页面包装器
-function VoiceInterviewPageWrapper() {
-  return <VoiceInterviewPage />;
 }
 
 export default App;

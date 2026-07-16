@@ -1,330 +1,248 @@
-import {useMemo, useState} from 'react';
-import {AnimatePresence, motion} from 'framer-motion';
-import {BarChart3, ChevronDown, CirclePlus, MessageSquare, CheckCircle, AlertCircle} from 'lucide-react';
-import {getScoreColor} from '../utils/score';
+import {useState} from 'react';
+import {
+  AlertCircle,
+  BarChart3,
+  CheckCircle,
+  ChevronDown,
+  CirclePlus,
+  MessageSquare,
+} from 'lucide-react';
 import type {AnswerItem, InterviewDetail} from '../api/history';
+import {getScoreTextColor} from '../utils/score';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
 }
 
-/**
- * 面试详情面板组件
- */
-export default function InterviewDetailPanel({ interview }: InterviewDetailPanelProps) {
-  // 默认展开所有题目
-  const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(() => {
-    const allIndices = new Set<number>();
-    if (interview.answers) {
-      interview.answers.forEach((_, idx) => allIndices.add(idx));
-    }
-    return allIndices;
-  });
+export default function InterviewDetailPanel({interview}: InterviewDetailPanelProps) {
+  const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(
+    () => new Set((interview.answers || []).map((_, index) => index)),
+  );
 
   const toggleQuestion = (index: number) => {
-    setExpandedQuestions(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(index)) {
-        newSet.delete(index);
+    setExpandedQuestions(previous => {
+      const next = new Set(previous);
+      if (next.has(index)) {
+        next.delete(index);
       } else {
-        newSet.add(index);
+        next.add(index);
       }
-      return newSet;
+      return next;
     });
   };
 
-  // 计算圆环进度
-  const { circumference, strokeDashoffset } = useMemo(() => {
-    const percent = interview.overallScore !== null ? (interview.overallScore / 100) * 100 : 0;
-    const circ = 2 * Math.PI * 54; // r=54
-    const offset = circ - (percent / 100) * circ;
-    return { circumference: circ, strokeDashoffset: offset };
-  }, [interview.overallScore]);
-
   return (
-      <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-    >
-      {/* 评分卡片 */}
-        <ScoreCard
-        score={interview.overallScore}
-        feedback={interview.overallFeedback}
-        circumference={circumference}
-        strokeDashoffset={strokeDashoffset}
-      />
+    <div className="space-y-5">
+      <ScoreCard score={interview.overallScore} feedback={interview.overallFeedback} />
 
-      {/* 表现优势 */}
       {interview.strengths && interview.strengths.length > 0 && (
         <StrengthsSection strengths={interview.strengths} />
       )}
 
-      {/* 改进建议 */}
       {interview.improvements && interview.improvements.length > 0 && (
         <ImprovementsSection improvements={interview.improvements} />
       )}
 
-      {/* 问答记录详情 */}
-        <QuestionsSection
+      <QuestionsSection
         answers={interview.answers || []}
         expandedQuestions={expandedQuestions}
         toggleQuestion={toggleQuestion}
       />
-    </motion.div>
-  );
-}
-
-// 评分卡片组件
-function ScoreCard({
-  score,
-  feedback,
-  circumference,
-  strokeDashoffset
-}: {
-  score: number | null;
-  feedback: string | null;
-  circumference: number;
-  strokeDashoffset: number;
-}) {
-  return (
-    <div className="bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-8 text-white">
-      <div className="flex flex-col items-center text-center">
-        {/* 圆环进度条 */}
-        <div className="relative w-32 h-32 mb-6">
-          <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 120 120">
-            <circle
-              cx="60"
-              cy="60"
-              r="54"
-              stroke="rgba(255,255,255,0.2)"
-              strokeWidth="8"
-              fill="none"
-            />
-            <motion.circle
-              cx="60"
-              cy="60"
-              r="54"
-              stroke="white"
-              strokeWidth="8"
-              fill="none"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              initial={{ strokeDashoffset: circumference }}
-              animate={{ strokeDashoffset }}
-              transition={{ duration: 1.5, ease: "easeOut" }}
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <motion.span
-              className="text-4xl font-bold"
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.5 }}
-            >
-              {score ?? '-'}
-            </motion.span>
-            <span className="text-sm text-white/70">总分</span>
-          </div>
-        </div>
-
-        <h3 className="text-2xl font-bold mb-3">面试评估</h3>
-        <p className="text-white/90 max-w-2xl leading-relaxed">
-          {feedback || (score === null
-            ? '本次未作答或评估尚未完成，暂无评估反馈。'
-            : '暂无评估反馈。')}
-        </p>
-      </div>
     </div>
   );
 }
 
-// 优势部分组件
-function StrengthsSection({ strengths }: { strengths: string[] }) {
+function ScoreCard({score, feedback}: {score: number | null; feedback: string | null}) {
+  const circumference = 2 * Math.PI * 42;
+  const safeScore = score === null ? 0 : Math.max(0, Math.min(100, score));
+  const strokeDashoffset = circumference - (safeScore / 100) * circumference;
+
   return (
-      <motion.div
-          className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.1 }}
-    >
-        <h4 className="font-semibold text-emerald-600 dark:text-emerald-400 mb-4 flex items-center gap-2">
-        <CheckCircle className="w-5 h-5" />
-        表现优势
-      </h4>
-      <ul className="space-y-3">
-        {strengths.map((s: string, i: number) => (
-            <li key={i} className="text-slate-700 dark:text-slate-300 flex items-start gap-3">
-            <span className="w-2 h-2 bg-primary-500 rounded-full mt-2 flex-shrink-0"></span>
-            <span>{s}</span>
-          </li>
-        ))}
-      </ul>
-    </motion.div>
+    <section className="surface-card flex flex-col gap-5 p-5 sm:flex-row sm:items-center">
+      <div className="relative mx-auto h-24 w-24 flex-shrink-0 sm:mx-0">
+        <svg className="h-24 w-24 -rotate-90" viewBox="0 0 96 96" aria-hidden="true">
+          <circle
+            cx="48"
+            cy="48"
+            r="42"
+            fill="none"
+            strokeWidth="7"
+            className="stroke-stone-200 dark:stroke-stone-700"
+          />
+          <circle
+            cx="48"
+            cy="48"
+            r="42"
+            fill="none"
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            className="stroke-primary-600"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-2xl font-semibold text-stone-900 dark:text-white">{score ?? '-'}</span>
+          <span className="text-xs text-stone-500 dark:text-stone-400">总分</span>
+        </div>
+      </div>
+
+      <div className="min-w-0 text-center sm:text-left">
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-white">面试反馈</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600 dark:text-stone-300">
+          {feedback || (score === null ? '本次尚未完成评估，暂时没有反馈。' : '本次暂无文字反馈。')}
+        </p>
+      </div>
+    </section>
   );
 }
 
-// 改进建议部分组件
-function ImprovementsSection({ improvements }: { improvements: string[] }) {
+function StrengthsSection({strengths}: {strengths: string[]}) {
   return (
-      <motion.div
-          className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.2 }}
-    >
-        <h4 className="font-semibold text-amber-600 dark:text-amber-400 mb-4 flex items-center gap-2">
-        <AlertCircle className="w-5 h-5" />
-        改进建议
+    <section className="surface-card p-5">
+      <h4 className="mb-3 flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400">
+        <CheckCircle className="h-5 w-5" />
+        做得较好
       </h4>
-      <ul className="space-y-3">
-        {improvements.map((s: string, i: number) => (
-            <li key={i} className="text-slate-700 dark:text-slate-300 flex items-start gap-3">
-            <span className="w-2 h-2 bg-amber-500 rounded-full mt-2 flex-shrink-0"></span>
-            <span>{s}</span>
+      <ul className="space-y-2">
+        {strengths.map((strength, index) => (
+          <li key={index} className="flex items-start gap-3 text-sm leading-6 text-stone-700 dark:text-stone-300">
+            <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-500" />
+            <span>{strength}</span>
           </li>
         ))}
       </ul>
-    </motion.div>
+    </section>
   );
 }
 
-// 问答部分组件
+function ImprovementsSection({improvements}: {improvements: string[]}) {
+  return (
+    <section className="surface-card p-5">
+      <h4 className="mb-3 flex items-center gap-2 font-semibold text-amber-700 dark:text-amber-400">
+        <AlertCircle className="h-5 w-5" />
+        回答建议
+      </h4>
+      <ul className="space-y-2">
+        {improvements.map((improvement, index) => (
+          <li key={index} className="flex items-start gap-3 text-sm leading-6 text-stone-700 dark:text-stone-300">
+            <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500" />
+            <span>{improvement}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function QuestionsSection({
   answers,
   expandedQuestions,
-  toggleQuestion
+  toggleQuestion,
 }: {
   answers: AnswerItem[];
   expandedQuestions: Set<number>;
   toggleQuestion: (index: number) => void;
 }) {
   return (
-    <div>
-      <h4 className="font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-        <MessageSquare className="w-5 h-5 text-primary-500" />
-        问答记录详情
+    <section>
+      <h4 className="mb-3 flex items-center gap-2 font-semibold text-stone-800 dark:text-white">
+        <MessageSquare className="h-5 w-5 text-primary-600" />
+        逐题回顾
       </h4>
 
-      <div className="space-y-4">
-        {answers.map((answer, idx) => (
-          <QuestionCard
-            key={idx}
-            answer={answer}
-            index={idx}
-            isExpanded={expandedQuestions.has(idx)}
-            onToggle={() => toggleQuestion(idx)}
-          />
-        ))}
-      </div>
-    </div>
+      {answers.length === 0 ? (
+        <div className="surface-card p-5 text-sm text-stone-500 dark:text-stone-400">暂无作答记录。</div>
+      ) : (
+        <div className="space-y-3">
+          {answers.map((answer, index) => (
+            <QuestionCard
+              key={`${answer.questionIndex}-${index}`}
+              answer={answer}
+              isExpanded={expandedQuestions.has(index)}
+              onToggle={() => toggleQuestion(index)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
-// 问题卡片组件
 function QuestionCard({
   answer,
-  index,
   isExpanded,
-  onToggle
+  onToggle,
 }: {
   answer: AnswerItem;
-  index: number;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
   return (
-      <motion.div
-          className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.1 + index * 0.05 }}
-    >
-      {/* 问题头部 */}
-        <div
-            className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+    <article className="surface-card overflow-hidden">
+      <button
+        type="button"
         onClick={onToggle}
+        aria-expanded={isExpanded}
+        className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/60"
       >
-        <div className="flex items-center gap-3">
-          <span
-              className="w-8 h-8 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg flex items-center justify-center text-sm font-semibold">
+        <span className="flex min-w-0 flex-wrap items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-100 text-sm font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
             {answer.questionIndex + 1}
           </span>
-          <span
-              className="px-3 py-1 bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs font-medium rounded-full">
+          <span className="status-badge bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">
             {answer.category || '综合'}
           </span>
-          <span className={`font-semibold ${getScoreColor(answer.score, [80, 60])}`}>
-            得分: {answer.score}
+          <span className={`text-sm font-semibold ${getScoreTextColor(answer.score, [80, 60])}`}>
+            {answer.score} 分
           </span>
-        </div>
-          <motion.span
-          className="w-5 h-5 text-slate-400"
-          animate={{ rotate: isExpanded ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <ChevronDown className="w-5 h-5" />
-        </motion.span>
+        </span>
+        <ChevronDown className={`h-5 w-5 flex-shrink-0 text-stone-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+      </button>
+
+      <div className="border-t border-stone-100 px-5 py-4 dark:border-stone-800">
+        <p className="font-medium leading-7 text-stone-900 dark:text-white">{answer.question}</p>
       </div>
 
-      {/* 问题内容 */}
-      <div className="px-5 pb-2">
-        <p className="text-slate-800 dark:text-white font-medium leading-relaxed">{answer.question}</p>
-      </div>
+      {isExpanded && (
+        <div className="space-y-4 border-t border-stone-100 px-5 py-4 dark:border-stone-800">
+          <div className="rounded-lg bg-stone-50 p-4 dark:bg-stone-800/60">
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-stone-500 dark:text-stone-400">
+              <MessageSquare className="h-4 w-4" />
+              你的回答
+            </p>
+            <p className={`whitespace-pre-line text-sm leading-6 ${
+              !answer.userAnswer || answer.userAnswer === '不知道'
+                ? 'font-medium text-red-600 dark:text-red-400'
+                : 'text-stone-700 dark:text-stone-300'
+            }`}>
+              {answer.userAnswer || '未回答'}
+            </p>
+          </div>
 
-      {/* 展开内容 */}
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            <div className="px-5 pb-5 space-y-4">
-              {/* 你的回答 */}
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1">
-                  <MessageSquare className="w-4 h-4" />
-                  你的回答
-                </p>
-                <p className={`leading-relaxed ${
-                  !answer.userAnswer || answer.userAnswer === '不知道' 
-                    ? 'text-red-500 font-medium'
-                      : 'text-slate-700 dark:text-slate-300'
-                }`}>
-                  "{answer.userAnswer || '(未回答)'}"
-                </p>
-              </div>
-
-              {/* AI 深度评价 */}
-              {answer.feedback && (
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-2 font-medium">
-                    <BarChart3 className="w-4 h-4 text-primary-500" />
-                    AI 深度评价
-                  </p>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-6">{answer.feedback}</p>
-                </div>
-              )}
-
-              {/* 参考答案 */}
-              {answer.referenceAnswer && (
-                  <div
-                      className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 border border-slate-100 dark:border-slate-600">
-                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 flex items-center gap-2 font-medium">
-                    <CirclePlus className="w-4 h-4 text-primary-500" />
-                    参考答案
-                  </p>
-                    <div
-                        className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">{answer.referenceAnswer}</div>
-                </div>
-              )}
+          {answer.feedback && (
+            <div>
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-stone-400">
+                <BarChart3 className="h-4 w-4 text-primary-600" />
+                回答反馈
+              </p>
+              <p className="text-sm leading-6 text-stone-700 dark:text-stone-300">{answer.feedback}</p>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+          )}
+
+          {answer.referenceAnswer && (
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-700 dark:bg-stone-800/60">
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-stone-400">
+                <CirclePlus className="h-4 w-4 text-primary-600" />
+                参考思路
+              </p>
+              <div className="whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-stone-300">
+                {answer.referenceAnswer}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </article>
   );
 }

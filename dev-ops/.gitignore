@@ -1,0 +1,4 @@
+.env
+.last-release-sha
+backups/
+!README.md

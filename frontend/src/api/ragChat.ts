@@ -50,7 +50,6 @@ export interface RagChatSessionDetail {
 const PROGRESS_PREFIX = 'progress:';
 const REFERENCE_PREFIX = 'reference:';
 const REWRITTEN_PREFIX = 'rewritten:';
-const ROUTE_PREFIX = 'route:';
 const CARD_PREFIX = 'card:';
 const CARD_CHOICE_PREFIX = 'card_choice:';
 
@@ -60,20 +59,14 @@ export interface RagCardChoice {
   type: string;
 }
 
-export interface RagRouteInfo {
-  strategy: string;
-  reasoning: string;
-}
-
 /**
- * progress:/reference:/rewritten:/route:/card: 前缀事件是 RAG 元数据（不进回答正文），
+ * progress:/reference:/rewritten:/card: 前缀事件是 RAG 元数据（不进回答正文），
  * 其内容需原样保留（reference 内是 JSON，不能做 \\n→\n 转义，否则破坏 JSON）。
  */
 function isPrefixedEvent(content: string): boolean {
   return content.startsWith(PROGRESS_PREFIX)
     || content.startsWith(REFERENCE_PREFIX)
     || content.startsWith(REWRITTEN_PREFIX)
-    || content.startsWith(ROUTE_PREFIX)
     || content.startsWith(CARD_PREFIX)
     || content.startsWith(CARD_CHOICE_PREFIX);
 }
@@ -234,7 +227,6 @@ export const ragChatApi = {
    * @param onProgress 阶段进度文案（progress: 前缀）
    * @param onReference 引用来源（reference: 前缀，已 JSON.parse）
    * @param onRewritten 改写后问题（rewritten: 前缀）
-   * @param onRoute 路由策略（route: 前缀，已 JSON.parse）
    */
   async sendMessageStream(
     sessionId: number,
@@ -247,7 +239,6 @@ export const ragChatApi = {
     onCard?: (text: string) => void,
     onCardChoice?: (choices: RagCardChoice[]) => void,
     onRewritten?: (text: string) => void,
-    onRoute?: (route: RagRouteInfo) => void,
   ): Promise<void> {
     return fetchTextStream({
       url: `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
@@ -277,15 +268,6 @@ export const ragChatApi = {
         }
         if (raw.startsWith(REWRITTEN_PREFIX)) {
           onRewritten?.(raw.substring(REWRITTEN_PREFIX.length));
-          return;
-        }
-        if (raw.startsWith(ROUTE_PREFIX)) {
-          const payload = raw.substring(ROUTE_PREFIX.length);
-          try {
-            onRoute?.(JSON.parse(payload) as RagRouteInfo);
-          } catch {
-            // ignore
-          }
           return;
         }
         if (raw.startsWith(CARD_PREFIX)) {

@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 public class InterviewQuestionProperties {
 
     private int followUpCount = 1;
-    private String questionSystemPromptPath = "classpath:prompts/interview-question-skill-system.st";
-    private String questionUserPromptPath = "classpath:prompts/interview-question-skill-user.st";
+    private String questionSystemPromptPath = "classpath:prompts/interview-question-topic-system.st";
+    private String questionUserPromptPath = "classpath:prompts/interview-question-topic-user.st";
     private String resumeQuestionSystemPromptPath = "classpath:prompts/interview-question-resume-system.st";
     private String resumeQuestionUserPromptPath = "classpath:prompts/interview-question-resume-user.st";
 }

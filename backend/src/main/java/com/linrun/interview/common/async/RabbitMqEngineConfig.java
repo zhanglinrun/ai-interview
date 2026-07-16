@@ -10,20 +10,12 @@ import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.retry.RejectAndDontRequeueRecoverer;
-import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainerFactoryConfigurer;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 
 /**
- * RabbitMQ 异步任务引擎装配（仅 {@code app.async.engine=rabbitmq} 时加载）。
- *
- * <p>{@code RabbitAutoConfiguration} 被 {@code spring.autoconfigure.exclude} 默认排除，避免
- * 默认 rocketmq 引擎下也去连 RabbitMQ；这里以 {@link ConditionalOnProperty} 门控后再显式
- * {@link Import} 装配 {@code ConnectionFactory / RabbitTemplate / RabbitAdmin}，与
- * {@link RocketMqEngineConfig} 的处理对称。
+ * RabbitMQ 异步任务引擎装配。
  *
  * <p>拓扑：一个 direct 主交换机 + 每条管道一个业务队列（声明 DLX 指向死信交换机）+ 一个死信交换机
  * + 每条管道一个死信队列。业务队列的消费失败经重试建议链重试
@@ -31,8 +23,6 @@ import org.springframework.context.annotation.Import;
  * 路由进对应 DLQ；{@code RabbitDlqAlarmConsumer} 订阅 DLQ 告警。
  */
 @Configuration
-@ConditionalOnProperty(name = "app.async.engine", havingValue = AsyncEngineProperties.ENGINE_RABBITMQ)
-@Import(RabbitAutoConfiguration.class)
 public class RabbitMqEngineConfig {
 
     @Bean
@@ -101,32 +91,62 @@ public class RabbitMqEngineConfig {
             .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ_ROUTING);
     }
 
-    // ==================== 语音面试评估 ====================
+    // ==================== 岗位实战准备 ====================
 
     @Bean
-    public Queue voiceEvaluateQueue() {
-        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_QUEUE)
+    public Queue jobInterviewPrepareQueue() {
+        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_QUEUE)
             .withArgument("x-dead-letter-exchange", AsyncTaskStreamConstants.RABBIT_TASK_DLX)
             .withArgument("x-dead-letter-routing-key",
-                AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_DLQ_ROUTING)
+                AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ_ROUTING)
             .build();
     }
 
     @Bean
-    public Queue voiceEvaluateDlq() {
-        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_DLQ).build();
+    public Queue jobInterviewPrepareDlq() {
+        return QueueBuilder.durable(
+            AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ).build();
     }
 
     @Bean
-    public Binding voiceEvaluateBinding() {
-        return BindingBuilder.bind(voiceEvaluateQueue()).to(taskExchange())
-            .with(AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_ROUTING);
+    public Binding jobInterviewPrepareBinding() {
+        return BindingBuilder.bind(jobInterviewPrepareQueue()).to(taskExchange())
+            .with(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_ROUTING);
     }
 
     @Bean
-    public Binding voiceEvaluateDlqBinding() {
-        return BindingBuilder.bind(voiceEvaluateDlq()).to(taskDlx())
-            .with(AsyncTaskStreamConstants.RABBIT_VOICE_EVALUATE_DLQ_ROUTING);
+    public Binding jobInterviewPrepareDlqBinding() {
+        return BindingBuilder.bind(jobInterviewPrepareDlq()).to(taskDlx())
+            .with(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ_ROUTING);
+    }
+
+    // ==================== 证据化复盘 ====================
+
+    @Bean
+    public Queue interviewReportQueue() {
+        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_QUEUE)
+            .withArgument("x-dead-letter-exchange", AsyncTaskStreamConstants.RABBIT_TASK_DLX)
+            .withArgument("x-dead-letter-routing-key",
+                AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ_ROUTING)
+            .build();
+    }
+
+    @Bean
+    public Queue interviewReportDlq() {
+        return QueueBuilder.durable(
+            AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ).build();
+    }
+
+    @Bean
+    public Binding interviewReportBinding() {
+        return BindingBuilder.bind(interviewReportQueue()).to(taskExchange())
+            .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_ROUTING);
+    }
+
+    @Bean
+    public Binding interviewReportDlqBinding() {
+        return BindingBuilder.bind(interviewReportDlq()).to(taskDlx())
+            .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ_ROUTING);
     }
 
     // ==================== 监听容器工厂（重试 → DLQ） ====================
