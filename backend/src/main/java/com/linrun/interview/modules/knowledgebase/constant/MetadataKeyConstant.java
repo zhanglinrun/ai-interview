@@ -49,6 +49,9 @@ public final class MetadataKeyConstant {
     /** 向量库返回的 embedding ID */
     public static final String EMBEDDING_ID = "EMBEDDING_ID";
 
+    /** 向量化批次租约令牌，仅用于安全反向清理失败批次。 */
+    public static final String EMBEDDING_CLAIM = "embeddingClaim";
+
     /** 父块 ID（父子切片：子 chunk 指向所属父 chunk） */
     public static final String PARENT_CHUNK_ID = "parentChunkId";
 

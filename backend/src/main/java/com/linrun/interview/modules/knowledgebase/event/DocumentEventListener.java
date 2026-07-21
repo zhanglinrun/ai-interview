@@ -47,8 +47,9 @@ public class DocumentEventListener {
             knowledgeDocumentService.activateVersion(version);
             log.info("文档向量化完成: docId={}, versionId={}", docId, versionId);
         } catch (Exception e) {
-            // 失败不重抛：状态停在 CHUNKED，由 @Scheduled 补偿任务兜底重试
-            log.error("文档向量化失败，等待补偿任务重试: docId={}, versionId={}, error={}",
+            // activateVersion 已持久化失败原因、退避时间和终止标记；监听器不重抛，避免异步异常
+            // 失去统一处理入口。未达到最大次数的任务由 @Scheduled 补偿继续执行。
+            log.error("文档向量化失败，已记录任务状态: docId={}, versionId={}, error={}",
                 docId, versionId, e.getMessage(), e);
         }
     }

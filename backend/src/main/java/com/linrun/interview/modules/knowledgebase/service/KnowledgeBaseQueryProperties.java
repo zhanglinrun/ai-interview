@@ -15,6 +15,7 @@ public class KnowledgeBaseQueryProperties {
     private Hybrid hybrid = new Hybrid();
     private Rerank rerank = new Rerank();
     private Citation citation = new Citation();
+    private Context context = new Context();
     private Hyde hyde = new Hyde();
     private Fusion fusion = new Fusion();
     private ParentExpand parentExpand = new ParentExpand();
@@ -125,6 +126,13 @@ public class KnowledgeBaseQueryProperties {
         private double invalidPenalty = 0.1;
     }
 
+    /** 生成前的检索上下文总预算。 */
+    @Data
+    public static class Context {
+        /** 全部最终片段正文的最大字符数；小于 1 表示不限制。 */
+        private int maxTotalChars = 6000;
+    }
+
     /**
      * HyDE（Hypothetical Document Embeddings）配置：先让 LLM 就问题生成一段假设性答案，
      * 用该答案的向量做检索，提升"问题表述"与"答案表述"之间的语义鸿沟。
@@ -146,10 +154,6 @@ public class KnowledgeBaseQueryProperties {
      */
     @Data
     public static class Fusion {
-        /** 是否启用多路并行召回 + 跨路 RRF 融合 */
-        private boolean enabled = false;
-        /** 多路融合时，每路单独召回的候选数 */
-        private int perQueryTopK = 12;
         /** 跨路 RRF 融合常数 k */
         private int rrfK = 60;
         /** 融合后交给重排/上下文的候选上限 */

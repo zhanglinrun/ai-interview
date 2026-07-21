@@ -81,11 +81,11 @@ public class ResumeUploadService {
         log.info("简历文本解析完成: {} - 解析耗时: {}ms, 文本长度: {} 字符",
             fileName, System.currentTimeMillis() - parseStart, resumeText.length());
 
-        // 5. 保存简历到RustFS
+        // 5. 保存简历原件到 MinIO
         long storageStart = System.currentTimeMillis();
         String fileKey = storageService.uploadResume(file);
         String fileUrl = storageService.getFileUrl(fileKey);
-        log.info("简历已存储到RustFS: {} - 存储耗时: {}ms",
+        log.info("简历已存储到 MinIO: {} - 存储耗时: {}ms",
             fileKey, System.currentTimeMillis() - storageStart);
 
         // 6. 保存简历到数据库（状态为 PENDING）

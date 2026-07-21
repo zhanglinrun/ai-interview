@@ -182,12 +182,7 @@ services:
       ES_HOST: http://elasticsearch:9200
       ES_INDEX_NAME: ai-interview-vector
       ES_DIMENSIONS: ${ES_DIMENSIONS:-1536}
-      APP_STORAGE_ENDPOINT: http://minio:9000
-      APP_STORAGE_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      APP_STORAGE_SECRET_KEY: ${MINIO_SECRET_KEY}
-      APP_STORAGE_BUCKET: ${MINIO_BUCKET:-ai-interview}
-      APP_STORAGE_REGION: us-east-1
-      # FileStorageService 用的是 minio.* 配置（不是 app.storage.*），必须显式指向容器内 minio 服务，
+      # FileStorageService 使用 minio.* 配置，必须显式指向容器内 MinIO 服务，
       # 否则回退 localhost:9000 → 上传报"文件读取失败"(STORAGE 4001)。
       MINIO_URL: http://minio:9000
       MINIO_ENDPOINT: http://minio:9000

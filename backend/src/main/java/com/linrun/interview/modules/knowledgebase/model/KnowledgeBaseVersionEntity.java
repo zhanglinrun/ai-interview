@@ -28,7 +28,7 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
     /** 语义化版本号，如 1.0.0。 */
     private String version;
 
-    /** 原始文件 URL（RustFS）。 */
+    /** 原始文件 URL（MinIO）。 */
     private String docUrl;
 
     /** 原始文件对象存储键；用于短时预签名与失败补偿，不向前端暴露。 */
@@ -42,6 +42,21 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
 
     /** 版本状态机。 */
     private DocumentStatus status;
+
+    /** 向量化任务累计尝试次数。 */
+    private Integer embeddingAttempt;
+
+    /** 当前向量化任务租约开始时间。 */
+    private LocalDateTime embeddingClaimedAt;
+
+    /** 退避后的最早下次重试时间。 */
+    private LocalDateTime embeddingNextRetryAt;
+
+    /** 最近一次向量化错误摘要。 */
+    private String embeddingLastError;
+
+    /** 是否已达到最大尝试次数，需要人工重新切块或重置。 */
+    private Boolean embeddingTerminalFailure;
 
     /** 上传用户标识。 */
     private String uploadUser;
@@ -117,6 +132,46 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
 
     public void setStatus(DocumentStatus status) {
         this.status = status;
+    }
+
+    public Integer getEmbeddingAttempt() {
+        return embeddingAttempt;
+    }
+
+    public void setEmbeddingAttempt(Integer embeddingAttempt) {
+        this.embeddingAttempt = embeddingAttempt;
+    }
+
+    public LocalDateTime getEmbeddingClaimedAt() {
+        return embeddingClaimedAt;
+    }
+
+    public void setEmbeddingClaimedAt(LocalDateTime embeddingClaimedAt) {
+        this.embeddingClaimedAt = embeddingClaimedAt;
+    }
+
+    public LocalDateTime getEmbeddingNextRetryAt() {
+        return embeddingNextRetryAt;
+    }
+
+    public void setEmbeddingNextRetryAt(LocalDateTime embeddingNextRetryAt) {
+        this.embeddingNextRetryAt = embeddingNextRetryAt;
+    }
+
+    public String getEmbeddingLastError() {
+        return embeddingLastError;
+    }
+
+    public void setEmbeddingLastError(String embeddingLastError) {
+        this.embeddingLastError = embeddingLastError;
+    }
+
+    public Boolean getEmbeddingTerminalFailure() {
+        return embeddingTerminalFailure;
+    }
+
+    public void setEmbeddingTerminalFailure(Boolean embeddingTerminalFailure) {
+        this.embeddingTerminalFailure = embeddingTerminalFailure;
     }
 
     public String getUploadUser() {

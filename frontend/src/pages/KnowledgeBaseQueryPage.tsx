@@ -60,6 +60,11 @@ export function removeQuestionSearchParam(searchParams: URLSearchParams): URLSea
   return next;
 }
 
+export function citationStatusLabel(source: RagSourceDTO, finalized: boolean): string | null {
+  if (!finalized) return null;
+  return source.cited ? '已引用' : '未引用';
+}
+
 export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBaseQueryPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   // 知识库状态
@@ -93,6 +98,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [rewrittenQuestion, setRewrittenQuestion] = useState('');
   // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
   const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
+  const [citationFinalized, setCitationFinalized] = useState(false);
   const [cardMessage, setCardMessage] = useState('');
   const [cardChoices, setCardChoices] = useState<RagCardChoice[]>([]);
   const [evalOpen, setEvalOpen] = useState(false);
@@ -242,13 +248,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   };
 
   const handleNewSession = () => {
+    if (loading) return;
     setCurrentSessionId(null);
     setCurrentSessionTitle('');
     setMessages([]);
     setSessionBoundKbIds(new Set());
+    setActiveSources(null);
+    setCitationFinalized(false);
   };
 
   const handleLoadSession = async (sessionId: number) => {
+    if (loading) return;
     try {
       const detail = await ragChatApi.getSessionDetail(sessionId);
       setCurrentSessionId(detail.id);
@@ -256,6 +266,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       const kbIds = new Set(detail.knowledgeBases.map(kb => kb.id));
       setSelectedKbIds(kbIds);
       setSessionBoundKbIds(kbIds);
+      setActiveSources(null);
+      setCitationFinalized(false);
       setMessages(detail.messages.map(m => ({
         id: m.id,
         type: m.type,
@@ -268,7 +280,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   };
 
   const handleDeleteSession = async () => {
-    if (!sessionDeleteConfirm) return;
+    if (!sessionDeleteConfirm || loading) return;
     try {
       await ragChatApi.deleteSession(sessionDeleteConfirm.id);
       await loadSessions();
@@ -282,6 +294,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   };
 
   const handleEditSessionTitle = (sessionId: number, currentTitle: string) => {
+    if (loading) return;
     setEditingSessionTitle({ id: sessionId, title: currentTitle });
     setNewSessionTitle(currentTitle);
   };
@@ -303,6 +316,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
 
   const handleTogglePin = async (sessionId: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (loading) return;
     try {
       await ragChatApi.togglePin(sessionId);
       await loadSessions();
@@ -335,6 +349,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setProgressText('');
     setRewrittenQuestion('');
     setActiveSources(null);
+    setCitationFinalized(false);
     setCardMessage('');
     setCardChoices([]);
 
@@ -409,7 +424,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setLoading(false);
           setProgressText('');
           setRewrittenQuestion('');
-          setActiveSources(null);
           loadSessions();
         },
         (error: Error) => {
@@ -419,12 +433,17 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setProgressText('');
           setRewrittenQuestion('');
           setActiveSources(null);
+          setCitationFinalized(false);
         },
         (text: string) => {
           setProgressText(text);
         },
         (sources: RagSourceDTO[]) => {
           setActiveSources(sources);
+        },
+        (metadata) => {
+          setActiveSources(metadata.sources);
+          setCitationFinalized(true);
         },
         (text: string) => {
           cardContent = text;
@@ -441,6 +460,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       console.error('发起流式查询失败:', err);
       updateAssistantMessage(getErrorMessage(err, '回答失败，请重试'));
       setLoading(false);
+      setActiveSources(null);
+      setCitationFinalized(false);
     }
   };
 
@@ -573,7 +594,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
               <h2 className="text-base font-semibold text-slate-800 dark:text-white">对话历史</h2>
               <button
                 onClick={handleNewSession}
-                disabled={selectedKbIds.size === 0}
+                disabled={selectedKbIds.size === 0 || loading}
                 className="p-1.5 text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="新建对话"
               >
@@ -596,7 +617,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                     <div
                       key={session.id}
                       onClick={() => handleLoadSession(session.id)}
-                      className={`group cursor-pointer rounded-lg p-3 transition-colors focus-within:ring-2 focus-within:ring-primary-500 ${currentSessionId === session.id
+                      aria-disabled={loading}
+                      className={`group rounded-lg p-3 transition-colors focus-within:ring-2 focus-within:ring-primary-500 ${loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${currentSessionId === session.id
                           ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-500'
                           : 'bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 border border-transparent'
                         } ${session.isPinned ? 'border-l-4 border-l-primary-500' : ''}`}
@@ -608,7 +630,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                             event.stopPropagation();
                             void handleLoadSession(session.id);
                           }}
-                          className="min-w-0 flex-1 text-left focus-visible:outline-none"
+                          disabled={loading}
+                          className="min-w-0 flex-1 text-left focus-visible:outline-none disabled:cursor-not-allowed"
                         >
                           <div className="flex items-center gap-1.5">
                             {session.isPinned && (
@@ -623,6 +646,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                         <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 lg:opacity-0">
                           <button
                             onClick={(e) => handleTogglePin(session.id, e)}
+                            disabled={loading}
                             className={`p-1 rounded transition-colors ${session.isPinned
                               ? 'text-primary-500 hover:text-primary-600'
                               : 'text-slate-400 hover:text-primary-500'
@@ -636,7 +660,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                               e.stopPropagation();
                               handleEditSessionTitle(session.id, session.title);
                             }}
-                            className="p-1 text-slate-400 hover:text-primary-500 rounded transition-colors"
+                            disabled={loading}
+                            className="p-1 text-slate-400 hover:text-primary-500 rounded transition-colors disabled:cursor-not-allowed"
                             title="编辑标题"
                           >
                             <Edit className="w-4 h-4" />
@@ -646,7 +671,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                               e.stopPropagation();
                               setSessionDeleteConfirm({ id: session.id, title: session.title });
                             }}
-                            className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors"
+                            disabled={loading}
+                            className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors disabled:cursor-not-allowed"
                             title="删除"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -796,8 +822,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                       检索优化：{rewrittenQuestion}
                                     </div>
                                   )}
-                                  {/* 引用来源（来自 reference: 前缀事件，流式期间显示在助手气泡内） */}
-                                  {loading && index === messages.length - 1 && activeSources && activeSources.length > 0 && (
+                                  {/* 当前回答的引用来源；citation 终态到达后显示实际引用状态。 */}
+                                  {index === messages.length - 1 && activeSources && activeSources.length > 0 && (
                                     <div className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2 space-y-1">
                                       <p className="text-xs text-slate-400 dark:text-slate-500">参考来源</p>
                                       {activeSources.slice(0, 3).map((s, i) => (
@@ -805,6 +831,11 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                           {i + 1}. {s.documentTitle}
                                           {s.similarity != null && (
                                             <span className="ml-1 text-slate-400">（相关度 {s.similarity.toFixed(2)}）</span>
+                                          )}
+                                          {citationStatusLabel(s, citationFinalized) && (
+                                            <span className={`ml-1 ${s.cited ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                              {citationStatusLabel(s, citationFinalized)}
+                                            </span>
                                           )}
                                         </div>
                                       ))}
@@ -1086,8 +1117,8 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                       ['Hit@K', evalResult.hitRate],
                       ['MRR', evalResult.mrr],
                       ['NDCG', evalResult.ndcg],
-                      ['引用命中', evalResult.citationHitRate],
-                      ['覆盖率', evalResult.citationCoverage],
+                      ['检索召回', evalResult.retrievalRecall],
+                      ['检索精确', evalResult.retrievalPrecision],
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-lg bg-slate-50 dark:bg-slate-700 p-3">
                         <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>

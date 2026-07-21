@@ -12,6 +12,8 @@ import com.linrun.interview.common.evidence.EvidenceStatus;
 import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.rag.CorrectiveRetrievalGrader;
+import com.linrun.interview.modules.knowledgebase.rag.ContextExpandingContentAggregator;
+import com.linrun.interview.modules.knowledgebase.rag.ContextExpansionService;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryDecomposer;
 import com.linrun.interview.modules.knowledgebase.rag.RagQueryTrace;
@@ -57,7 +59,7 @@ public class EvidenceRetrievalService {
   private final KnowledgeBaseQueryProperties queryProperties;
   private final RerankService rerankService;
   private final ObjectMapper objectMapper;
-  private final SegmentTextCacheService segmentTextCacheService;
+  private final ContextExpansionService contextExpansionService;
   private final PromptTemplate decomposePrompt;
   private final PromptTemplate cragPrompt;
 
@@ -70,7 +72,6 @@ public class EvidenceRetrievalService {
       KnowledgeBaseQueryProperties queryProperties,
       RerankService rerankService,
       ObjectMapper objectMapper,
-      SegmentTextCacheService segmentTextCacheService,
       ResourceLoader resourceLoader
   ) throws IOException {
     this.embeddingStore = embeddingStore;
@@ -81,7 +82,8 @@ public class EvidenceRetrievalService {
     this.queryProperties = queryProperties;
     this.rerankService = rerankService;
     this.objectMapper = objectMapper;
-    this.segmentTextCacheService = segmentTextCacheService;
+    this.contextExpansionService = new ContextExpansionService(
+        segmentService, queryProperties.getParentExpand());
     this.decomposePrompt = new PromptTemplate(resourceLoader
         .getResource(queryProperties.getDecomposePromptPath())
         .getContentAsString(StandardCharsets.UTF_8));
@@ -98,7 +100,7 @@ public class EvidenceRetrievalService {
   ) {
     requireQuery(query);
     List<String> degraded = new ArrayList<>();
-    List<Content> contents = retrieveAndRank(scope, List.of(query), degraded);
+    List<Content> contents = expand(retrieveAndRank(scope, List.of(query), degraded));
     EvidenceStatus status = contents.isEmpty()
         ? EvidenceStatus.NONE
         : contents.size() >= 2 ? EvidenceStatus.SUFFICIENT : EvidenceStatus.WEAK;
@@ -125,11 +127,11 @@ public class EvidenceRetrievalService {
     CorrectiveRetrievalGrader.GradeResult grade = grade(scope, query, contents, degraded);
     if (grade.degraded()) {
       return toPacket(capabilityAtomKey, query, EvidenceStatus.WEAK,
-          contents, List.of(), degraded);
+          expand(contents), List.of(), degraded);
     }
     return switch (grade.grade()) {
       case CORRECT -> toPacket(capabilityAtomKey, query, EvidenceStatus.SUFFICIENT,
-          contents, List.of(), degraded);
+          expand(contents), List.of(), degraded);
       case INCORRECT -> toPacket(capabilityAtomKey, query, EvidenceStatus.NONE,
           List.of(), List.of(), degraded);
       case AMBIGUOUS -> correctOnce(
@@ -198,18 +200,18 @@ public class EvidenceRetrievalService {
     if (correctedQuery == null || correctedQuery.isBlank()
         || correctedQuery.equals(originalQuery)) {
       return toPacket(capabilityAtomKey, originalQuery, EvidenceStatus.WEAK,
-          first, List.of(), degraded);
+          expand(first), List.of(), degraded);
     }
     degraded.add("CRAG_CORRECTED_ONCE");
     List<Content> corrected = retrieveAndRank(scope, List.of(correctedQuery), degraded);
     List<Content> merged = fuseRankedLists(
         List.of(first, corrected),
         List.of(1.0d, 1.0d),
-        queryProperties.getHybrid().getRrfK(),
-        queryProperties.getHybrid().getFusionTopK());
+        queryProperties.getFusion().getRrfK(),
+        queryProperties.getFusion().getFinalTopK());
     merged = rerank(merged, originalQuery, degraded);
     EvidenceStatus status = merged.isEmpty() ? EvidenceStatus.NONE : EvidenceStatus.WEAK;
-    return toPacket(capabilityAtomKey, originalQuery, status, merged, List.of(), degraded);
+    return toPacket(capabilityAtomKey, originalQuery, status, expand(merged), List.of(), degraded);
   }
 
   private List<Content> retrieveAndRank(
@@ -237,8 +239,8 @@ public class EvidenceRetrievalService {
     List<Content> fused = fuseRankedLists(
         queryResults,
         queryWeights,
-        queryProperties.getHybrid().getRrfK(),
-        queryProperties.getHybrid().getFusionTopK());
+        queryProperties.getFusion().getRrfK(),
+        queryProperties.getFusion().getFinalTopK());
     return rerank(fused, queries.getFirst(), degraded);
   }
 
@@ -249,8 +251,6 @@ public class EvidenceRetrievalService {
         Math.max(queryProperties.getSearch().getTopkMedium(), 1),
         queryProperties.getSearch().getMinScoreDefault(),
         List.of(),
-        segmentService,
-        queryProperties.getParentExpand(),
         queryProperties.getHybrid(),
         null,
         null,
@@ -259,8 +259,13 @@ public class EvidenceRetrievalService {
         objectMapper,
         null,
         scope.dataUserId(),
-        segmentTextCacheService,
-        scope);
+        scope, elasticSearchProperties.getDimensions());
+  }
+
+  private List<Content> expand(List<Content> contents) {
+    return ContextExpandingContentAggregator.limitByTotalChars(
+        contextExpansionService.expand(contents),
+        queryProperties.getContext().getMaxTotalChars());
   }
 
   private List<Content> rerank(

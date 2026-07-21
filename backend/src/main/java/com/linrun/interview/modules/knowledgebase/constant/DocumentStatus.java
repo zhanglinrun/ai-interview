@@ -6,7 +6,9 @@ package com.linrun.interview.modules.knowledgebase.constant;
  * <p>流转：{@link #INIT} → {@link #UPLOADED} → {@link #CONVERTING} → {@link #CONVERTED}
  * → {@link #CHUNKED} → {@link #VECTOR_STORED}。无需向量存储的走 {@link #STORED}。
  *
- * <p>本状态机无显式 FAILED，失败靠文档停在 {@link #CHUNKED} 由 {@code @Scheduled} 补偿任务重试。
+ * <p>业务状态不额外引入 FAILED。向量化失败时文档保持 {@link #CHUNKED}，任务租约、尝试次数、
+ * 下次重试时间、最后错误和终止标记单独持久化在版本记录中；事件触发失败后由定时补偿执行
+ * 有界重试，达到最大次数后停止自动重试，等待人工修复配置并重置任务。
  */
 public enum DocumentStatus {
     /** 初始状态。 */

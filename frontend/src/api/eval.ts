@@ -62,6 +62,8 @@ export interface RagItemResult {
   firstHitRank: number;
   reciprocalRank: number;
   ndcg: number;
+  retrievalRecall: number;
+  retrievalPrecision: number;
 }
 
 export interface RagEvalResponse {
@@ -71,8 +73,8 @@ export interface RagEvalResponse {
   hitRate: number;
   mrr: number;
   ndcg: number;
-  citationHitRate: number;
-  citationCoverage: number;
+  retrievalRecall: number;
+  retrievalPrecision: number;
   items: RagItemResult[];
 }
 

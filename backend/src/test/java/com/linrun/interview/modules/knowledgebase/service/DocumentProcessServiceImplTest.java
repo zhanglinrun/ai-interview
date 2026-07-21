@@ -1,6 +1,7 @@
 package com.linrun.interview.modules.knowledgebase.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.infrastructure.file.ContentTypeDetectionService;
 import com.linrun.interview.infrastructure.file.FileHashService;
@@ -18,12 +19,25 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -42,8 +56,10 @@ class DocumentProcessServiceImplTest {
     @Mock private KnowledgeBaseChunkingService chunkingService;
     @Mock private KnowledgeDocumentService knowledgeDocumentService;
     @Mock private VectorStoreService vectorStoreService;
+    @Mock private VectorizationTaskService vectorizationTaskService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ObjectMapper objectMapper;
+    @Mock private TransactionTemplate transactionTemplate;
 
     @InjectMocks
     private DocumentProcessServiceImpl service;
@@ -67,6 +83,82 @@ class DocumentProcessServiceImplTest {
         when(segmentService.countByDocumentVersion(3L)).thenReturn(2L);
 
         assertThat(service.split(1L)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("重新切块状态竞争时不得继续删除分段")
+    void rechunkStopsWhenAtomicStateTransitionFails() {
+        KnowledgeBaseEntity doc = doc(1L, 3L);
+        doc.setDocStatus(DocumentStatus.VECTOR_STORED);
+        KnowledgeBaseVersionEntity version = version(
+            1L, 3L, DocumentStatus.VECTOR_STORED, "rag.md");
+        when(knowledgeBaseEntityMapper.selectOne(any())).thenReturn(doc);
+        when(versionService.getById(3L)).thenReturn(Optional.of(version));
+        when(knowledgeBaseEntityMapper.beginRechunk(1L, 3L)).thenReturn(0);
+        executeTransactionsImmediately();
+
+        assertThatThrownBy(() -> service.rechunk(1L))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("文档状态已变化");
+
+        verify(vectorStoreService, never()).removeByDocIdAndVersion(1L, 3L);
+        verify(segmentService, never()).physicalDeleteByDocumentVersion(3L);
+        verify(vectorizationTaskService, never()).reset(3L);
+    }
+
+    @Test
+    @DisplayName("重新切块必须先接管数据库状态再删除 ES")
+    void rechunkFencesDatabaseBeforeDeletingVectors() {
+        KnowledgeBaseEntity doc = doc(1L, 3L);
+        doc.setDocStatus(DocumentStatus.VECTOR_STORED);
+        KnowledgeBaseVersionEntity version = version(
+            1L, 3L, DocumentStatus.VECTOR_STORED, "rag.md");
+        when(knowledgeBaseEntityMapper.selectOne(any())).thenReturn(doc);
+        when(versionService.getById(3L)).thenReturn(Optional.of(version));
+        when(knowledgeBaseEntityMapper.beginRechunk(1L, 3L)).thenReturn(1);
+        when(versionService.beginRechunk(3L, 1L)).thenReturn(true);
+        doThrow(new IllegalStateException("ES unavailable"))
+            .when(vectorStoreService).removeByDocIdAndVersion(1L, 3L);
+        executeTransactionsImmediately();
+
+        assertThatThrownBy(() -> service.rechunk(1L))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("ES unavailable");
+
+        InOrder order = inOrder(knowledgeBaseEntityMapper, versionService, vectorStoreService);
+        order.verify(knowledgeBaseEntityMapper).beginRechunk(1L, 3L);
+        order.verify(versionService).beginRechunk(3L, 1L);
+        order.verify(vectorStoreService).removeByDocIdAndVersion(1L, 3L);
+        verify(segmentService, never()).physicalDeleteByDocumentVersion(3L);
+        verify(vectorizationTaskService, never()).reset(3L);
+    }
+
+    @Test
+    @DisplayName("重切块中断后直接 split 也应先恢复旧向量清理")
+    void splitResumesInterruptedRechunkCleanup() {
+        KnowledgeBaseEntity doc = doc(1L, 3L);
+        KnowledgeBaseVersionEntity version = version(
+            1L, 3L, DocumentStatus.CONVERTED, "rag.md");
+        when(knowledgeBaseEntityMapper.selectOne(any())).thenReturn(doc);
+        when(versionService.getById(3L)).thenReturn(Optional.of(version));
+        when(segmentService.countByDocumentVersion(3L)).thenReturn(2L);
+        doThrow(new IllegalStateException("ES unavailable"))
+            .when(vectorStoreService).removeByDocIdAndVersion(1L, 3L);
+
+        assertThatThrownBy(() -> service.split(1L))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("ES unavailable");
+
+        verify(vectorStoreService).removeByDocIdAndVersion(1L, 3L);
+        verify(segmentService, never()).physicalDeleteByDocumentVersion(3L);
+    }
+
+    private void executeTransactionsImmediately() {
+        doAnswer(invocation -> {
+            Consumer<TransactionStatus> action = invocation.getArgument(0);
+            action.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
     }
 
     private KnowledgeBaseEntity doc(Long docId, Long currentVersionId) {

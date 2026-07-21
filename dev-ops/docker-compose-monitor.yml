@@ -2,8 +2,6 @@
 # 用法：
 #   cd dev-ops
 #   docker compose -f docker-compose-environment.yml -f docker-compose-monitor.yml up -d
-# 或在项目根目录：
-#   docker compose -f docker-compose.dev.yml -f docker-compose.monitor.yml up -d
 #
 # Prometheus: http://localhost:9090
 # Grafana:    http://localhost:3000（默认 admin / admin）

@@ -44,9 +44,29 @@ public interface KnowledgeBaseSegmentMapper extends BaseMapper<KnowledgeBaseSegm
       <foreach collection="segments" item="seg" open="(" separator="," close=")">
         #{seg.id}
       </foreach>
+        AND document_id = #{docId}
+        AND document_version = #{versionId}
+        AND status = 'STORED'
+        AND embedding_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM knowledge_bases kb
+          JOIN knowledge_base_version kbv
+            ON kbv.doc_id = kb.id
+           AND kbv.version_id = #{versionId}
+           AND kbv.deleted = 0
+          WHERE kb.id = #{docId}
+            AND kb.deleted = 0
+            AND kbv.embedding_attempt = #{attempt}
+            AND kbv.embedding_claimed_at = #{claimedAt}
+        )
       </script>
       """)
   int batchUpdateEmbedding(
       @Param("segments") List<KnowledgeBaseSegmentEntity> segments,
+      @Param("docId") Long docId,
+      @Param("versionId") Long versionId,
+      @Param("attempt") int attempt,
+      @Param("claimedAt") java.time.LocalDateTime claimedAt,
       @Param("status") String status);
 }

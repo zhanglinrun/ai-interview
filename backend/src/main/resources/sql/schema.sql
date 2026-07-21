@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
     `converted_content`  LONGTEXT     NULL,
     `content_hash`       VARCHAR(64)  NULL,
     `status`             VARCHAR(20)  NULL,
+    `embedding_attempt`  INT          NOT NULL DEFAULT 0,
+    `embedding_claimed_at` DATETIME(6) NULL,
+    `embedding_next_retry_at` DATETIME(6) NULL,
+    `embedding_last_error` VARCHAR(1000) NULL,
+    `embedding_terminal_failure` TINYINT(1) NOT NULL DEFAULT 0,
     `upload_user`        VARCHAR(64)  NULL,
     `changelog`          VARCHAR(500) NULL,
     `created_at`         DATETIME(6)  NOT NULL,
@@ -120,6 +125,8 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
     UNIQUE KEY `uk_kbv_doc_version` (`doc_id`, `version`),
     KEY `idx_kbv_doc_id` (`doc_id`),
     KEY `idx_kbv_upload_user_hash` (`upload_user`, `content_hash`),
+    KEY `idx_kbv_embedding_recovery`
+        (`status`, `embedding_terminal_failure`, `embedding_next_retry_at`, `embedding_claimed_at`),
     CONSTRAINT `fk_kbv_doc` FOREIGN KEY (`doc_id`) REFERENCES `knowledge_bases` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -214,6 +221,8 @@ CREATE TABLE IF NOT EXISTS `rag_evaluation_runs` (
     `min_score`               DOUBLE        NULL,
     `topk`                    INT           NULL,
     `ndcg`                    DOUBLE        NULL,
+    `retrieval_recall`        DOUBLE        NULL,
+    `retrieval_precision`     DOUBLE        NULL,
     `citation_hit_rate`       DOUBLE        NULL,
     `citation_coverage`       DOUBLE        NULL,
     `created_at`              DATETIME(6)   NOT NULL,

@@ -185,6 +185,13 @@ file:
 
 # Application custom configuration
 app:
+  knowledgebase:
+    vectorization:
+      max-attempts: ${APP_KB_VECTOR_MAX_ATTEMPTS:5}
+      claim-lease: ${APP_KB_VECTOR_CLAIM_LEASE:30m}
+      base-backoff: ${APP_KB_VECTOR_BASE_BACKOFF:1m}
+      max-backoff: ${APP_KB_VECTOR_MAX_BACKOFF:1h}
+      recovery-batch-size: ${APP_KB_VECTOR_RECOVERY_BATCH_SIZE:50}
   job-interview:
     prompt-version: ${JOB_INTERVIEW_PROMPT_VERSION:job-interview-v2}
     follow-up-limit-per-main-question: ${JOB_INTERVIEW_FOLLOW_UP_LIMIT:1}
@@ -368,8 +375,8 @@ app:
           model-path: ${APP_AI_RAG_RERANK_LOCAL_MODEL_PATH:classpath:model/bge-reranker-model/model_quantized.onnx}
           tokenizer-path: ${APP_AI_RAG_RERANK_LOCAL_TOKENIZER_PATH:classpath:model/bge-reranker-model/tokenizer.json}
           max-sequence-length: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:8192}
-      # 父子/兄弟分段扩展（small-to-big）：检索命中 chunk 后，按 parentChunkId 取父块章节、
-      # 按 brotherChunkId 取同组兄弟按序拼接，给 LLM 更完整上下文（对齐业界实践）。
+      # 父子/兄弟分段扩展（small-to-big）：子块完成 RRF/rerank/TopN 后，按 parentChunkId
+      # 取父块章节，或按 brotherChunkId 取同组兄弟按序拼接，再交给 LLM。
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
@@ -377,6 +384,13 @@ app:
         max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
         cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}
+      # 最终上下文总预算：按 RRF/rerank 顺序保留完整片段，保证 [n] 与 sources 索引一致。
+      context:
+        max-total-chars: ${APP_AI_RAG_CONTEXT_MAX_TOTAL_CHARS:6000}
+      # 多 Query（原问题/rewrite/HyDE/分解子查询）之间的 RRF 参数。
+      fusion:
+        rrf-k: ${APP_AI_RAG_FUSION_RRF_K:60}
+        final-top-k: ${APP_AI_RAG_FUSION_FINAL_TOP_K:12}
       # Query Decomposition（P2）：复杂问题拆子查询并行检索，简单问题规则预筛跳过
       decompose:
         enabled: ${APP_AI_RAG_DECOMPOSE_ENABLED:true}
@@ -424,14 +438,6 @@ app:
       - application/vnd.openxmlformats-officedocument.wordprocessingml.document
       - text/plain
 
-  # RustFS (S3兼容) 存储配置
-  storage:
-    endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
-    access-key: ${APP_STORAGE_ACCESS_KEY:minioadmin}
-    secret-key: ${APP_STORAGE_SECRET_KEY:minioadmin}
-    bucket: ${APP_STORAGE_BUCKET:ai-interview}
-    region: ${APP_STORAGE_REGION:us-east-1}
-  
   # CORS配置 - React前端
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:80,http://localhost:28080,http://127.0.0.1:28080}

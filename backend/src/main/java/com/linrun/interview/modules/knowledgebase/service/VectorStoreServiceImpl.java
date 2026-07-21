@@ -3,7 +3,9 @@ package com.linrun.interview.modules.knowledgebase.service;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
+import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.embedding.Embedding;
@@ -13,7 +15,6 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -36,14 +37,27 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class VectorStoreServiceImpl implements VectorStoreService {
 
     private static final String DOC_ID_KEY = "docId";
     private static final String VERSION_KEY = "version";
+    private static final String EMBEDDING_ID_PREFIX = "kb-segment-";
     private final ElasticsearchEmbeddingStore embeddingStore;
     private final LlmProviderRegistry llmProviderRegistry;
     private final ObjectMapper objectMapper;
+    private final ElasticSearchProperties elasticSearchProperties;
+
+    public VectorStoreServiceImpl(
+        ElasticsearchEmbeddingStore embeddingStore,
+        LlmProviderRegistry llmProviderRegistry,
+        ObjectMapper objectMapper,
+        ElasticSearchProperties elasticSearchProperties
+    ) {
+        this.embeddingStore = embeddingStore;
+        this.llmProviderRegistry = llmProviderRegistry;
+        this.objectMapper = objectMapper;
+        this.elasticSearchProperties = elasticSearchProperties;
+    }
 
     private EmbeddingModel embeddingModel() {
         return llmProviderRegistry.getDefaultEmbeddingModel();
@@ -51,26 +65,36 @@ public class VectorStoreServiceImpl implements VectorStoreService {
 
     @Override
     public List<String> embedAndStore(List<KnowledgeBaseSegmentEntity> segments) {
+        return embedAndStore(segments, null);
+    }
+
+    @Override
+    public List<String> embedAndStore(
+        List<KnowledgeBaseSegmentEntity> segments, String embeddingClaim) {
         if (segments == null || segments.isEmpty()) {
             return Collections.emptyList();
         }
         EmbeddingModel model = embeddingModel();
-        List<TextSegment> textSegments = segments.stream().map(this::toTextSegment).toList();
+        List<TextSegment> textSegments = segments.stream()
+            .map(segment -> toTextSegment(segment, embeddingClaim))
+            .toList();
         List<String> embeddingIds = new ArrayList<>(segments.size());
         for (int from = 0; from < textSegments.size(); from += EmbeddingBatchPolicy.MAX_BATCH_SIZE) {
             int to = Math.min(from + EmbeddingBatchPolicy.MAX_BATCH_SIZE, textSegments.size());
             List<TextSegment> batch = textSegments.subList(from, to);
+            List<String> batchIds = segments.subList(from, to).stream()
+                .map(this::stableEmbeddingId)
+                .toList();
             Response<List<Embedding>> embeddingResponse = model.embedAll(batch);
             List<Embedding> content = embeddingResponse == null ? null : embeddingResponse.content();
             if (content == null || content.size() != batch.size()) {
                 throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
                     "Embedding 返回数量与请求分段数量不一致");
             }
-            List<String> batchIds = embeddingStore.addAll(content, batch);
-            if (batchIds == null || batchIds.size() != batch.size()) {
-                throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
-                    "向量索引返回数量与请求分段数量不一致");
-            }
+            content.forEach(this::validateEmbeddingDimension);
+            // 使用 MySQL segment 主键生成稳定 ES ID。若 ES 写入成功后进程在 DB 回写前宕机，
+            // 补偿重试会覆盖同一文档，而不是再生成一份随机 ID 的孤儿向量。
+            embeddingStore.addAll(batchIds, content, batch);
             embeddingIds.addAll(batchIds);
         }
         if (embeddingIds.size() != segments.size()) {
@@ -88,9 +112,33 @@ public class VectorStoreServiceImpl implements VectorStoreService {
         }
         TextSegment textSegment = toTextSegment(segment);
         Response<Embedding> embeddingResponse = embeddingModel().embed(textSegment.text());
-        String embeddingId = embeddingStore.add(embeddingResponse.content(), textSegment);
+        Embedding embedding = embeddingResponse == null ? null : embeddingResponse.content();
+        if (embedding == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "Embedding 返回结果为空");
+        }
+        validateEmbeddingDimension(embedding);
+        String embeddingId = stableEmbeddingId(segment);
+        embeddingStore.addAll(List.of(embeddingId), List.of(embedding), List.of(textSegment));
         log.info("单条向量化完成: segmentId={}, embeddingId={}", segment.getId(), embeddingId);
         return embeddingId;
+    }
+
+    private String stableEmbeddingId(KnowledgeBaseSegmentEntity segment) {
+        if (segment.getId() == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "分段尚未落库，无法生成稳定向量 ID");
+        }
+        return EMBEDDING_ID_PREFIX + segment.getId();
+    }
+
+    private void validateEmbeddingDimension(Embedding embedding) {
+        int expected = elasticSearchProperties.getDimensions();
+        if (expected > 0 && embedding.dimension() != expected) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "Embedding 维度与 ES 索引不一致: actual=" + embedding.dimension()
+                    + ", expected=" + expected + "。切换 Embedding 模型后必须同步重建索引");
+        }
     }
 
     @Override
@@ -118,6 +166,23 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             log.error("按embeddingIds批量删除向量失败: count={}", embeddingIds.size(), e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED,
                 "按 embeddingId 批量删除向量失败", e);
+        }
+    }
+
+    @Override
+    public void removeByEmbeddingClaim(String embeddingClaim) {
+        if (embeddingClaim == null || embeddingClaim.isBlank()) {
+            return;
+        }
+        try {
+            Filter filter = metadataKey(MetadataKeyConstant.EMBEDDING_CLAIM)
+                .isEqualTo(embeddingClaim);
+            embeddingStore.removeAll(filter);
+            log.info("按向量化租约令牌删除向量成功: claim={}", embeddingClaim);
+        } catch (Exception e) {
+            log.error("按向量化租约令牌删除向量失败: claim={}", embeddingClaim, e);
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED,
+                "按向量化租约令牌删除向量失败", e);
         }
     }
 
@@ -165,8 +230,16 @@ public class VectorStoreServiceImpl implements VectorStoreService {
 
     @Override
     public TextSegment toTextSegment(KnowledgeBaseSegmentEntity segment) {
+        return toTextSegment(segment, null);
+    }
+
+    private TextSegment toTextSegment(
+        KnowledgeBaseSegmentEntity segment, String embeddingClaim) {
         Map<String, String> metadataMap = parseMetadataMap(segment.getMetadata());
         Metadata metadata = metadataMap != null ? Metadata.from(metadataMap) : new Metadata();
+        if (embeddingClaim != null && !embeddingClaim.isBlank()) {
+            metadata.put(MetadataKeyConstant.EMBEDDING_CLAIM, embeddingClaim);
+        }
         return TextSegment.from(segment.getText(), metadata);
     }
 

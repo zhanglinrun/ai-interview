@@ -49,6 +49,7 @@ export interface RagChatSessionDetail {
 
 const PROGRESS_PREFIX = 'progress:';
 const REFERENCE_PREFIX = 'reference:';
+const CITATION_PREFIX = 'citation:';
 const REWRITTEN_PREFIX = 'rewritten:';
 const CARD_PREFIX = 'card:';
 const CARD_CHOICE_PREFIX = 'card_choice:';
@@ -60,12 +61,13 @@ export interface RagCardChoice {
 }
 
 /**
- * progress:/reference:/rewritten:/card: 前缀事件是 RAG 元数据（不进回答正文），
+ * progress:/reference:/citation:/rewritten:/card: 前缀事件是 RAG 元数据（不进回答正文），
  * 其内容需原样保留（reference 内是 JSON，不能做 \\n→\n 转义，否则破坏 JSON）。
  */
 function isPrefixedEvent(content: string): boolean {
   return content.startsWith(PROGRESS_PREFIX)
     || content.startsWith(REFERENCE_PREFIX)
+    || content.startsWith(CITATION_PREFIX)
     || content.startsWith(REWRITTEN_PREFIX)
     || content.startsWith(CARD_PREFIX)
     || content.startsWith(CARD_CHOICE_PREFIX);
@@ -146,11 +148,13 @@ function processEventStreamBuffer(
  * - token：回答正文片段（无前缀）
  * - progress：阶段进度（progress: 前缀）
  * - reference：引用来源 JSON（reference: 前缀）
+ * - citation：生成完成后的引用校验结果（citation: 前缀）
  */
 export type RagStreamEvent =
   | { type: 'token'; chunk: string }
   | { type: 'progress'; text: string }
-  | { type: 'reference'; sources: RagSourceDTO[] };
+  | { type: 'reference'; sources: RagSourceDTO[] }
+  | { type: 'citation'; metadata: RagCitationMetadata };
 
 export interface RagSourceDTO {
   knowledgeBaseId: number | null;
@@ -163,6 +167,12 @@ export interface RagSourceDTO {
   snippet: string;
   similarity: number | null;
   cited: boolean;
+}
+
+export interface RagCitationMetadata {
+  sources: RagSourceDTO[];
+  confidence: number | null;
+  invalidCitations: number[];
 }
 
 export const ragChatApi = {
@@ -221,11 +231,12 @@ export const ragChatApi = {
   },
 
   /**
-   * 发送消息（流式SSE），解析 progress:/reference: 前缀事件并分流回调。
+   * 发送消息（流式SSE），解析 progress:/reference:/citation: 前缀事件并分流回调。
    *
    * @param onToken 回答 token 片段（无前缀）
    * @param onProgress 阶段进度文案（progress: 前缀）
    * @param onReference 引用来源（reference: 前缀，已 JSON.parse）
+   * @param onCitation 生成完成后的引用校验结果（citation: 前缀，已 JSON.parse）
    * @param onRewritten 改写后问题（rewritten: 前缀）
    */
   async sendMessageStream(
@@ -236,6 +247,7 @@ export const ragChatApi = {
     onError: (error: Error) => void,
     onProgress?: (text: string) => void,
     onReference?: (sources: RagSourceDTO[]) => void,
+    onCitation?: (metadata: RagCitationMetadata) => void,
     onCard?: (text: string) => void,
     onCardChoice?: (choices: RagCardChoice[]) => void,
     onRewritten?: (text: string) => void,
@@ -251,7 +263,7 @@ export const ragChatApi = {
         body: JSON.stringify({ question }),
       },
       onMessage: (raw: string) => {
-        // progress:/reference: 前缀事件是元数据，不进回答正文
+        // 前缀事件是元数据，不进回答正文
         if (raw.startsWith('progress:')) {
           onProgress?.(raw.substring('progress:'.length));
           return;
@@ -261,6 +273,15 @@ export const ragChatApi = {
           try {
             const sources = JSON.parse(payload) as RagSourceDTO[];
             onReference?.(sources);
+          } catch {
+            // 忽略解析失败，不中断流
+          }
+          return;
+        }
+        if (raw.startsWith(CITATION_PREFIX)) {
+          const payload = raw.substring(CITATION_PREFIX.length);
+          try {
+            onCitation?.(JSON.parse(payload) as RagCitationMetadata);
           } catch {
             // 忽略解析失败，不中断流
           }

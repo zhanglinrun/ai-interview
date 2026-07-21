@@ -40,10 +40,10 @@ public class KnowledgeBaseEntity extends BaseEntity {
     // 文件类型
     private String contentType;
     
-    // RustFS存储的文件Key
+    // MinIO 存储的文件 Key
     private String storageKey;
     
-    // RustFS存储的文件URL
+    // MinIO 存储的文件 URL
     private String storageUrl;
     
     // 上传时间

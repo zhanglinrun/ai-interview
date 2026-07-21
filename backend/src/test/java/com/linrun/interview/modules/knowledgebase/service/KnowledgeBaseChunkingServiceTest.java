@@ -30,4 +30,14 @@ class KnowledgeBaseChunkingServiceTest {
     assertThat(resolved.splitType()).isEqualTo(SplitType.BROTHER.name());
     assertThat(resolved.chunkSize()).isEqualTo(512);
   }
+
+  @Test
+  @DisplayName("overlap 不得达到 chunkSize 以免滑窗死循环")
+  void resolveSplitParamClampsOversizedOverlap() {
+    DocumentSplitParam resolved = service.resolveSplitParam(
+        new DocumentSplitParam(SplitType.BROTHER.name(), 80, 100, null, null, null));
+
+    assertThat(resolved.chunkSize()).isEqualTo(80);
+    assertThat(resolved.overlap()).isEqualTo(79);
+  }
 }

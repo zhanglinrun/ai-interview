@@ -102,22 +102,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host 'Validated Compose: production HTTPS with logs profile'
 
-$rootCases = @('docker-compose.yml', 'docker-compose.dev.yml')
-foreach ($file in $rootCases) {
-  & docker compose --project-directory $repoRoot -f (Join-Path $repoRoot $file) config --quiet
-  if ($LASTEXITCODE -ne 0) {
-    throw "Compose validation failed: root wrapper $file"
-  }
-  Write-Host "Validated Compose: root wrapper $file"
-}
-
-& docker compose --project-directory $repoRoot -f (Join-Path $repoRoot 'docker-compose.dev.yml') `
-  -f (Join-Path $repoRoot 'docker-compose.monitor.yml') config --quiet
-if ($LASTEXITCODE -ne 0) {
-  throw 'Compose validation failed: root monitoring wrapper'
-}
-Write-Host 'Validated Compose: root monitoring wrapper'
-
 $productionFiles = @(
   (Join-Path $devOps 'docker-compose-prod.yml'),
   (Join-Path $devOps 'docker-compose-observability.yml')

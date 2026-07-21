@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * RAG 聊天控制器
@@ -36,6 +37,7 @@ import java.util.List;
 public class RagChatController {
 
     static final String EMPTY_RESPONSE_FALLBACK = "本次回答未生成有效内容，请重新提问。";
+    static final String CANCELLED_RESPONSE_FALLBACK = "【中断】回答生成已取消，请重新提问。";
 
     private final RagChatSessionService sessionService;
 
@@ -126,11 +128,20 @@ public class RagChatController {
         Long messageId = sessionService.prepareStreamMessage(sessionId, request.question());
 
         // 2. 获取流式响应
-        StringBuilder fullContent = new StringBuilder();
+        StringBuffer fullContent = new StringBuffer();
+        AtomicBoolean messagePersisted = new AtomicBoolean(false);
+        Flux<String> answerStream;
+        try {
+            answerStream = sessionService.getStreamAnswer(
+                sessionId, request.question(), messageId);
+        } catch (Exception e) {
+            // getStreamAnswer 在请求线程同步读取会话与历史；异常也转成流错误，统一完成占位消息。
+            answerStream = Flux.error(e);
+        }
 
-        return sessionService.getStreamAnswer(sessionId, request.question(), messageId)
+        return answerStream
             .doOnNext(chunk -> {
-                // progress:/reference: 前缀事件是元数据，不计入回答正文；
+                // progress:/reference:/citation: 前缀事件是元数据，不计入回答正文；
                 // 普通文本是回答 token；交互卡片的提示正文也需要落库，避免刷新后只剩空消息
                 if (!isPrefixedEvent(chunk)) {
                     fullContent.append(unescapeChunk(chunk));
@@ -138,7 +149,7 @@ public class RagChatController {
                     fullContent.append(chunk.substring("card:".length()));
                 }
             })
-            // 使用 ServerSentEvent 包装；progress:/reference: 原样透传，回答 token 转义换行避免破坏 SSE
+            // 使用 ServerSentEvent 包装；元数据原样透传，回答 token 转义换行避免破坏 SSE
             .map(chunk -> ServerSentEvent.<String>builder()
                 .data(isPrefixedEvent(chunk) ? chunk : escapeChunk(chunk))
                 .build())
@@ -148,7 +159,7 @@ public class RagChatController {
                 String content = !completedContent.isBlank()
                     ? completedContent
                     : EMPTY_RESPONSE_FALLBACK;
-                sessionService.completeStreamMessage(messageId, content);
+                completeMessageOnce(messagePersisted, messageId, content);
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
                 // 4. 异步 LLM 标题生成（亮点6）：首问完成后用虚拟线程根据首问生成摘要标题
                 sessionService.maybeGenerateTitleAsync(sessionId, request.question());
@@ -158,16 +169,31 @@ public class RagChatController {
                 String content = !fullContent.isEmpty()
                     ? fullContent.toString()
                     : "【错误】回答生成失败：" + e.getMessage();
-                sessionService.completeStreamMessage(messageId, content);
+                completeMessageOnce(messagePersisted, messageId, content);
                 log.error("RAG 聊天流式错误: sessionId={}", sessionId, e);
+            })
+            .doOnCancel(() -> {
+                String content = !fullContent.isEmpty()
+                    ? fullContent.toString()
+                    : CANCELLED_RESPONSE_FALLBACK;
+                completeMessageOnce(messagePersisted, messageId, content);
+                log.info("RAG 聊天流式取消: sessionId={}, messageId={}", sessionId, messageId);
             });
+    }
+
+    private void completeMessageOnce(
+        AtomicBoolean messagePersisted, Long messageId, String content) {
+        if (messagePersisted.compareAndSet(false, true)) {
+            sessionService.completeStreamMessage(messageId, content);
+        }
     }
 
     /** 前缀事件原样透传；除 card: 提示会持久化外，其余事件不计入回答正文。 */
     private static boolean isPrefixedEvent(String chunk) {
         return chunk != null
             && (chunk.startsWith("progress:") || chunk.startsWith("reference:")
-            || chunk.startsWith("rewritten:") || chunk.startsWith("route:")
+            || chunk.startsWith("citation:") || chunk.startsWith("rewritten:")
+            || chunk.startsWith("route:")
             || chunk.startsWith("card:") || chunk.startsWith("card_choice:"));
     }
 

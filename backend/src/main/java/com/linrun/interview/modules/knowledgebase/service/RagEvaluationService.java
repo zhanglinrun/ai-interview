@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.time.LocalDateTime;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +37,7 @@ public class RagEvaluationService {
         int k = request.k() != null && request.k() > 0 ? request.k() : 5;
         List<RagEvalResponse.ItemResult> results = new ArrayList<>();
         for (RagEvalRequest.Item item : request.items()) {
+            validateGroundTruth(item);
             List<TextSegment> retrieved = queryService.retrieveForEvaluation(
                 request.knowledgeBaseIds(), item.question()).stream().limit(k).toList();
             results.add(evaluateItem(item, retrieved, k));
@@ -44,13 +46,15 @@ public class RagEvaluationService {
         double hitRate = total == 0 ? 0 : results.stream().filter(RagEvalResponse.ItemResult::hit).count() * 1.0 / total;
         double mrr = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::reciprocalRank).average().orElse(0);
         double ndcg = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::ndcg).average().orElse(0);
-        double citationHitRate = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::citationHitRate).average().orElse(0);
-        double citationCoverage = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::citationCoverage).average().orElse(0);
+        double retrievalRecall = total == 0 ? 0 : results.stream()
+            .mapToDouble(RagEvalResponse.ItemResult::retrievalRecall).average().orElse(0);
+        double retrievalPrecision = total == 0 ? 0 : results.stream()
+            .mapToDouble(RagEvalResponse.ItemResult::retrievalPrecision).average().orElse(0);
         RagEvalResponse response = new RagEvalResponse(null, total, k, round(hitRate), round(mrr),
-            round(ndcg), round(citationHitRate), round(citationCoverage), results);
+            round(ndcg), round(retrievalRecall), round(retrievalPrecision), results);
         String runId = saveRun(request, response);
         return new RagEvalResponse(runId, response.total(), response.k(), response.hitRate(),
-            response.mrr(), response.ndcg(), response.citationHitRate(), response.citationCoverage(),
+            response.mrr(), response.ndcg(), response.retrievalRecall(), response.retrievalPrecision(),
             response.items());
     }
 
@@ -67,6 +71,9 @@ public class RagEvaluationService {
                     "requestItems", request.items(),
                     "results", response.items(),
                     "ndcg", response.ndcg(),
+                    "retrievalRecall", response.retrievalRecall(),
+                    "retrievalPrecision", response.retrievalPrecision(),
+                    // 兼容历史读取方；新 UI 和报告只使用 retrieval* 字段。
                     "citationHitRate", response.citationHitRate(),
                     "citationCoverage", response.citationCoverage()
                 )))
@@ -75,6 +82,8 @@ public class RagEvaluationService {
                 .hitRate(response.hitRate())
                 .meanReciprocalRank(response.mrr())
                 .ndcg(response.ndcg())
+                .retrievalRecall(response.retrievalRecall())
+                .retrievalPrecision(response.retrievalPrecision())
                 .citationHitRate(response.citationHitRate())
                 .citationCoverage(response.citationCoverage())
                 .topk(response.k())
@@ -93,19 +102,46 @@ public class RagEvaluationService {
         return title.length() <= 120 ? title : title.substring(0, 120);
     }
 
+    private void validateGroundTruth(RagEvalRequest.Item item) {
+        boolean hasChunkId = item.expectedChunkIds() != null
+            && item.expectedChunkIds().stream()
+                .anyMatch(value -> value != null && !value.isBlank());
+        boolean hasKeyword = item.expectedKeywords() != null
+            && item.expectedKeywords().stream()
+                .anyMatch(value -> value != null && !value.isBlank());
+        if (!hasChunkId && !hasKeyword) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "RAG 评测项必须提供 expectedKeywords 或 expectedChunkIds: " + item.question());
+        }
+    }
+
     private RagEvalResponse.ItemResult evaluateItem(RagEvalRequest.Item item, List<TextSegment> retrieved, int k) {
         Set<String> expectedChunkIds = item.expectedChunkIds() == null
             ? Set.of()
-            : new HashSet<>(item.expectedChunkIds());
-        List<String> expectedKeywords = item.expectedKeywords() == null
-            ? List.of()
-            : item.expectedKeywords();
+            : item.expectedChunkIds().stream()
+                .filter(chunkId -> chunkId != null && !chunkId.isBlank())
+                .map(String::strip)
+                .collect(Collectors.toSet());
+        Set<String> expectedKeywords = item.expectedKeywords() == null
+            ? Set.of()
+            : item.expectedKeywords().stream()
+                .filter(keyword -> keyword != null && !keyword.isBlank())
+                .map(keyword -> keyword.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        int expectedEvidenceCount = expectedEvidenceCount(expectedChunkIds, expectedKeywords);
+        if (expectedEvidenceCount == 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "RAG 评测项必须提供 expectedKeywords 或 expectedChunkIds: " + item.question());
+        }
 
         int firstHitRank = 0;
         List<String> chunkIds = new ArrayList<>();
         List<RagEvalResponse.RetrievedSegment> retrievedSegments = new ArrayList<>();
         double dcg = 0.0;
-        int matchedEvidenceCount = 0;
+        int relevantResultCount = 0;
+        Set<String> matchedEvidence = new HashSet<>();
+        Set<String> seenRetrievedChunks = new HashSet<>();
+        int uniqueRetrievedCount = 0;
         for (int i = 0; i < retrieved.size(); i++) {
             TextSegment segment = retrieved.get(i);
             String chunkId = segment.metadata().getString(MetadataKeyConstant.CHUNK_ID);
@@ -116,47 +152,51 @@ public class RagEvaluationService {
                 parseLong(segment.metadata().getString(MetadataKeyConstant.DOC_ID)),
                 snippet(segment.text()),
                 parseScore(segment.metadata().toMap().get("SCORE"))));
-            if (matches(segment, expectedChunkIds, expectedKeywords)) {
+            if (chunkId != null && !seenRetrievedChunks.add(chunkId)) {
+                continue;
+            }
+            uniqueRetrievedCount++;
+            Set<String> segmentEvidence = new HashSet<>();
+            if (chunkId != null && expectedChunkIds.contains(chunkId)) {
+                segmentEvidence.add("chunk:" + chunkId);
+            }
+            String text = segment.text() == null ? "" : segment.text().toLowerCase(Locale.ROOT);
+            for (String keyword : expectedKeywords) {
+                if (text.contains(keyword)) {
+                    segmentEvidence.add("keyword:" + keyword);
+                }
+            }
+            segmentEvidence.removeAll(matchedEvidence);
+            if (!segmentEvidence.isEmpty()) {
+                matchedEvidence.addAll(segmentEvidence);
                 int rank = i + 1;
                 if (firstHitRank == 0) {
                     firstHitRank = rank;
                 }
-                matchedEvidenceCount++;
+                relevantResultCount++;
                 dcg += 1.0 / log2(rank + 1);
             }
         }
-        int expectedEvidenceCount = expectedEvidenceCount(expectedChunkIds, expectedKeywords);
-        int idealHits = Math.min(k, Math.max(1, expectedEvidenceCount));
+        int matchedEvidenceCount = matchedEvidence.size();
+        int idealHits = Math.min(k, expectedEvidenceCount);
         double idcg = 0.0;
         for (int i = 1; i <= idealHits; i++) {
             idcg += 1.0 / log2(i + 1);
         }
         double reciprocalRank = firstHitRank == 0 ? 0 : 1.0 / firstHitRank;
         double ndcg = idcg == 0 ? 0 : dcg / idcg;
-        double citationHitRate = expectedEvidenceCount == 0 ? 0 : Math.min(1.0, matchedEvidenceCount * 1.0 / expectedEvidenceCount);
-        double citationCoverage = retrieved.isEmpty() ? 0 : matchedEvidenceCount * 1.0 / retrieved.size();
+        double retrievalRecall = Math.min(
+            1.0, matchedEvidenceCount * 1.0 / expectedEvidenceCount);
+        double retrievalPrecision = uniqueRetrievedCount == 0
+            ? 0 : relevantResultCount * 1.0 / uniqueRetrievedCount;
         return new RagEvalResponse.ItemResult(
             item.question(), firstHitRank > 0, firstHitRank, round(reciprocalRank), round(ndcg),
-            round(citationHitRate), round(citationCoverage), chunkIds, retrievedSegments);
+            round(retrievalRecall), round(retrievalPrecision), chunkIds, retrievedSegments);
     }
 
-    private boolean matches(TextSegment segment, Set<String> expectedChunkIds, List<String> expectedKeywords) {
-        String chunkId = segment.metadata().getString(MetadataKeyConstant.CHUNK_ID);
-        if (chunkId != null && expectedChunkIds.contains(chunkId)) {
-            return true;
-        }
-        String text = segment.text().toLowerCase(Locale.ROOT);
-        return expectedKeywords.stream()
-            .filter(keyword -> keyword != null && !keyword.isBlank())
-            .map(keyword -> keyword.toLowerCase(Locale.ROOT))
-            .anyMatch(text::contains);
-    }
-
-    private int expectedEvidenceCount(Set<String> expectedChunkIds, List<String> expectedKeywords) {
+    private int expectedEvidenceCount(Set<String> expectedChunkIds, Set<String> expectedKeywords) {
         int chunkCount = expectedChunkIds == null ? 0 : expectedChunkIds.size();
-        int keywordCount = expectedKeywords == null ? 0 : (int) expectedKeywords.stream()
-            .filter(keyword -> keyword != null && !keyword.isBlank())
-            .count();
+        int keywordCount = expectedKeywords == null ? 0 : expectedKeywords.size();
         return chunkCount + keywordCount;
     }
 

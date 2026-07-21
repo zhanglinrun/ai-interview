@@ -37,6 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
@@ -58,7 +59,8 @@ import java.util.Map;
  *   <li>解析产物 Markdown 直接存版本表 {@code convertedContent}（Lob），split 时直接取，省存储往返。</li>
  *   <li>切块固定用 {@link MarkdownHeaderBrotherTextSplitter}，块大小/重叠取自 {@link KnowledgeBaseQueryProperties}。</li>
  *   <li>{@code Assert} → {@link BusinessException}；并发控制用 {@code @DistributeLock}（见切面 DistributeLockAspect）。</li>
- *   <li>事务边界：upload/split 含存储/解析外部调用，不加 {@code @Transactional}；DB 写操作走各 Service 自身事务。</li>
+ *   <li>事务边界：upload/split/rechunk 的 MinIO、解析、切块与 ES 调用均在事务外；仅 segment
+ *       落库、状态推进和事件发布通过 {@link TransactionTemplate} 进入同一个短事务。</li>
  * </ul>
  */
 @Slf4j
@@ -80,6 +82,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseChunkingService chunkingService;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final VectorizationTaskService vectorizationTaskService;
+    private final TransactionTemplate transactionTemplate;
     private final VectorStoreService vectorStoreService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
@@ -114,7 +118,7 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容已存在，请勿重复上传");
         }
 
-        // 3. 存原始文件到 RustFS
+        // 3. 存原始文件到 MinIO
         String storageKey = storageService.uploadKnowledgeBase(file);
         String docUrl = storageService.getFileUrl(storageKey);
 
@@ -247,16 +251,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 120,
+    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = -1,
         message = "该知识库正在切块，请稍后再试")
     public int split(Long docId) {
         return split(docId, chunkingService.defaultSplitParam());
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 120,
+    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = -1,
         message = "该知识库正在切块，请稍后再试")
     public int split(Long docId, DocumentSplitParam splitParam) {
         return splitInternal(docId, splitParam);
@@ -279,16 +281,18 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             log.info("版本已切块，返回现有分段数: docId={}, count={}", docId, count);
             return (int) count;
         }
-        if (entity.getDocStatus() == DocumentStatus.VECTOR_STORED) {
-            vectorStoreService.removeByDocIdAndVersion(docId, version.getVersionId());
-            segmentService.physicalDeleteByDocumentVersion(version.getVersionId());
-            version.setStatus(DocumentStatus.CONVERTED);
-            versionService.update(version);
-            entity.setDocStatus(DocumentStatus.CONVERTED);
-            MapperUtils.save(knowledgeBaseEntityMapper, entity);
+        if (entity.getDocStatus() == DocumentStatus.VECTOR_STORED
+            || version.getStatus() == DocumentStatus.VECTOR_STORED) {
+            beginOrResumeRechunk(entity, version);
+            clearVersionArtifacts(docId, version.getVersionId());
+        } else if (entity.getDocStatus() == DocumentStatus.CONVERTED
+            && version.getStatus() == DocumentStatus.CONVERTED
+            && segmentService.countByDocumentVersion(version.getVersionId()) > 0) {
+            // 上次重切块可能在 DB 状态接管后、清理外部向量前失败；保留旧 segment 作为恢复标记。
+            clearVersionArtifacts(docId, version.getVersionId());
         }
         if (entity.getDocStatus() != DocumentStatus.CONVERTED
-            && version.getStatus() != DocumentStatus.CONVERTED) {
+            || version.getStatus() != DocumentStatus.CONVERTED) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "文档状态不为 CONVERTED，无法切块，当前状态: " + entity.getDocStatus());
         }
@@ -376,15 +380,16 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             segEntity.setStatus(SegmentStatus.STORED);
             segmentEntities.add(segEntity);
         }
-        segmentService.saveBatch(segmentEntities);
-
-        // 状态升 CHUNKED（单调推进，对齐业界实践 split）
-        knowledgeDocumentService.advanceDocumentAndVersionStatus(
-            docId, version.getVersionId(), DocumentStatus.CHUNKED);
-
-        // 发事件触发异步向量化
         int segmentCount = segmentEntities.size();
-        eventPublisher.publishEvent(new DocumentChunkedEvent(docId, version.getVersionId(), segmentCount));
+        // 只把 segment 落库、状态推进和事件发布放进短事务。AFTER_COMMIT 监听器会在该事务
+        // 真正提交后触发；MinIO 下载、Excel/Markdown 切块均已在事务外完成。
+        transactionTemplate.executeWithoutResult(tx -> {
+            segmentService.saveBatch(segmentEntities);
+            knowledgeDocumentService.advanceDocumentAndVersionStatus(
+                docId, version.getVersionId(), DocumentStatus.CHUNKED);
+            eventPublisher.publishEvent(
+                new DocumentChunkedEvent(docId, version.getVersionId(), segmentCount));
+        });
         log.info("文档切块事件已发布: docId={}, versionId={}, segmentCount={}",
             docId, version.getVersionId(), segmentCount);
         return segmentCount;
@@ -397,9 +402,8 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     // 与 split 共用同一把锁，rechunk 直接调用 splitInternal 避免同类调用绕过代理。
-    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = 180,
+    @DistributeLock(key = "'kb:split:' + #docId", waitTime = 0, leaseTime = -1,
         message = "该知识库正在切块或重新向量化，请稍后再试")
     public int rechunk(Long docId) {
         Long userId = UserContext.requireUserId();
@@ -414,19 +418,42 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         KnowledgeBaseVersionEntity version = versionService.getById(versionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本记录不存在"));
 
-        // 1. 清 ES 旧向量（按 docId+versionId，失败抛异常回滚，避免残留孤儿向量）
-        vectorStoreService.removeByDocIdAndVersion(docId, versionId);
-        // 2. 物理删当前版本 segment
-        segmentService.physicalDeleteByDocumentVersion(versionId);
-        // 3. 版本降回 CONVERTED
-        version.setStatus(DocumentStatus.CONVERTED);
-        versionService.update(version);
-        // 4. 主表降回 CONVERTED
-        entity.setDocStatus(DocumentStatus.CONVERTED);
-        MapperUtils.save(knowledgeBaseEntityMapper, entity);
+        // 先用 DB 状态接管任务，再清理外部向量。失败时保留 CONVERTED + 旧 segment，重试可继续收敛。
+        beginOrResumeRechunk(entity, version);
+        clearVersionArtifacts(docId, versionId);
 
-        // 5. 重新切块发事件触发异步向量化
+        // 重新切块发事件触发异步向量化
         return splitInternal(docId, chunkingService.defaultSplitParam());
+    }
+
+    private void beginOrResumeRechunk(
+        KnowledgeBaseEntity entity, KnowledgeBaseVersionEntity version) {
+        if (entity.getDocStatus() == DocumentStatus.CONVERTED
+            && version.getStatus() == DocumentStatus.CONVERTED) {
+            return;
+        }
+        if (entity.getDocStatus() != DocumentStatus.VECTOR_STORED
+            || version.getStatus() != DocumentStatus.VECTOR_STORED) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "文档状态已变化，无法重新切块: docId=" + entity.getId());
+        }
+        transactionTemplate.executeWithoutResult(tx -> {
+            if (knowledgeBaseEntityMapper.beginRechunk(entity.getId(), version.getVersionId()) != 1
+                || !versionService.beginRechunk(version.getVersionId(), entity.getId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "文档状态已变化，无法重新切块: docId=" + entity.getId());
+            }
+        });
+        entity.setDocStatus(DocumentStatus.CONVERTED);
+        version.setStatus(DocumentStatus.CONVERTED);
+    }
+
+    private void clearVersionArtifacts(Long docId, Long versionId) {
+        vectorStoreService.removeByDocIdAndVersion(docId, versionId);
+        transactionTemplate.executeWithoutResult(tx -> {
+            segmentService.physicalDeleteByDocumentVersion(versionId);
+            vectorizationTaskService.reset(versionId);
+        });
     }
 
     @Override

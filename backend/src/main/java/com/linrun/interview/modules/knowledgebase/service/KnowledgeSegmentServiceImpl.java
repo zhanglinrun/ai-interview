@@ -105,11 +105,14 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
 
   @Override
   @Transactional
-  public int batchUpdateEmbedding(List<KnowledgeBaseSegmentEntity> segments) {
+  public int batchUpdateEmbedding(
+      Long docId, Long versionId, int attempt, LocalDateTime claimedAt,
+      List<KnowledgeBaseSegmentEntity> segments) {
     if (segments == null || segments.isEmpty()) {
       return 0;
     }
-    int affected = segmentMapper.batchUpdateEmbedding(segments, SegmentStatus.VECTOR_STORED.name());
+    int affected = segmentMapper.batchUpdateEmbedding(
+        segments, docId, versionId, attempt, claimedAt, SegmentStatus.VECTOR_STORED.name());
     log.info("批量回写分段 embeddingId 完成: count={}, affected={}", segments.size(), affected);
     return affected;
   }

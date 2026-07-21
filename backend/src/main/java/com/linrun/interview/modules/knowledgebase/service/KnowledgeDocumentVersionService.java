@@ -31,6 +31,9 @@ public interface KnowledgeDocumentVersionService {
     /** 更新版本（状态切换等）。 */
     void update(KnowledgeBaseVersionEntity version);
 
+    /** 将当前已向量化版本原子降为 CONVERTED，供重新切块使用。 */
+    boolean beginRechunk(Long versionId, Long docId);
+
     /** 按 docId 物理删除所有版本。 */
     int physicalDeleteByDocId(Long docId);
 

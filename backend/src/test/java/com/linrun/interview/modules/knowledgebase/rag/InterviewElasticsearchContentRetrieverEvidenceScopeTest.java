@@ -47,8 +47,6 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
         List.of(new EvidenceScope.DomainScope(
             DataDomain.CANDIDATE, Set.of("doc-1"), Set.of("v1"), 1.0d)),
         true);
-    KnowledgeBaseQueryProperties.ParentExpand expand = new KnowledgeBaseQueryProperties.ParentExpand();
-    expand.setEnabled(false);
     try (RestClient restClient = RestClient.builder(
         new HttpHost("127.0.0.1", server.getAddress().getPort(), "http")).build()) {
       InterviewElasticsearchContentRetriever retriever =
@@ -58,8 +56,6 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
               10,
               0.0d,
               List.of(),
-              null,
-              expand,
               new KnowledgeBaseQueryProperties.Hybrid(),
               null,
               null,
@@ -68,8 +64,8 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
               new ObjectMapper(),
               "full_text",
               7L,
-              null,
-              scope);
+              scope,
+              null);
 
       var result = retriever.retrieve(Query.from("缓存一致性"));
 
@@ -100,8 +96,6 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
     });
     server.start();
 
-    KnowledgeBaseQueryProperties.ParentExpand expand = new KnowledgeBaseQueryProperties.ParentExpand();
-    expand.setEnabled(false);
     try (RestClient restClient = RestClient.builder(
         new HttpHost("127.0.0.1", server.getAddress().getPort(), "http")).build()) {
       InterviewElasticsearchContentRetriever retriever =
@@ -111,8 +105,6 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
               10,
               0.0d,
               List.of(),
-              null,
-              expand,
               new KnowledgeBaseQueryProperties.Hybrid(),
               null,
               null,
@@ -121,9 +113,9 @@ class InterviewElasticsearchContentRetrieverEvidenceScopeTest {
               new ObjectMapper(),
               "full_text",
               7L,
-              null,
               new EvidenceScope(7L, List.of(new EvidenceScope.DomainScope(
-                  DataDomain.CANDIDATE, Set.of("doc-1"), Set.of("v1"), 1.0d)), true));
+                  DataDomain.CANDIDATE, Set.of("doc-1"), Set.of("v1"), 1.0d)), true),
+              null);
 
       assertThat(retriever.retrieve(Query.from("缓存一致性"))).isEmpty();
     } finally {

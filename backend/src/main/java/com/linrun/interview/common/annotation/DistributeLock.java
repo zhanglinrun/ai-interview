@@ -42,7 +42,7 @@ public @interface DistributeLock {
     long waitTime() default 0;
 
     /**
-     * 持有锁最长时间（防止持锁进程宕机导致死锁），超时自动释放。
+     * 持有锁最长时间；小于等于 0 时使用 Redisson watchdog 自动续期。
      *
      * @return 持锁时间
      */

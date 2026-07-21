@@ -25,6 +25,17 @@ public interface KnowledgeBaseEntityMapper extends BaseMapper<KnowledgeBaseEntit
   })
   int incrementQuestionCountBatch(@Param("userId") Long userId, @Param("ids") List<Long> ids);
 
+  @Update("""
+      UPDATE knowledge_bases
+      SET doc_status = 'CONVERTED',
+          lock_version = lock_version + 1
+      WHERE id = #{docId}
+        AND current_version_id = #{versionId}
+        AND doc_status = 'VECTOR_STORED'
+        AND deleted = 0
+      """)
+  int beginRechunk(@Param("docId") Long docId, @Param("versionId") Long versionId);
+
   /** 级联删除时物理删主表，绕过 {@code @TableLogic} 软删。 */
   @Delete("DELETE FROM knowledge_bases WHERE id = #{id}")
   int physicalDeleteById(@Param("id") Long id);

@@ -17,6 +17,10 @@ public interface VectorStoreService {
      */
     List<String> embedAndStore(List<KnowledgeBaseSegmentEntity> segments);
 
+    /** 批量写入并在 ES metadata 中记录本批租约令牌。 */
+    List<String> embedAndStore(
+        List<KnowledgeBaseSegmentEntity> segments, String embeddingClaim);
+
     /**
      * 单条嵌入并写入 ES，返回 embeddingId。
      */
@@ -31,6 +35,9 @@ public interface VectorStoreService {
      * 按 embeddingId 集合批量删除向量（向量化批次 DB 回写失败时的反向补偿，失败抛异常）。
      */
     void removeByEmbeddingIds(List<String> embeddingIds);
+
+    /** 仅删除仍携带指定租约令牌的向量，避免旧任务误删新任务覆盖的稳定 ID。 */
+    void removeByEmbeddingClaim(String embeddingClaim);
 
     /**
      * 按 docId 删除该文档所有版本的向量（metadata DOC_ID filter）。

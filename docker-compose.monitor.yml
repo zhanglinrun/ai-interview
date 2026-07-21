@@ -1,4 +1,0 @@
-# 兼容入口 → dev-ops/docker-compose-monitor.yml
-# 推荐：cd dev-ops && docker compose -f docker-compose-monitor.yml up -d
-include:
-  - path: dev-ops/docker-compose-monitor.yml

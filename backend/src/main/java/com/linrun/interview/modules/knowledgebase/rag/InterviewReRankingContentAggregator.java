@@ -5,23 +5,22 @@ import dev.langchain4j.model.scoring.ScoringModel;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.DefaultContent;
 import dev.langchain4j.rag.content.aggregator.ContentAggregator;
-import dev.langchain4j.rag.content.aggregator.ReciprocalRankFuser;
 import dev.langchain4j.rag.query.Query;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static dev.langchain4j.internal.Exceptions.illegalArgument;
 import static dev.langchain4j.internal.Utils.getOrDefault;
-import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
 import static dev.langchain4j.rag.content.ContentMetadata.RERANKED_SCORE;
 
 /**
@@ -57,6 +56,9 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
     private final Integer maxResults;
     private final Consumer<String> progressCallback;
     private final RagQueryTrace trace;
+    private final int hybridRrfK;
+    private final int fusionRrfK;
+    private final int fusionFinalTopK;
     /** rerank 进度只发一次（聚合可能对多 query 多次调用 aggregate）。 */
     private final AtomicBoolean rerankProgressSent = new AtomicBoolean(false);
 
@@ -67,14 +69,14 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
     public InterviewReRankingContentAggregator(ScoringModel scoringModel,
                                                 Function<Map<Query, Collection<List<Content>>>, Query> querySelector,
                                                 Double minScore) {
-        this(scoringModel, querySelector, minScore, null);
+        this(scoringModel, querySelector, minScore, null, null, null, null, null, null);
     }
 
     public InterviewReRankingContentAggregator(ScoringModel scoringModel,
                                                 Function<Map<Query, Collection<List<Content>>>, Query> querySelector,
                                                 Double minScore,
                                                 Integer maxResults) {
-        this(scoringModel, querySelector, minScore, maxResults, null);
+        this(scoringModel, querySelector, minScore, maxResults, null, null, null, null, null);
     }
 
     public InterviewReRankingContentAggregator(ScoringModel scoringModel,
@@ -82,7 +84,8 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
                                                 Double minScore,
                                                 Integer maxResults,
                                                 Consumer<String> progressCallback) {
-        this(scoringModel, querySelector, minScore, maxResults, progressCallback, null);
+        this(scoringModel, querySelector, minScore, maxResults, progressCallback,
+            null, null, null, null);
     }
 
     public InterviewReRankingContentAggregator(ScoringModel scoringModel,
@@ -90,13 +93,19 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
                                                 Double minScore,
                                                 Integer maxResults,
                                                 Consumer<String> progressCallback,
-                                                RagQueryTrace trace) {
-        this.scoringModel = ensureNotNull(scoringModel, "scoringModel");
+                                                RagQueryTrace trace,
+                                                Integer hybridRrfK,
+                                                Integer fusionRrfK,
+                                                Integer fusionFinalTopK) {
+        this.scoringModel = scoringModel;
         this.querySelector = getOrDefault(querySelector, DEFAULT_QUERY_SELECTOR);
         this.minScore = minScore;
         this.maxResults = getOrDefault(maxResults, Integer.MAX_VALUE);
         this.progressCallback = progressCallback;
         this.trace = trace;
+        this.hybridRrfK = getOrDefault(hybridRrfK, 60);
+        this.fusionRrfK = getOrDefault(fusionRrfK, 60);
+        this.fusionFinalTopK = getOrDefault(fusionFinalTopK, Integer.MAX_VALUE);
     }
 
     @Override
@@ -105,7 +114,8 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
             return Collections.emptyList();
         }
         // 亮点2：rerank 前推一次"正在排序筛选结果"进度
-        if (progressCallback != null && rerankProgressSent.compareAndSet(false, true)) {
+        if (scoringModel != null && progressCallback != null
+            && rerankProgressSent.compareAndSet(false, true)) {
             progressCallback.accept("正在排序筛选结果...");
         }
 
@@ -125,14 +135,20 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         }
 
         // 跨 query 二次 RRF 融合
-        List<Content> fusedContents = InterviewReciprocalRankFuser.fuse(参考实现DefaultContents);
+        List<Content> fusedContents = InterviewReciprocalRankFuser.fuse(
+            参考实现DefaultContents, fusionRrfK);
+        if (fusedContents.size() > fusionFinalTopK) {
+            fusedContents = fusedContents.subList(0, fusionFinalTopK);
+        }
 
         if (fusedContents.isEmpty()) {
             return fusedContents;
         }
 
-        List<Content> reranked = reRankAndFilter(fusedContents, query);
-        if (trace != null) {
+        List<Content> reranked = scoringModel == null
+            ? fallback(fusedContents)
+            : reRankAndFilter(fusedContents, query);
+        if (trace != null && scoringModel != null) {
             trace.recordReranked(reranked);
         }
         return reranked;
@@ -142,29 +158,71 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         Map<Query, List<Content>> fused = new LinkedHashMap<>();
         for (Query query : queryToContents.keySet()) {
             Collection<List<Content>> contents = queryToContents.get(query);
-            fused.put(query, ReciprocalRankFuser.fuse(contents));
+            List<List<InterviewDefaultContent>> wrapped = contents.stream()
+                .map(list -> list.stream()
+                    .map(content -> new InterviewDefaultContent((DefaultContent) content))
+                    .toList())
+                .toList();
+            fused.put(query, InterviewReciprocalRankFuser.fuse(wrapped, hybridRrfK));
         }
         return fused;
     }
 
     protected List<Content> reRankAndFilter(List<Content> contents, Query query) {
-        List<TextSegment> segments = contents.stream()
-            .map(Content::textSegment)
-            .collect(Collectors.toList());
+        List<TextSegment> segments = contents.stream().map(Content::textSegment).toList();
 
-        List<Double> scores = scoringModel.scoreAll(segments, query.text()).content();
-
-        Map<TextSegment, Double> segmentToScore = new LinkedHashMap<>();
-        for (int i = 0; i < segments.size(); i++) {
-            segmentToScore.put(segments.get(i), scores.get(i));
+        List<Double> scores;
+        try {
+            scores = scoringModel.scoreAll(segments, query.text()).content();
+        } catch (Exception e) {
+            log.warn("Rerank 失败，保留 RRF 顺序: {}", e.getMessage());
+            return fallback(contents);
+        }
+        if (!usableScores(scores, contents.size())) {
+            log.warn("Rerank 返回不可用分数，保留 RRF 顺序: expected={}, actual={}",
+                contents.size(), scores == null ? null : scores.size());
+            return fallback(contents);
         }
 
-        return segmentToScore.entrySet().stream()
-            .filter(entry -> minScore == null || entry.getValue() >= minScore)
-            .sorted(Map.Entry.<TextSegment, Double>comparingByValue().reversed())
-            .map(entry -> Content.from(entry.getKey(), Map.of(RERANKED_SCORE, entry.getValue())))
+        List<ScoredContent> scored = new ArrayList<>(contents.size());
+        for (int i = 0; i < segments.size(); i++) {
+            scored.add(new ScoredContent(contents.get(i), scores.get(i), i));
+        }
+
+        return scored.stream()
+            .filter(item -> minScore == null || item.score() >= minScore)
+            .sorted(Comparator.comparingDouble(ScoredContent::score).reversed()
+                .thenComparingInt(ScoredContent::index))
+            .map(item -> Content.from(item.content().textSegment(),
+                Map.of(RERANKED_SCORE, item.score())))
             .limit(maxResults)
-            .collect(Collectors.toList());
+            .toList();
+    }
+
+    private boolean usableScores(List<Double> scores, int expectedSize) {
+        if (scores == null || scores.size() != expectedSize || scores.isEmpty()) {
+            return false;
+        }
+        Double first = null;
+        boolean hasVariation = false;
+        for (Double score : scores) {
+            if (score == null || !Double.isFinite(score)) {
+                return false;
+            }
+            if (first == null) {
+                first = score;
+            } else if (Double.compare(first, score) != 0) {
+                hasVariation = true;
+            }
+        }
+        return scores.size() == 1 || hasVariation;
+    }
+
+    private List<Content> fallback(List<Content> contents) {
+        return contents.stream().limit(maxResults).toList();
+    }
+
+    private record ScoredContent(Content content, double score, int index) {
     }
 
     public static ReRankingContentAggregatorBuilder builder() {
@@ -178,6 +236,9 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         private Integer maxResults;
         private Consumer<String> progressCallback;
         private RagQueryTrace trace;
+        private Integer hybridRrfK;
+        private Integer fusionRrfK;
+        private Integer fusionFinalTopK;
 
         public ReRankingContentAggregatorBuilder scoringModel(ScoringModel scoringModel) {
             this.scoringModel = scoringModel;
@@ -210,9 +271,24 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
             return this;
         }
 
+        public ReRankingContentAggregatorBuilder hybridRrfK(Integer hybridRrfK) {
+            this.hybridRrfK = hybridRrfK;
+            return this;
+        }
+
+        public ReRankingContentAggregatorBuilder fusionRrfK(Integer fusionRrfK) {
+            this.fusionRrfK = fusionRrfK;
+            return this;
+        }
+
+        public ReRankingContentAggregatorBuilder fusionFinalTopK(Integer fusionFinalTopK) {
+            this.fusionFinalTopK = fusionFinalTopK;
+            return this;
+        }
+
         public InterviewReRankingContentAggregator build() {
             return new InterviewReRankingContentAggregator(scoringModel, querySelector, minScore,
-                maxResults, progressCallback, trace);
+                maxResults, progressCallback, trace, hybridRrfK, fusionRrfK, fusionFinalTopK);
         }
     }
 }

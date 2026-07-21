@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildRagCardFollowUp, removeQuestionSearchParam } from './KnowledgeBaseQueryPage';
+import {
+  buildRagCardFollowUp,
+  citationStatusLabel,
+  removeQuestionSearchParam,
+} from './KnowledgeBaseQueryPage';
 
 describe('KnowledgeBaseQueryPage card follow-up', () => {
   it('将 jobTrack 选项映射为岗位方向提问，而不是简历分析', () => {
@@ -17,5 +21,24 @@ describe('KnowledgeBaseQueryPage card follow-up', () => {
 
     expect(result.get('question')).toBeNull();
     expect(result.get('task')).toBe('training-1');
+  });
+
+  it('citation 终态到达后区分已引用和未引用来源', () => {
+    const source = {
+      knowledgeBaseId: 1,
+      documentTitle: 'RAG.md',
+      sourceName: 'RAG.md',
+      category: null,
+      sectionTitle: null,
+      chunkIndex: null,
+      chunkCount: null,
+      snippet: '片段',
+      similarity: 0.9,
+      cited: true,
+    };
+
+    expect(citationStatusLabel(source, false)).toBeNull();
+    expect(citationStatusLabel(source, true)).toBe('已引用');
+    expect(citationStatusLabel({ ...source, cited: false }, true)).toBe('未引用');
   });
 });

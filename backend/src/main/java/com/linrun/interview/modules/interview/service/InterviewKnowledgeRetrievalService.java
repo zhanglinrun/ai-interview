@@ -35,6 +35,7 @@ public class InterviewKnowledgeRetrievalService {
   private static final int MAX_CANDIDATES = 6;
   private static final int MAX_PROMPT_EVIDENCE = 4;
   private static final int MAX_CHARS_PER_CHUNK = 600;
+  private static final int MAX_PROMPT_CHARS = 3000;
   private static final int MAX_QUERY_CATEGORIES = 4;
 
   private final KnowledgeBaseQueryService knowledgeBaseQueryService;
@@ -133,8 +134,12 @@ public class InterviewKnowledgeRetrievalService {
     String body = bundle.promptEvidence().stream()
         .map(this::formatEvidence)
         .collect(Collectors.joining("\n"));
+    String sanitized = promptSanitizer.sanitize(body);
+    String bounded = sanitized.length() <= MAX_PROMPT_CHARS
+        ? sanitized
+        : sanitized.substring(0, MAX_PROMPT_CHARS - 1) + "…";
     return promptSanitizer.wrapWithDelimiters(
-        "interview_evidence", promptSanitizer.sanitize(body));
+        "interview_evidence", bounded);
   }
 
   private InterviewEvidence toEvidence(Content content) {

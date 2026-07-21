@@ -114,8 +114,8 @@ export interface RagEvalResponse {
   hitRate: number;
   mrr: number;
   ndcg: number;
-  citationHitRate: number;
-  citationCoverage: number;
+  retrievalRecall: number;
+  retrievalPrecision: number;
   items: RagEvalItemResult[];
 }
 
@@ -125,8 +125,8 @@ export interface RagEvalItemResult {
   firstHitRank: number;
   reciprocalRank: number;
   ndcg: number;
-  citationHitRate: number;
-  citationCoverage: number;
+  retrievalRecall: number;
+  retrievalPrecision: number;
   retrievedChunkIds: string[];
   retrievedSegments: RagEvalRetrievedSegment[];
 }

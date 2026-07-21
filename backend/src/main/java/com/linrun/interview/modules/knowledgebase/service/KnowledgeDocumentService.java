@@ -44,7 +44,8 @@ public interface KnowledgeDocumentService {
     void deactivateVersion(Long versionId);
 
     /**
-     * 按版本实体激活（供事件监听器/补偿任务调用，避免再查一次）。
+     * 按版本实体激活（供事件监听器/补偿任务调用）。实现会在取得版本级锁后重新读取最新状态，
+     * 避免异步线程使用旧快照重复向量化。
      *
      * @param version 版本实体
      */

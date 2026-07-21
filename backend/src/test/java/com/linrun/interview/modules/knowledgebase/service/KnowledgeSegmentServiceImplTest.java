@@ -13,10 +13,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,5 +50,24 @@ class KnowledgeSegmentServiceImplTest {
     verify(segmentMapper).insert(captor.capture());
     assertThat(captor.getValue().getCreatedAt()).isNotNull();
     assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+  }
+
+  @Test
+  @DisplayName("批量回写 embedding 时应携带文档和版本作用域")
+  void batchUpdateEmbeddingUsesDocumentVersionScope() {
+    KnowledgeBaseSegmentEntity segment = new KnowledgeBaseSegmentEntity();
+    segment.setId(1L);
+    segment.setEmbeddingId("kb-segment-1");
+    LocalDateTime claimedAt = LocalDateTime.of(2026, 7, 19, 12, 0);
+    when(segmentMapper.batchUpdateEmbedding(
+        any(), eq(10L), eq(20L), eq(2), eq(claimedAt),
+        eq(SegmentStatus.VECTOR_STORED.name())))
+        .thenReturn(1);
+
+    int affected = service.batchUpdateEmbedding(10L, 20L, 2, claimedAt, List.of(segment));
+
+    assertThat(affected).isEqualTo(1);
+    verify(segmentMapper).batchUpdateEmbedding(
+        List.of(segment), 10L, 20L, 2, claimedAt, SegmentStatus.VECTOR_STORED.name());
   }
 }

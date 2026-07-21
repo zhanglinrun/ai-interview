@@ -10,7 +10,7 @@ import com.linrun.interview.modules.knowledgebase.service.DocumentCleanupService
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeDocumentVersionService;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
-import com.linrun.interview.modules.knowledgebase.service.VectorStoreService;
+import com.linrun.interview.modules.knowledgebase.service.VectorizationTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -34,11 +34,12 @@ public class DocumentCompensationJob {
     private final KnowledgeSegmentService segmentService;
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
     private final DocumentCleanupService documentCleanupService;
-    private final VectorStoreService vectorStoreService;
+    private final VectorizationTaskService vectorizationTaskService;
 
     /**
-     * 向量化补偿任务：扫描 CHUNKED 状态的当前版本，重新触发向量化。
-     * 每 5 分钟执行一次。事件监听器失败时，版本会停在 CHUNKED，由本任务兜底重试。
+     * 向量化补偿任务：分页扫描达到重试时间、租约空闲且未终止的 CHUNKED 当前版本。
+     * 默认每 5 分钟执行一次；真正的 CAS 抢占、指数退避和最大次数仍由
+     * {@link VectorizationTaskService} 统一控制。
      */
     @Scheduled(fixedDelayString = "${app.knowledgebase.compensation.embedding-delay-ms:300000}",
         initialDelayString = "${app.knowledgebase.compensation.embedding-initial-delay-ms:60000}")
@@ -49,8 +50,8 @@ public class DocumentCompensationJob {
         int successCount = 0;
         int failCount = 0;
         try {
-            List<KnowledgeBaseVersionEntity> versions = versionService.findByStatus(DocumentStatus.CHUNKED);
-            log.info("发现 {} 个 CHUNKED 状态的版本", versions.size());
+            List<KnowledgeBaseVersionEntity> versions = vectorizationTaskService.findRecoverable();
+            log.info("发现 {} 个达到重试时间的 CHUNKED 版本", versions.size());
 
             for (KnowledgeBaseVersionEntity version : versions) {
                 Long docId = version.getDocId();
@@ -66,11 +67,6 @@ public class DocumentCompensationJob {
                     continue;
                 }
                 try {
-                    // N1 对账：分段全部没有 embeddingId 却可能有 ES 残留向量（批次回写失败 +
-                    // 反向清理也失败的场景）→ 先按 docId+versionId 清一遍 ES（幂等），再重新向量化
-                    if (segmentService.countWithEmbedding(docId, versionId) == 0) {
-                        vectorStoreService.removeByDocIdAndVersion(docId, versionId);
-                    }
                     knowledgeDocumentService.activateVersion(version);
                     log.info("向量化补偿成功: docId={}, versionId={}", docId, versionId);
                     successCount++;

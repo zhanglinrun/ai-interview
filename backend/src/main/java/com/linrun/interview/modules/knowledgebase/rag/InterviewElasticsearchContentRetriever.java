@@ -22,10 +22,7 @@ import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
-import com.linrun.interview.modules.knowledgebase.model.KnowledgeBaseSegmentEntity;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
-import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
-import com.linrun.interview.modules.knowledgebase.service.SegmentTextCacheService;
 import com.linrun.interview.modules.knowledgebase.util.DocumentPermissionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.client.Request;
@@ -35,9 +32,6 @@ import org.elasticsearch.client.ResponseException;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,10 +50,8 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  * 把 {@code EmbeddingMatch} 转成带 {@link ContentMetadata#SCORE} 与
  * {@link ContentMetadata#EMBEDDING_ID} 的 {@link Content}，供 Aggregator 融合/rerank。
  *
- * <p>父子/兄弟分段扩展（small-to-big，对齐业界实践）：检索命中小 chunk 后，开启
- * {@code ParentExpand} 时按 {@code parentChunkId} 取父块章节文本拼接、按 {@code brotherChunkId}
- * 取同组兄弟按序拼接成完整段落，给 LLM 更完整上下文。扩展从 segment 表按冗余列批量查（避免 N+1），
- * 受 {@code maxChars/maxSiblings} 截断；扩展不改变命中 chunk 的 score。权限过滤由 docId + accessibleBy 限定。
+ * <p>本类只返回小块召回结果。父子/兄弟 small-to-big 扩展由内容聚合器在 RRF/rerank 完成后执行，
+ * 防止较大的父块正文提前参与精排、稀释命中子块的相关性。
  *
  * <p>每次对话按 knowledgeBaseIds 构建 filter，故为 prototype 作用域，由调用方 new 或工厂创建。
  */
@@ -72,8 +64,6 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final double minScore;
     private final Filter filter;
     private final Set<String> knowledgeBaseIdSet;
-    private final KnowledgeSegmentService segmentService;
-    private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
     private final KnowledgeBaseQueryProperties.Hybrid hybrid;
     private final Consumer<String> progressCallback;
     private final RagQueryTrace trace;
@@ -82,110 +72,20 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     private final ObjectMapper objectMapper;
     private final String forcedSearchMode;
     private final Long accessibleUserId;
-    private final SegmentTextCacheService segmentTextCache;
     private final EvidenceScope evidenceScope;
+    private final Integer expectedDimensions;
     /** 检索进度只发一次（DefaultRetrievalAugmentor 可能对多 query 多次调用 retrieve）。 */
     private final AtomicBoolean retrieveProgressSent = new AtomicBoolean(false);
 
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), null, null);
-    }
-
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
-                                                   Consumer<String> progressCallback) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, new KnowledgeBaseQueryProperties.Hybrid(), progressCallback, null);
-    }
-
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
-                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
-                                                   Consumer<String> progressCallback) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds,
-            segmentService, parentExpand, hybrid, progressCallback, null);
-    }
-
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
-                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
-                                                   Consumer<String> progressCallback,
-                                                   RagQueryTrace trace) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
-            parentExpand, hybrid, progressCallback, trace, null, null, null);
-    }
-
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
-                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
-                                                   Consumer<String> progressCallback,
-                                                   RagQueryTrace trace,
-                                                   RestClient restClient,
-                                                   String indexName,
-                                                   ObjectMapper objectMapper) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
-            parentExpand, hybrid, progressCallback, trace, restClient, indexName, objectMapper,
-            null, null, null);
-    }
-
-    public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
-                                                   EmbeddingModel embeddingModel,
-                                                   int maxResults,
-                                                   double minScore,
-                                                   List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
-                                                   KnowledgeBaseQueryProperties.Hybrid hybrid,
-                                                   Consumer<String> progressCallback,
-                                                   RagQueryTrace trace,
-                                                   RestClient restClient,
-                                                   String indexName,
-                                                   ObjectMapper objectMapper,
-                                                   String forcedSearchMode,
-                                                   Long accessibleUserId,
-                                                   SegmentTextCacheService segmentTextCache) {
-        this(embeddingStore, embeddingModel, maxResults, minScore, knowledgeBaseIds, segmentService,
-            parentExpand, hybrid, progressCallback, trace, restClient, indexName, objectMapper,
-            forcedSearchMode, accessibleUserId, segmentTextCache, null);
-    }
-
     /**
-     * 分域证据检索构造器。EvidenceScope 会同时下推到向量与 BM25 查询，并在结果层再次校验。
+     * 构建只负责召回小块的检索器。EvidenceScope 会同时下推到向量与 BM25 查询，并在结果层
+     * 再次校验；父块和兄弟块由后置的 {@link ContextExpansionService} 扩展。
      */
     public InterviewElasticsearchContentRetriever(ElasticsearchEmbeddingStore embeddingStore,
                                                    EmbeddingModel embeddingModel,
                                                    int maxResults,
                                                    double minScore,
                                                    List<Long> knowledgeBaseIds,
-                                                   KnowledgeSegmentService segmentService,
-                                                   KnowledgeBaseQueryProperties.ParentExpand parentExpand,
                                                    KnowledgeBaseQueryProperties.Hybrid hybrid,
                                                    Consumer<String> progressCallback,
                                                    RagQueryTrace trace,
@@ -194,8 +94,8 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
                                                    ObjectMapper objectMapper,
                                                    String forcedSearchMode,
                                                    Long accessibleUserId,
-                                                   SegmentTextCacheService segmentTextCache,
-                                                   EvidenceScope evidenceScope) {
+                                                   EvidenceScope evidenceScope,
+                                                   Integer expectedDimensions) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
         this.maxResults = maxResults;
@@ -207,8 +107,6 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             .filter(Objects::nonNull)
             .map(String::valueOf)
             .collect(Collectors.toUnmodifiableSet());
-        this.segmentService = segmentService;
-        this.parentExpand = parentExpand;
         this.hybrid = hybrid;
         this.progressCallback = progressCallback;
         this.trace = trace;
@@ -217,8 +115,8 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         this.objectMapper = objectMapper;
         this.forcedSearchMode = forcedSearchMode;
         this.accessibleUserId = accessibleUserId;
-        this.segmentTextCache = segmentTextCache;
         this.evidenceScope = evidenceScope;
+        this.expectedDimensions = expectedDimensions;
     }
 
     @Override
@@ -231,6 +129,15 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             result = search(null, query.text());
         } else {
             Embedding queryEmbedding = embeddingModel.embed(query.text()).content();
+            if (queryEmbedding == null) {
+                throw new IllegalStateException("查询 Embedding 返回为空");
+            }
+            if (expectedDimensions != null && expectedDimensions > 0
+                && queryEmbedding.dimension() != expectedDimensions) {
+                throw new IllegalStateException(
+                    "查询 Embedding 维度与 ES 索引不一致: actual=" + queryEmbedding.dimension()
+                        + ", expected=" + expectedDimensions);
+            }
             var builder = EmbeddingSearchRequest.builder()
                 .queryEmbedding(queryEmbedding)
                 .maxResults(Math.max(maxResults, 1));
@@ -248,15 +155,12 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
             .filter(this::matchesKnowledgeBaseFilter)
             .collect(Collectors.toList());
 
-        List<Content> expanded = parentExpand != null && parentExpand.isEnabled()
-            ? expandWithContext(contents)
-            : contents;
         if (trace != null) {
-            trace.recordRetrieved(expanded);
+            trace.recordRetrieved(contents);
         }
-        log.info("[InterviewElasticsearchContentRetriever] 检索完成: query='{}', 命中 {} 条, 扩展后 {} 条",
-            query.text(), contents.size(), expanded.size());
-        return expanded;
+        log.info("[InterviewElasticsearchContentRetriever] 子块检索完成: query='{}', 命中 {} 条",
+            query.text(), contents.size());
+        return contents;
     }
 
     private EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request, String queryText) {
@@ -473,96 +377,6 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         return knowledgeBaseIdSet.contains(docId);
     }
 
-    /**
-     * 父子/兄弟扩展：对命中 chunk 批量取父块与同组兄弟，拼接成更完整上下文。
-     * 扩展后 Content 的 score 沿用命中 chunk 的相关性分（代表命中精度，不因拼接而改变）。
-     */
-    private List<Content> expandWithContext(List<Content> hits) {
-        if (hits.isEmpty() || segmentService == null) {
-            return hits;
-        }
-        // 1. 收集需要补全的 parentChunkId / brotherChunkId
-        Set<String> parentChunkIds = new HashSet<>();
-        Set<String> brotherChunkIds = new HashSet<>();
-        for (Content c : hits) {
-            Metadata meta = c.textSegment().metadata();
-            String pid = meta.getString(MetadataKeyConstant.PARENT_CHUNK_ID);
-            String bid = meta.getString(MetadataKeyConstant.BROTHER_CHUNK_ID);
-            if (pid != null && !pid.isBlank()) {
-                parentChunkIds.add(pid);
-            }
-            if (bid != null && !bid.isBlank()) {
-                brotherChunkIds.add(bid);
-            }
-        }
-
-        // 2. 批量查父块（按 chunkId）与同组兄弟（按 brotherChunkId，已按 index 排序）
-        Map<String, String> parentTextByChunkId = new HashMap<>();
-        if (!parentChunkIds.isEmpty()) {
-            Map<String, String> loaded = loadParentTexts(parentChunkIds);
-            parentTextByChunkId.putAll(loaded);
-        }
-        Map<String, List<KnowledgeBaseSegmentEntity>> brothersByGroupId = new LinkedHashMap<>();
-        if (!brotherChunkIds.isEmpty()) {
-            List<KnowledgeBaseSegmentEntity> brothers =
-                segmentService.findByBrotherChunkIdIn(new ArrayList<>(brotherChunkIds));
-            brothers = brothers.stream().filter(this::matchesSegmentScope).toList();
-            if (segmentTextCache != null) {
-                segmentTextCache.warmChunkTexts(brothers);
-            }
-            for (KnowledgeBaseSegmentEntity s : brothers) {
-                brothersByGroupId.computeIfAbsent(s.getBrotherChunkId(), k -> new ArrayList<>()).add(s);
-            }
-        }
-
-        // 3. 逐条命中 chunk 做扩展
-        int maxChars = parentExpand.getMaxChars() > 0 ? parentExpand.getMaxChars() : Integer.MAX_VALUE;
-        int maxSiblings = parentExpand.getMaxSiblings() > 0 ? parentExpand.getMaxSiblings() : Integer.MAX_VALUE;
-        List<Content> expanded = new ArrayList<>(hits.size());
-        Set<String> seenTexts = new HashSet<>();
-        for (Content hit : hits) {
-            TextSegment seg = hit.textSegment();
-            Metadata meta = seg.metadata();
-            String expandedText = ParentExpandHelper.buildExpandedText(
-                seg.text(), meta, parentTextByChunkId, brothersByGroupId, maxChars, maxSiblings,
-                parentExpand.getStrategy());
-            Content expandedContent;
-            if (expandedText.equals(seg.text())) {
-                expandedContent = hit;
-            } else {
-                // meta 已含 SCORE/EMBEDDING_ID（toContent 写入），仅追加 expanded 标记
-                Metadata enriched = meta.put("expanded", "1");
-                TextSegment expandedSeg = new TextSegment(expandedText, enriched);
-                expandedContent = Content.from(expandedSeg, hit.metadata());
-            }
-            if (seenTexts.add(expandedContent.textSegment().text())) {
-                expanded.add(expandedContent);
-            }
-        }
-        return expanded;
-    }
-
-    private Map<String, String> loadParentTexts(Set<String> parentChunkIds) {
-        Map<String, String> loaded = new HashMap<>();
-        List<KnowledgeBaseSegmentEntity> segments =
-            segmentService.findByChunkIdIn(new ArrayList<>(parentChunkIds));
-        for (KnowledgeBaseSegmentEntity segment : segments) {
-            if (!matchesSegmentScope(segment)) {
-                continue;
-            }
-            if (segment.getText() == null || segment.getText().isBlank()) {
-                continue;
-            }
-            String text = segmentTextCache == null
-                ? segment.getText()
-                : segmentTextCache.getTextByChunkId(segment.getChunkId(), segment::getText);
-            if (text != null && !text.isBlank()) {
-                loaded.put(segment.getChunkId(), text);
-            }
-        }
-        return loaded;
-    }
-
     private ObjectNode buildNativeMetadataFilter() {
         if (objectMapper == null) {
             return null;
@@ -717,17 +531,6 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
         } catch (IllegalArgumentException e) {
             return false;
         }
-    }
-
-    private boolean matchesSegmentScope(KnowledgeBaseSegmentEntity segment) {
-        if (evidenceScope == null) {
-            return true;
-        }
-        return evidenceScope.contains(
-            segment.getDataDomain(),
-            segment.getResourceId(),
-            segment.getResourceVersion(),
-            segment.getUserId());
     }
 
     private Filter buildDocIdFilter(List<Long> knowledgeBaseIds) {

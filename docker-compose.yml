@@ -1,4 +1,0 @@
-# 兼容入口 → dev-ops/docker-compose-app.yml（全栈，勿与 docker-compose.dev.yml 同时 up）
-# 推荐：cd dev-ops && docker compose -f docker-compose-app.yml up -d --build
-include:
-  - path: dev-ops/docker-compose-app.yml

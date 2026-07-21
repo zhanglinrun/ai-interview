@@ -12,9 +12,12 @@ import com.linrun.interview.common.security.UserContext;
 import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.model.QueryRequest;
 import com.linrun.interview.modules.knowledgebase.model.QueryResponse;
+import com.linrun.interview.modules.knowledgebase.model.RagCitationMetadata;
 import com.linrun.interview.modules.knowledgebase.model.RagSourceDTO;
 import com.linrun.interview.modules.knowledgebase.rag.CorrectiveRetrievalGrader;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryDecomposer;
+import com.linrun.interview.modules.knowledgebase.rag.ContextExpandingContentAggregator;
+import com.linrun.interview.modules.knowledgebase.rag.ContextExpansionService;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionService;
 import com.linrun.interview.modules.knowledgebase.rag.IntentRecognitionResult;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewCompositeQueryTransformer;
@@ -68,8 +71,10 @@ import java.util.function.Consumer;
  *
  * <p>检索/改写/融合/rerank 不再手写，改用 {@link DefaultRetrievalAugmentor} 编排
  * （{@link InterviewQueryTransformer} 改写 → ES 双通道检索 →
- * {@link InterviewElasticsearchContentRetriever} ES 检索 → {@link InterviewReRankingContentAggregator}
- * RRF 融合 + DashScope rerank → {@link DefaultContentInjector} 注入）。
+ * {@link InterviewElasticsearchContentRetriever} ES 子块检索 →
+ * {@link InterviewReRankingContentAggregator} RRF 融合 + DashScope rerank →
+ * {@link ContextExpandingContentAggregator} 父块/兄弟窗口扩展 →
+ * {@link DefaultContentInjector} 注入）。
  *
  * <p>同步 {@link #queryKnowledgeBase} 手动调 {@code augmentor.augment} 拿 {@code AugmentationResult}
  * （含检索 contents 与注入后的 chatMessage），再调 {@link ChatModel} 生成，用 contents 构建 sources/citation。
@@ -112,6 +117,8 @@ public class KnowledgeBaseQueryService {
     static final String PROGRESS_PREFIX = "progress:";
     /** SSE 流前缀协议：引用来源（JSON 数组，复用 {@link RagSourceDTO}）。 */
     static final String REFERENCE_PREFIX = "reference:";
+    /** SSE 流结束时的引用校验结果（JSON，复用同步查询字段名）。 */
+    static final String CITATION_PREFIX = "citation:";
     /** SSE 改写后问题（检索优化结果）。 */
     static final String REWRITTEN_PREFIX = "rewritten:";
     /** SSE 交互卡片提示。 */
@@ -142,6 +149,8 @@ public class KnowledgeBaseQueryService {
     private final int rerankTopN;
     private final KnowledgeBaseQueryProperties.ParentExpand parentExpand;
     private final KnowledgeBaseQueryProperties.Hybrid hybrid;
+    private final KnowledgeBaseQueryProperties.Fusion fusion;
+    private final int contextMaxTotalChars;
     private final KnowledgeBaseQueryProperties.Generation generation;
     private final KnowledgeBaseQueryProperties.IntentRecognition intentRecognition;
     private final MeterRegistry meterRegistry;
@@ -152,7 +161,6 @@ public class KnowledgeBaseQueryService {
     private final RagQueryTraceService traceService;
     private final RagPromptService ragPromptService;
     private final RagCardService ragCardService;
-    private final SegmentTextCacheService segmentTextCacheService;
     private final PromptTemplate hydePromptTemplate;
     private final boolean hydeEnabled;
     private final int hydeMaxChars;
@@ -180,7 +188,6 @@ public class KnowledgeBaseQueryService {
             RagQueryTraceService traceService,
             RagPromptService ragPromptService,
             RagCardService ragCardService,
-            SegmentTextCacheService segmentTextCacheService,
             @Autowired(required = false)
             MeterRegistry meterRegistry) throws IOException {
         this.llmProviderRegistry = llmProviderRegistry;
@@ -198,7 +205,6 @@ public class KnowledgeBaseQueryService {
         this.traceService = traceService;
         this.ragPromptService = ragPromptService;
         this.ragCardService = ragCardService;
-        this.segmentTextCacheService = segmentTextCacheService;
         this.hydePromptTemplate = new PromptTemplate(
             resourceLoader.getResource(queryProperties.getHydePromptPath())
                 .getContentAsString(StandardCharsets.UTF_8));
@@ -220,6 +226,8 @@ public class KnowledgeBaseQueryService {
         this.rerankTopN = queryProperties.getRerank().getTopN();
         this.parentExpand = queryProperties.getParentExpand();
         this.hybrid = queryProperties.getHybrid();
+        this.fusion = queryProperties.getFusion();
+        this.contextMaxTotalChars = queryProperties.getContext().getMaxTotalChars();
         this.generation = queryProperties.getGeneration();
         this.intentRecognition = queryProperties.getIntentRecognition();
         this.decompose = queryProperties.getDecompose();
@@ -280,7 +288,7 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
-     * 面试逐轮证据检索：保留 ES 双路混合检索、父子/兄弟上下文扩展、RRF 与 rerank，
+     * 面试逐轮证据检索：保留 ES 双路混合检索、RRF、rerank 与后置父子/兄弟上下文扩展，
      * 但跳过 Query Rewrite、HyDE、Query Decomposition 与 CRAG 的 LLM 调用。
      *
      * <p>面试场景的查询已经由目标能力原子构造，继续做生成式改写收益有限，却会给每道题
@@ -388,6 +396,7 @@ public class KnowledgeBaseQueryService {
      * <ul>
      *   <li>{@code progress:xxx} —— 阶段进度（优化问题/检索/排序/生成）</li>
      *   <li>{@code reference:[...]} —— 引用来源 JSON 数组（{@link RagSourceDTO}）</li>
+     *   <li>{@code citation:{...}} —— 生成完成后的引用校验、置信度与无效编号</li>
      *   <li>无前缀 —— 回答 token（含流末尾的 sourcesMarkdown）</li>
      * </ul>
      *
@@ -412,6 +421,11 @@ public class KnowledgeBaseQueryService {
         }
 
         return Flux.<String>create(sink -> {
+            long start = System.nanoTime();
+            RagQueryTrace trace = new RagQueryTrace();
+            AtomicBoolean traceSaved = new AtomicBoolean(false);
+            List<Content> traceContents = new ArrayList<>();
+            List<RagSourceDTO> traceSources = new ArrayList<>();
             try {
                 UserContext.setUserId(userId);
                 countService.updateQuestionCounts(knowledgeBaseIds);
@@ -466,11 +480,10 @@ public class KnowledgeBaseQueryService {
                     }
                 }
 
-                long start = System.nanoTime();
-                RagQueryTrace trace = new RagQueryTrace();
                 AugmentationOutcome outcome = augment(knowledgeBaseIds, question, history, progressCallback,
                     assistantMessageId, trace, userId);
                 List<Content> contents = outcome.contents();
+                traceContents.addAll(contents);
                 if (contents.isEmpty()) {
                     traceService.save(userId, knowledgeBaseIds, question, trace, List.of(),
                         NO_RESULT_RESPONSE, null, List.of(), elapsedMillis(start));
@@ -480,30 +493,51 @@ public class KnowledgeBaseQueryService {
                 }
 
                 // augment 后推引用来源（reference: 前缀 + RagSourceDTO JSON）
-                List<RagSourceDTO> traceSources = buildSources(contents, null);
+                List<RagSourceDTO> initialSources = buildSources(contents, null);
+                traceSources.addAll(initialSources);
                 emitRewrittenQuestion(sink, trace);
-                emitReference(sink, traceSources);
+                emitReference(sink, initialSources);
 
                 log.debug("检索到 {} 个相关片段", contents.size());
                 Flux<String> responseFlux = streamGenerate(outcome, history, userId);
 
                 log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
                 Flux<String> normalizedFlux = normalizeStreamOutput(responseFlux);
-                String sourcesMarkdown = buildSourcesMarkdown(contents);
-                if (!sourcesMarkdown.isBlank()) {
-                    normalizedFlux = normalizedFlux.concatWith(Flux.just(sourcesMarkdown));
-                }
-
-                StringBuilder answerBuffer = new StringBuilder();
-                Flux<String> finalFlux = instrumentStream(normalizedFlux)
-                    .doOnNext(answerBuffer::append)
-                    .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
-                    .doOnComplete(() -> traceService.save(userId, knowledgeBaseIds, question, trace,
-                        traceSources, answerBuffer.toString(), null, List.of(), elapsedMillis(start)))
+                StringBuffer answerBuffer = new StringBuffer();
+                Flux<String> answerFlux = instrumentStream(normalizedFlux)
                     .onErrorResume(e -> {
                         log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
                         return Flux.just("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。");
-                    });
+                    })
+                    .doOnNext(answerBuffer::append);
+                Flux<String> finalFlux = answerFlux.concatWith(Flux.defer(() -> {
+                    String answer = answerBuffer.toString();
+                    StreamCitationResult citationResult = analyzeStreamCitation(
+                        answer, contents, initialSources);
+                    saveStreamTraceOnce(traceSaved, traceService, userId, knowledgeBaseIds,
+                        question, trace, citationResult, answer, elapsedMillis(start));
+                    List<String> suffix = new ArrayList<>();
+                    String sourcesMarkdown = buildSourcesMarkdown(initialSources);
+                    if (!sourcesMarkdown.isBlank()) {
+                        suffix.add(sourcesMarkdown);
+                    }
+                    String citationEvent = serializeCitationMetadata(
+                        citationResult.sources(), citationResult.confidence(),
+                        citationResult.invalidCitations());
+                    if (citationEvent != null) {
+                        suffix.add(citationEvent);
+                    }
+                    log.info("流式输出完成: kbIds={}", knowledgeBaseIds);
+                    return Flux.fromIterable(suffix);
+                })).doOnCancel(() -> {
+                    String answer = answerBuffer.toString();
+                    StreamCitationResult citationResult = analyzeStreamCitation(
+                        answer, contents, initialSources);
+                    saveStreamTraceOnce(traceSaved, traceService, userId, knowledgeBaseIds,
+                        question, trace, citationResult, answer, elapsedMillis(start));
+                    log.info("流式输出被取消，已保存部分 Trace: kbIds={}, answerChars={}",
+                        knowledgeBaseIds, answer.length());
+                });
 
                 final reactor.core.Disposable[] innerRef = new reactor.core.Disposable[1];
                 innerRef[0] = finalFlux.subscribe(
@@ -519,8 +553,13 @@ public class KnowledgeBaseQueryService {
                 });
             } catch (Exception e) {
                 log.error("知识库流式问答失败: {}", e.getMessage(), e);
+                String errorAnswer = "【错误】知识库查询失败：" + e.getMessage();
+                StreamCitationResult citationResult = analyzeStreamCitation(
+                    errorAnswer, traceContents, traceSources);
+                saveStreamTraceOnce(traceSaved, traceService, userId, knowledgeBaseIds,
+                    question, trace, citationResult, errorAnswer, elapsedMillis(start));
                 if (!sink.isCancelled()) {
-                    sink.next("【错误】知识库查询失败：" + e.getMessage());
+                    sink.next(errorAnswer);
                     sink.complete();
                 }
             } finally {
@@ -637,7 +676,9 @@ public class KnowledgeBaseQueryService {
                         question, corrected);
                     List<Content> corrctedContents = retrieveContentsOnly(
                         knowledgeBaseIds, corrected, history, progressCallback, assistantMessageId, trace, userId);
-                    List<Content> merged = mergeDedupContents(outcome.contents(), corrctedContents);
+                    List<Content> merged = ContextExpandingContentAggregator.limitByTotalChars(
+                        mergeDedupContents(outcome.contents(), corrctedContents),
+                        contextMaxTotalChars);
                     if (trace != null) {
                         trace.crag(gr.grade().name(), "re-retrieve:" + corrected);
                     }
@@ -742,26 +783,33 @@ public class KnowledgeBaseQueryService {
                     decomposePromptTemplate, decompose.getMaxSubQueries(), progressCallback, trace)
                 : transformer;
         }
-        InterviewReRankingContentAggregator rerankAggregator = rerankEnabled && rerankService.isEnabled()
-            ? InterviewReRankingContentAggregator.builder()
-                .scoringModel(rerankService)
-                .maxResults(rerankTopN > 0 ? rerankTopN : null)
+        boolean rerankAvailable = rerankEnabled && rerankService.isEnabled();
+        InterviewReRankingContentAggregator rerankAggregator =
+            InterviewReRankingContentAggregator.builder()
+                .scoringModel(rerankAvailable ? rerankService : null)
+                .maxResults(rerankAvailable && rerankTopN > 0
+                    ? rerankTopN : hybrid.getFusionTopK())
                 .querySelector(qtc -> qtc.keySet().iterator().next())
                 .progressCallback(null)
                 .trace(trace)
-                .build()
-            : null;
+                .hybridRrfK(hybrid.getRrfK())
+                .fusionRrfK(fusion.getRrfK())
+                .fusionFinalTopK(fusion.getFinalTopK())
+                .build();
         ContentInjector contentInjector = new DefaultContentInjector();
-        ContentAggregator finalAggregator =
-            ProgressAwareContentAggregator.wrap(rerankAggregator, progressCallback);
+        ContentAggregator rankedAggregator = rerankAvailable
+            ? ProgressAwareContentAggregator.wrap(rerankAggregator, progressCallback)
+            : rerankAggregator;
+        ContentAggregator finalAggregator = new ContextExpandingContentAggregator(
+            rankedAggregator,
+            new ContextExpansionService(segmentService, parentExpand),
+            contextMaxTotalChars);
 
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
             .queryRouter(query -> esRouterRetrievers)
             .queryTransformer(queryTransformer)
             .contentInjector(contentInjector);
-        if (finalAggregator != null) {
-            builder.contentAggregator(finalAggregator);
-        }
+        builder.contentAggregator(finalAggregator);
         return builder.build();
     }
 
@@ -801,10 +849,9 @@ public class KnowledgeBaseQueryService {
         EvidenceScope evidenceScope) {
         return new InterviewElasticsearchContentRetriever(
             embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), topk, minScore,
-            knowledgeBaseIds, segmentService, parentExpand, hybrid, progressCallback, trace,
+            knowledgeBaseIds, hybrid, progressCallback, trace,
             restClient, elasticSearchProperties.getIndexName(), objectMapper,
-            forcedSearchMode, userId, segmentTextCacheService,
-            evidenceScope);
+            forcedSearchMode, userId, evidenceScope, elasticSearchProperties.getDimensions());
     }
 
     private void emitRewrittenQuestion(reactor.core.publisher.FluxSink<String> sink, RagQueryTrace trace) {
@@ -902,8 +949,70 @@ public class KnowledgeBaseQueryService {
         return sources;
     }
 
-    private String buildSourcesMarkdown(List<Content> contents) {
-        List<RagSourceDTO> sources = buildSources(contents, null);
+    static List<RagSourceDTO> markCitedSources(
+        List<RagSourceDTO> sources, Set<Integer> citedIndexes) {
+        if (sources == null || sources.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> safeIndexes = citedIndexes == null ? Set.of() : citedIndexes;
+        List<RagSourceDTO> marked = new ArrayList<>(sources.size());
+        for (int i = 0; i < sources.size(); i++) {
+            RagSourceDTO source = sources.get(i);
+            marked.add(new RagSourceDTO(
+                source.knowledgeBaseId(),
+                source.documentTitle(),
+                source.sourceName(),
+                source.category(),
+                source.sectionTitle(),
+                source.chunkIndex(),
+                source.chunkCount(),
+                source.snippet(),
+                source.similarity(),
+                safeIndexes.contains(i + 1)));
+        }
+        return marked;
+    }
+
+    static StreamCitationResult buildStreamCitationResult(
+        List<RagSourceDTO> sources,
+        CitationAnalyzer.CitationAnalysis citation,
+        Double confidence) {
+        return new StreamCitationResult(
+            markCitedSources(sources, Set.copyOf(citation.citedIndexes())),
+            confidence,
+            List.copyOf(citation.invalidIndexes()));
+    }
+
+    private StreamCitationResult analyzeStreamCitation(
+        String answer, List<Content> contents, List<RagSourceDTO> initialSources) {
+        CitationAnalyzer.CitationAnalysis citation = citationEnabled
+            ? citationAnalyzer.analyze(answer, contents.size())
+            : new CitationAnalyzer.CitationAnalysis(List.of(), List.of(), 0.0d);
+        Double confidence = citationEnabled
+            ? citationAnalyzer.confidence(
+                contents.stream().map(this::extractSimilarity).toList(), citation)
+            : null;
+        return buildStreamCitationResult(initialSources, citation, confidence);
+    }
+
+    static void saveStreamTraceOnce(
+        AtomicBoolean traceSaved,
+        RagQueryTraceService traceService,
+        Long userId,
+        List<Long> knowledgeBaseIds,
+        String question,
+        RagQueryTrace trace,
+        StreamCitationResult citationResult,
+        String answer,
+        long latencyMs) {
+        if (traceSaved.compareAndSet(false, true)) {
+            traceService.save(userId, knowledgeBaseIds, question, trace,
+                citationResult.sources(), answer, citationResult.confidence(),
+                citationResult.invalidCitations(), latencyMs);
+        }
+    }
+
+    private String buildSourcesMarkdown(List<RagSourceDTO> sources) {
         if (sources.isEmpty()) {
             return "";
         }
@@ -934,6 +1043,17 @@ public class KnowledgeBaseQueryService {
             }
         } catch (Exception e) {
             log.warn("序列化引用来源失败，跳过 reference 事件: {}", e.getMessage());
+        }
+    }
+
+    private String serializeCitationMetadata(
+        List<RagSourceDTO> sources, Double confidence, List<Integer> invalidCitations) {
+        try {
+            return CITATION_PREFIX + objectMapper.writeValueAsString(
+                new RagCitationMetadata(sources, confidence, invalidCitations));
+        } catch (Exception e) {
+            log.warn("序列化流式引用校验结果失败，跳过 citation 事件: {}", e.getMessage());
+            return null;
         }
     }
 
@@ -1112,4 +1232,10 @@ public class KnowledgeBaseQueryService {
 
     /** augment 结果：检索到的 contents 与注入检索内容后的 chatMessage（供 LLM 生成）。 */
     private record AugmentationOutcome(List<Content> contents, ChatMessage chatMessage) {}
+
+    record StreamCitationResult(
+        List<RagSourceDTO> sources,
+        Double confidence,
+        List<Integer> invalidCitations
+    ) {}
 }

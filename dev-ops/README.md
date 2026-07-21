@@ -34,6 +34,19 @@ $ErrorActionPreference = 'Stop'
 Prometheus、Grafana JSON 和 Logstash 配置。它们不替代真实外部 API、HTTPS、恢复演练或 24 小时
 资源观察。
 
+## 已有数据卷升级
+
+MySQL 的 `/docker-entrypoint-initdb.d/01-schema.sql` 只在空数据卷首次初始化时执行。代码更新如果
+新增了 `backend/src/main/resources/sql/upgrade/` 下的脚本，复用旧数据卷时必须先运行：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+./dev-ops/Apply-DatabaseUpgrades.ps1
+```
+
+升级脚本按文件名顺序执行，并使用 `information_schema` 保证可重复运行。脚本只读取本地 `.env`
+中的数据库名和 root 密码，不输出密码。应先备份生产数据库，再执行升级和后端发布。
+
 ## 生产部署
 
 完整的首次部署、私有文件域、基础与全业务 smoke、短期 MySQL 快照、回滚和恢复步骤见

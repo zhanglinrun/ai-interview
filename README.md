@@ -6,9 +6,9 @@
 
 当前 V1 已完成代码、本地自动化门禁与关键浏览器流程回归，包含能力模板、四域证据 RAG、
 GitHub 固定 SHA 取证、四阶段岗位实战、Hot 100 算法、证据报告、能力画像和专项训练。
-GitHub REST 公共仓库同步和 Judge0 正常判题链路已有真实本地联调证据；MinerU 官方解析、可选
-GitHub MCP 实际命中、Judge0 异常与补判路径、完整 45 分钟面试，以及 4C6G 服务器 24 小时观察
-仍属于发布验收边界，不能把本地结果描述成线上结果。
+GitHub REST 公共仓库同步、Judge0 正常判题、知识库上传与检索评测已有真实本地联调证据；MinerU
+官方解析、可选 GitHub MCP 实际命中、BYOK 生成式 RAG / 报告、Judge0 异常与补判路径、完整
+45 分钟面试，以及 4C6G 服务器 24 小时观察仍属于发布验收边界，不能把本地结果描述成线上结果。
 
 ## 项目边界
 
@@ -155,14 +155,26 @@ $ErrorActionPreference = 'Stop'
 docker compose -f dev-ops/docker-compose-environment.yml up -d
 ```
 
-3. 在终端 A 启动后端。
+3. 如果复用已有 MySQL 数据卷，先执行可重复运行的数据库升级脚本。全新空卷也可以执行，脚本会
+   自动跳过已存在的字段和索引。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+./dev-ops/Apply-DatabaseUpgrades.ps1
+```
+
+仅更新 `schema.sql` 不会改变已有数据卷；跳过升级可能导致后端启动后在知识库上传、向量化补偿等
+链路出现 `Unknown column`。发布或拉取包含 `backend/src/main/resources/sql/upgrade/` 变更的版本后，
+必须在启动新后端前执行该脚本。
+
+4. 在终端 A 启动后端。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 mvn -pl backend spring-boot:run
 ```
 
-4. 在终端 B 安装依赖并启动前端。
+5. 在终端 B 安装依赖并启动前端。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -175,23 +187,40 @@ pnpm -C frontend dev
 
 ## 本地验证证据
 
-2026-07-16 在当前工作树执行了以下门禁：
+截至 2026-07-20，当前工作树已执行以下门禁：
 
-- 后端：根目录 `mvn test` 共 424 tests，0 failures，0 errors，3 skipped；跳过项是需要真实
+- 后端：`mvn -pl backend test` 共 466 tests，0 failures，0 errors，3 skipped；跳过项是需要真实
   Redis 环境的集成测试。
-- 前端：Vitest 共 16 个测试文件、33 tests 全部通过；TypeScript 检查和生产构建通过，
+- 前端：Vitest 共 17 个测试文件、35 tests 全部通过；TypeScript 检查和生产构建通过，
   Monaco 作为独立懒加载 chunk。
 - Compose：全部声明拓扑与端口 / 健康检查 / 资源上限策略通过配置校验；核心常驻预算
   3136 MiB，叠加 Prometheus、Grafana、Logstash、Kibana 后为 4608 MiB。
-- Fresh schema：临时 MySQL 8 空库初始化通过，共 51 张表、54 个外键。
+- Fresh schema：临时 MySQL 8 空库初始化通过，共 51 张表、54 个外键；存量卷升级脚本连续执行两次
+  均成功，证明当前升级 SQL 可重复运行。
 - 本地生产拓扑：使用隔离项目名和空卷启动 7 个核心容器，全部 healthy 且零重启；注册、登录、
   鉴权、能力模板、算法降级和 JD CRUD 冒烟通过。
 
 同一轮本地浏览器与真实外部依赖验收还确认了：
 
 - 登录后可访问工作台、岗位实战、专项训练、历史面试、招聘雷达、求职资源、知识库、日程、
-  RAG 评测和设置等主要页面，未发现应用级控制台错误。
-- RAG 会话可按知识库检索并返回引用，刷新后可恢复会话与消息；岗位选择卡片不会再被普通项目问题误触发。
+  RAG 评测和设置等主要页面，直接刷新与跨路由访问保持登录态。
+- 岗位实战创建并完成 6 道题，五道文字回答按无 BYOK 降级策略保存，算法题由 Judge0 客观判题通过；
+  报告因测试账号未配置 BYOK 明确进入 `FAILED`，且不会更新能力画像。
+- `docs/ARCHITECTURE.md` 上传后生成 20 个分段并进入 `VECTOR_STORED`；覆盖存储组件、向量补偿、
+  四域证据、Judge0 和 Agent 边界的 5 条人工样例历史结果为 Hit@K 1.00、MRR 0.87、NDCG 0.92。
+  旧报告中的“引用命中/覆盖率”实际是检索召回率/检索精确率，当前代码已完成准确命名；由于算法与
+  指标口径已修正，历史数字仅作问题发现记录，不能作为当前简历结果。重复证据、漏召回与 NDCG 上界
+  均有回归测试兜底，正式分数需重新运行并保留原始报告。
+- 专项算法训练的“两数之和”公开用例 2/2、隐藏用例 3/3 通过；草稿 revision、刷新恢复和 Judge0
+  结果展示均已验证。
+- 简历异步分析在缺少 BYOK 时会耗尽 RabbitMQ 有界重试并进入 `FAILED`，详情展示失败原因和重试入口；
+  不再把模型失败保存成 0 分并误显示为“分析完成”。
+- 统一评测示例可同时输出问题分类、资料检索与回答质量结果；本次示例总分 60.8%，其中分类 2/2，
+  检索样例因资料不包含预期关键点为 0，说明页面会保留坏例而不是只展示成功结果。
+- Agent Critic 使用真实 qwen3.5-flash 对 13 条固定 bad-case 集进行评测：9 条越界、难度错配、
+  重复、Prompt Injection、含糊题全部打回，4 条正例全部放行，Accuracy / 打回 Precision /
+  Recall / F1 均为 1.00。完整运行耗时 338.1 秒；该结果只证明固定集合上的 Critic 分类能力，
+  不等同于完整 Agent 任务成功率或线上效果。
 - GitHub REST 将公开仓库固定到 Commit SHA 后同步成功：验收样例为 120 个文件、442 个代码证据片段，
   且片段均完成向量索引；这不等于 GitHub MCP 已真实命中。
 - Judge0 CE 验收样例的 Java 提交通过全部用例，并保存 provider submission id、耗时和内存；
@@ -213,8 +242,9 @@ pnpm -C frontend build
 ```
 
 这些结果证明当前代码、内容、构建、关键本地浏览器流程，以及 GitHub REST / Judge0 正常路径；
-不代表 MinerU 官方解析、GitHub MCP 实际命中、Judge0 异常与补判、整场 45 分钟面试、线上容量、
-恢复演练或 4C6G 24 小时稳定性。
+测试账号没有配置用户模型 Key，因此不代表生成式 RAG 回答、完整面试报告和画像刷新已经完成真实
+BYOK E2E。也不代表 MinerU 官方解析、GitHub MCP 实际命中、Judge0 异常与补判、整场 45 分钟面试、
+线上容量、恢复演练或 4C6G 24 小时稳定性。
 
 ## 部署
 

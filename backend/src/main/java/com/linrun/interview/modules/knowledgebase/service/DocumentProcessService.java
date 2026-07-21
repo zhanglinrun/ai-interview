@@ -12,7 +12,7 @@ import java.time.LocalDate;
  *
  * <p>编排上传→解析→切块→向量化的完整链路：
  * <ul>
- *   <li>{@link #upload}：校验→解析为 Markdown→存 RustFS→落库版本 v1→状态 CONVERTED。</li>
+ *   <li>{@link #upload}：校验→原件存 MinIO→落库文档与版本→解析为 Markdown→状态 CONVERTED。</li>
  *   <li>{@link #split}：切块→落 segment 表→状态 CHUNKED→发布 {@code DocumentChunkedEvent}。</li>
  *   <li>{@link #rechunk}：删当前版本 segment→降状态 CONVERTED→重新 split，用于重新向量化。</li>
  *   <li>{@link #embedAndStore}：委托 {@link KnowledgeDocumentService#activateVersion} 完成向量化。</li>

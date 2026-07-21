@@ -3,6 +3,7 @@ package com.linrun.interview.modules.knowledgebase.service;
 
 import com.linrun.interview.common.mybatis.EntityQueries;
 import com.linrun.interview.common.mybatis.MapperUtils;
+import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.security.UserContext;
@@ -44,7 +45,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>{@code deactivateVersion} 直接调 {@link VectorStoreService#removeByDocIdAndVersion}，
  *       不经 DocumentCleanupService（避免前向依赖，cleanup service 是封装层）。</li>
  *   <li>激活完成后同步 {@link KnowledgeBaseEntity} 主表 docStatus + currentVersionId。</li>
- *   <li>删除级联：ES 删向量 + RustFS 删文件移到事务提交后执行（事务内禁止外部 IO）。</li>
+ *   <li>删除级联：ES 删向量 + MinIO 删文件移到事务提交后执行（事务内禁止外部 IO）。</li>
  * </ul>
  */
 @Slf4j
@@ -70,6 +71,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final EvidenceSnapshotService evidenceSnapshotService;
     private final DocumentParseTaskService documentParseTaskService;
     private final RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
+    private final VectorizationTaskService vectorizationTaskService;
     /** 向量化三段式的编程式小事务（方法级 @Transactional 会把外部 API 调用圈进长事务） */
     private final TransactionTemplate transactionTemplate;
 
@@ -107,7 +109,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         knowledgeBaseEntityMapper.physicalDeleteById(docId);
         log.info("删除知识库 DB 记录完成: docId={}", docId);
 
-        // 5. ES 删向量 + RustFS 删文件：外部 IO，移到事务提交后执行（事务内禁止外部 API）
+        // 5. ES 删向量 + MinIO 删文件：外部 IO，移到事务提交后执行（事务内禁止外部 API）
         schedulePostCommitCleanup(docId, storageKeys);
     }
 
@@ -141,7 +143,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     }
 
     /**
-     * 把 ES 删向量 + RustFS 删文件注册到当前事务的 afterCommit 回调。
+     * 把 ES 删向量 + MinIO 删文件注册到当前事务的 afterCommit 回调。
      * 失败仅告警，不阻断已提交的 DB 删除（外部残留靠人工或后续清理）。
      */
     private void schedulePostCommitCleanup(
@@ -177,7 +179,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     }
 
     /**
-     * 删除 RustFS 中的原始文件（失败仅告警，不阻断删除）。
+     * 删除 MinIO 中的原始文件（失败仅告警，不阻断删除）。
      */
     private void deleteStorageFile(Long docId, String storageKey) {
         if (storageKey == null || storageKey.isBlank()) {
@@ -186,11 +188,13 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         try {
             fileStorageService.deleteKnowledgeBase(storageKey);
         } catch (Exception e) {
-            log.warn("删除RustFS文件失败，继续删除知识库记录: docId={}, error={}", docId, e.getMessage(), e);
+            log.warn("删除 MinIO 文件失败，继续删除知识库记录: docId={}, error={}", docId, e.getMessage(), e);
         }
     }
 
     @Override
+    @DistributeLock(key = "'kb:vectorize:' + #versionId", waitTime = 0, leaseTime = -1,
+        message = "该版本正在向量化，请稍后再试")
     public void activateVersion(Long versionId) {
         // 不加方法级 @Transactional：向量化含外部 API 调用，事务边界由 entity 重载内
         // 的 transactionTemplate 分段控制（事务 A / 无事务嵌入段 / 事务 B）
@@ -223,18 +227,62 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * 任一批失败版本停留 CHUNKED，补偿任务重扫时跳过已有 embeddingId 的分段（幂等）。
      */
     @Override
+    @DistributeLock(key = "'kb:vectorize:' + #version.versionId", waitTime = 0, leaseTime = -1,
+        message = "该版本正在向量化，请稍后再试")
     public void activateVersion(KnowledgeBaseVersionEntity version) {
+        if (version == null || version.getVersionId() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "版本不能为空");
+        }
+        Long requestedVersionId = version.getVersionId();
+        // 事件、补偿和手动激活都可能携带旧快照。拿到版本级锁后重新读取，避免使用过期状态
+        // 重复执行或覆盖已完成结果。
+        KnowledgeBaseVersionEntity latestVersion = versionService.getById(requestedVersionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
+                "版本记录不存在: versionId=" + requestedVersionId));
         // 幂等：已向量化直接返回
-        if (version.getStatus() == DocumentStatus.VECTOR_STORED) {
-            log.info("版本已向量化，跳过: versionId={}", version.getVersionId());
+        if (latestVersion.getStatus() == DocumentStatus.VECTOR_STORED) {
+            log.info("版本已向量化，跳过: versionId={}", latestVersion.getVersionId());
             return;
         }
-        if (version.getStatus() != DocumentStatus.CHUNKED) {
+        if (latestVersion.getStatus() != DocumentStatus.CHUNKED) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "版本状态不是 CHUNKED，无法执行向量化，当前状态: " + version.getStatus());
+                "版本状态不是 CHUNKED，无法执行向量化，当前状态: " + latestVersion.getStatus());
         }
-        Long docId = version.getDocId();
-        Long versionId = version.getVersionId();
+        VectorizationTaskService.Claim claim = vectorizationTaskService.claim(requestedVersionId);
+        if (claim.state() != VectorizationTaskService.ClaimState.ACQUIRED
+            || claim.version() == null) {
+            if (claim.state() == VectorizationTaskService.ClaimState.TERMINAL
+                && claim.version() != null
+                && claim.version().getStatus() == DocumentStatus.VECTOR_STORED) {
+                return;
+            }
+            String lastError = claim.version() == null ? null : claim.version().getEmbeddingLastError();
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "向量化任务暂不可执行: state=" + claim.state()
+                    + (lastError == null ? "" : ", lastError=" + lastError));
+        }
+        try {
+            activateClaimedVersion(claim.version());
+        } catch (Exception e) {
+            try {
+                if (!vectorizationTaskService.fail(claim.version(), e)) {
+                    log.warn("向量化任务租约已失效，忽略旧任务失败状态: versionId={}", requestedVersionId);
+                }
+            } catch (Exception persistenceFailure) {
+                log.error("记录向量化失败状态异常: versionId={}", requestedVersionId,
+                    persistenceFailure);
+            }
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "版本向量化失败: versionId=" + requestedVersionId, e);
+        }
+    }
+
+    private void activateClaimedVersion(KnowledgeBaseVersionEntity latestVersion) {
+        Long docId = latestVersion.getDocId();
+        Long versionId = latestVersion.getVersionId();
         log.info("开始向量化版本: docId={}, versionId={}", docId, versionId);
 
         KnowledgeBaseEntity doc = Optional.ofNullable(knowledgeBaseEntityMapper.selectById(docId))
@@ -269,22 +317,40 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 if (batch.isEmpty()) {
                     break;
                 }
-                List<String> embeddingIds = vectorStoreService.embedAndStore(batch);
+                if (!vectorizationTaskService.renew(latestVersion)) {
+                    throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                        "向量化任务租约已失效，停止写入 ES: versionId=" + versionId);
+                }
+                String embeddingClaim = embeddingClaimToken(latestVersion);
+                List<String> embeddingIds = vectorStoreService.embedAndStore(batch, embeddingClaim);
                 for (int i = 0; i < batch.size(); i++) {
                     KnowledgeBaseSegmentEntity seg = batch.get(i);
                     seg.setEmbeddingId(embeddingIds.get(i));
                     seg.setStatus(SegmentStatus.VECTOR_STORED);
                 }
                 try {
-                    segmentService.batchUpdateEmbedding(batch);
+                    int affected = segmentService.batchUpdateEmbedding(
+                        docId, versionId,
+                        Math.max(latestVersion.getEmbeddingAttempt(), 0),
+                        latestVersion.getEmbeddingClaimedAt(),
+                        batch);
+                    if (affected != batch.size()) {
+                        throw new BusinessException(
+                            ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                            "文档或版本已删除，停止回写向量: docId=" + docId
+                                + ", versionId=" + versionId
+                                + ", expected=" + batch.size()
+                                + ", affected=" + affected);
+                    }
                 } catch (Exception e) {
-                    // N1：本批 DB 回写失败 → 反向删除本批 ES 向量，避免「ES 有、MySQL 无」孤儿
+                    // 只删除仍携带本批租约令牌的向量；新任务覆盖稳定 ID 后令牌已变化，
+                    // 旧任务无法误删新向量。
                     log.error("分段 embeddingId 批量回写失败，反向清理本批 ES 向量: docId={}, versionId={}, batchSize={}",
                         docId, versionId, batch.size(), e);
                     try {
-                        vectorStoreService.removeByEmbeddingIds(embeddingIds);
+                        vectorStoreService.removeByEmbeddingClaim(embeddingClaim);
                     } catch (Exception cleanupEx) {
-                        log.error("反向清理本批 ES 向量失败，留待补偿任务对账兜底: docId={}, versionId={}",
+                        log.error("反向清理本批 ES 向量失败，留待后续重试覆盖: docId={}, versionId={}",
                             docId, versionId, cleanupEx);
                     }
                     if (e instanceof BusinessException be) {
@@ -304,13 +370,28 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
         // 事务 B：版本 + 主表状态推进 VECTOR_STORED
         transactionTemplate.executeWithoutResult(tx -> {
-            version.setStatus(DocumentStatus.VECTOR_STORED);
-            versionService.update(version);
+            if (!vectorizationTaskService.complete(latestVersion)) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                    "向量化任务租约已失效，拒绝旧任务完成状态: versionId=" + versionId);
+            }
             doc.setDocStatus(DocumentStatus.VECTOR_STORED);
             doc.setCurrentVersionId(versionId);
-            MapperUtils.save(knowledgeBaseEntityMapper, doc);
+            if (knowledgeBaseEntityMapper.updateById(doc) != 1) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                    "文档状态已变化，拒绝旧任务推进终态: docId=" + docId);
+            }
         });
         log.info("版本向量化完成: docId={}, versionId={}", docId, versionId);
+    }
+
+    private String embeddingClaimToken(KnowledgeBaseVersionEntity version) {
+        if (version.getEmbeddingClaimedAt() == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED,
+                "向量化任务缺少租约令牌: versionId=" + version.getVersionId());
+        }
+        return version.getVersionId() + ":"
+            + Math.max(version.getEmbeddingAttempt(), 0) + ":"
+            + version.getEmbeddingClaimedAt();
     }
 
     private List<String> collectStorageKeys(KnowledgeBaseEntity document) {

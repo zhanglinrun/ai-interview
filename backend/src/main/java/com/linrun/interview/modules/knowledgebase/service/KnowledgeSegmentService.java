@@ -43,7 +43,9 @@ public interface KnowledgeSegmentService {
     /**
      * 向量化每批完成后批量回写 embeddingId + 升 VECTOR_STORED（一条 UPDATE，独立小事务）。
      */
-    int batchUpdateEmbedding(List<KnowledgeBaseSegmentEntity> segments);
+    int batchUpdateEmbedding(
+        Long docId, Long versionId, int attempt, java.time.LocalDateTime claimedAt,
+        List<KnowledgeBaseSegmentEntity> segments);
 
     /**
      * 统计某版本已回写 embeddingId 的分段数（向量对账用）。

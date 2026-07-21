@@ -2,3 +2,6 @@
 # 详见 src/main/resources/model/bge-reranker-model/README.md
 src/main/resources/model/bge-reranker-model/*.onnx
 src/main/resources/model/bge-reranker-model/tokenizer.json
+
+# Eclipse/JDT-LS local output (Cursor redhat.java); real Maven output is target/
+/bin/

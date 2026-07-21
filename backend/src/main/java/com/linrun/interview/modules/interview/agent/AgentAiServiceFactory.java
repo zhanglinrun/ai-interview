@@ -4,7 +4,6 @@ import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.infrastructure.redis.RedisChatMemoryStore;
 import com.linrun.interview.modules.interview.agent.model.AgentTraceStep;
 import com.linrun.interview.modules.interview.agent.tool.AgentTraceCollector;
-import com.linrun.interview.modules.interview.agent.tool.KnowledgeBaseSearchTool;
 import com.linrun.interview.modules.interview.agent.tool.ResumeReadTool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -26,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 「我的模型」触发 {@code evictUser} 后返回新实例，自然生成新缓存项。
  *
  * <p>Interviewer 挂载 ChatMemory（Redis 持久化窗口记忆，memoryId=面试 sessionId）
- * 与两个 @Tool；Planner/Critic 是无工具无记忆的单轮结构化输出。
+ * 与简历读取 @Tool；岗位知识证据由决策器统一预检索，Planner/Critic 是无工具无记忆的单轮结构化输出。
  */
 @Slf4j
 @Component
@@ -35,7 +34,6 @@ public class AgentAiServiceFactory {
 
   private final LlmProviderRegistry llmProviderRegistry;
   private final AgentOrchestrationProperties properties;
-  private final KnowledgeBaseSearchTool knowledgeBaseSearchTool;
   private final ResumeReadTool resumeReadTool;
   private final RedisChatMemoryStore chatMemoryStore;
 
@@ -56,7 +54,7 @@ public class AgentAiServiceFactory {
     return interviewerCache.computeIfAbsent(chatModel, model ->
         AiServices.builder(InterviewerAiService.class)
             .chatModel(model)
-            .tools(knowledgeBaseSearchTool, resumeReadTool)
+            .tools(resumeReadTool)
             .chatMemoryProvider(memoryId -> MessageWindowChatMemory.builder()
                 .id(memoryId)
                 .maxMessages(Math.max(2, properties.getMemoryWindow()))

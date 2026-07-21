@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.ai.LlmProviderRegistry;
 import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
+import com.linrun.interview.modules.knowledgebase.rag.ContextExpansionService;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
 import com.linrun.interview.modules.knowledgebase.service.RerankService;
-import com.linrun.interview.modules.knowledgebase.service.SegmentTextCacheService;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.content.Content;
@@ -53,8 +53,9 @@ import java.util.TreeSet;
  * {@link InterviewElasticsearchContentRetriever} 的 {@code forcedSearchMode} 分档构造，
  * hybrid+rerank 档再用 {@link RerankService} 精排。
  *
- * <p>为隔离「检索策略」本身的差异，评测统一关闭父子/兄弟上下文扩展、不设最低分阈值，
- * 只比较 chunk 级命中；正确性判定沿用数据集「关键点同义词组」ground truth。
+ * <p>前三档关闭父子/兄弟上下文扩展，只比较 chunk 级命中；第四档严格复用生产顺序：
+ * 子块混合召回 → 子块 rerank → TopK → small-to-big 扩展。不设最低分阈值，正确性判定沿用
+ * 数据集「关键点同义词组」ground truth。
  *
  * <p>连真实 ES + DashScope，默认被 {@code rag-eval} 组排除，不随普通 {@code mvn test} 运行。运行：
  * <pre>
@@ -84,7 +85,6 @@ class RagRetrievalEvalTest {
   @Autowired private ElasticSearchProperties elasticSearchProperties;
   @Autowired private RestClient restClient;
   @Autowired private ObjectMapper objectMapper;
-  @Autowired private SegmentTextCacheService segmentTextCacheService;
 
   @Value("${ragdataset.dataset-path:classpath:rag-eval/eval-dataset.yaml}")
   private String datasetPath;
@@ -155,8 +155,7 @@ class RagRetrievalEvalTest {
         List<TextSegment> vectorTopK = trim(retrieveVectorCandidates(scope, queryText), evalTopK);
         List<TextSegment> hybridTopK = trim(candidates, evalTopK);
         List<TextSegment> rerankTopK = trim(rerank(candidates, queryText), evalTopK);
-        List<TextSegment> expandCandidates = retrieveExpandedCandidates(scope, queryText);
-        List<TextSegment> expandTopK = trim(rerank(expandCandidates, queryText), evalTopK);
+        List<TextSegment> expandTopK = expand(rerankTopK);
         perTier.get(Tier.VECTOR).add(score(q, expectedKb, vectorTopK));
         perTier.get(Tier.HYBRID).add(score(q, expectedKb, hybridTopK));
         perTier.get(Tier.HYBRID_RERANK).add(score(q, expectedKb, rerankTopK));
@@ -188,38 +187,27 @@ class RagRetrievalEvalTest {
   // ==================== 检索三档 ====================
 
   private List<TextSegment> retrieveVectorCandidates(List<Long> scope, String query) {
-    return retrieve(scope, query, "vector", false);
+    return retrieve(scope, query, "vector");
   }
 
   private List<TextSegment> retrieveHybridCandidates(List<Long> scope, String query) {
-    return retrieve(scope, query, null, false);
+    return retrieve(scope, query, null);
   }
 
-  /** 第四档：混合检索 + 父子/兄弟 small-to-big 扩展（走生产同款 ParentExpand 配置）。 */
-  private List<TextSegment> retrieveExpandedCandidates(List<Long> scope, String query) {
-    return retrieve(scope, query, null, true);
-  }
-
-  private List<TextSegment> retrieve(List<Long> scope, String query, String forcedSearchMode,
-      boolean parentExpand) {
-    // 不直接改共享配置单例，避免污染其它档位
-    KnowledgeBaseQueryProperties.ParentExpand expand = new KnowledgeBaseQueryProperties.ParentExpand();
-    if (parentExpand) {
-      KnowledgeBaseQueryProperties.ParentExpand prod = queryProperties.getParentExpand();
-      expand.setEnabled(true);
-      expand.setStrategy(prod.getStrategy());
-      expand.setMaxChars(prod.getMaxChars());
-      expand.setMaxSiblings(prod.getMaxSiblings());
-      expand.setCacheTtlSeconds(prod.getCacheTtlSeconds());
-    } else {
-      expand.setEnabled(false);
-    }
+  private List<TextSegment> retrieve(List<Long> scope, String query, String forcedSearchMode) {
     InterviewElasticsearchContentRetriever retriever = new InterviewElasticsearchContentRetriever(
         embeddingStore, llmProviderRegistry.getDefaultEmbeddingModel(), Math.max(candidateTopK, 1), 0.0,
-        scope, segmentService, expand, queryProperties.getHybrid(), null, null,
+        scope, queryProperties.getHybrid(), null, null,
         restClient, elasticSearchProperties.getIndexName(), objectMapper,
-        forcedSearchMode, null, segmentTextCacheService);
+        forcedSearchMode, null, null, elasticSearchProperties.getDimensions());
     return retriever.retrieve(Query.from(query)).stream().map(Content::textSegment).toList();
+  }
+
+  /** 第四档只扩展已经完成 rerank 和 TopK 截断的子块，与生产链路保持一致。 */
+  private List<TextSegment> expand(List<TextSegment> rerankedTopK) {
+    List<Content> contents = rerankedTopK.stream().map(Content::from).toList();
+    return new ContextExpansionService(segmentService, queryProperties.getParentExpand())
+        .expand(contents).stream().map(Content::textSegment).toList();
   }
 
   private List<TextSegment> rerank(List<TextSegment> candidates, String query) {

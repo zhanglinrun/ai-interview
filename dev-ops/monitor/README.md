@@ -18,13 +18,6 @@ cd dev-ops
 docker compose -f docker-compose-environment.yml -f docker-compose-monitor.yml up -d
 ```
 
-项目根目录兼容入口：
-
-```bash
-docker compose -f docker-compose.monitor.yml up -d
-docker compose -f docker-compose.dev.yml -f docker-compose.monitor.yml up -d
-```
-
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000（默认 admin / admin）
 

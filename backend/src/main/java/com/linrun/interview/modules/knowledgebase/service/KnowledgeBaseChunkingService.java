@@ -34,20 +34,28 @@ public class KnowledgeBaseChunkingService {
   }
 
   /**
-   * 空 body / 缺省 splitType 时回落默认 BROTHER；保留调用方传入的 chunkSize/overlap 等。
+   * 空 body / 缺省 splitType 时回落默认 BROTHER；统一保证 overlap 小于 chunkSize，
+   * 避免滑动窗口起点不前进导致死循环。
    */
   public DocumentSplitParam resolveSplitParam(DocumentSplitParam param) {
     DocumentSplitParam defaults = defaultSplitParam();
-    if (param == null || param.splitType() == null || param.splitType().isBlank()) {
-      return new DocumentSplitParam(
-          defaults.splitType(),
-          param != null && param.chunkSize() != null ? param.chunkSize() : defaults.chunkSize(),
-          param != null && param.overlap() != null ? param.overlap() : defaults.overlap(),
-          param != null ? param.titleLevel() : null,
-          param != null ? param.separator() : null,
-          param != null ? param.regex() : null);
-    }
-    return param;
+    String splitType = param == null || param.splitType() == null || param.splitType().isBlank()
+        ? defaults.splitType()
+        : param.splitType();
+    int chunkSize = param != null && param.chunkSize() != null && param.chunkSize() > 0
+        ? param.chunkSize()
+        : defaults.chunkSize();
+    int requestedOverlap = param != null && param.overlap() != null
+        ? Math.max(0, param.overlap())
+        : defaults.overlap();
+    int overlap = Math.min(requestedOverlap, Math.max(0, chunkSize - 1));
+    return new DocumentSplitParam(
+        splitType,
+        chunkSize,
+        overlap,
+        param != null ? param.titleLevel() : null,
+        param != null ? param.separator() : null,
+        param != null ? param.regex() : null);
   }
 
   public List<TextSegment> split(String content) {

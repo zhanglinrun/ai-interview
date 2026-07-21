@@ -2,6 +2,7 @@ package com.linrun.interview.modules.interview.service;
 
 import com.linrun.interview.common.ai.PromptSanitizer;
 import com.linrun.interview.common.security.UserContext;
+import com.linrun.interview.modules.interview.agent.model.InterviewEvidence;
 import com.linrun.interview.modules.interview.agent.model.InterviewEvidence.Bundle;
 import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
 import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryService;
@@ -18,6 +19,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -94,5 +97,24 @@ class InterviewKnowledgeRetrievalServiceTest {
         7L, List.of(9L), "缓存一致性");
     verify(queryService, never()).retrieveContentsForInterviewEvidence(
         99L, List.of(9L), "缓存一致性");
+  }
+
+  @Test
+  @DisplayName("最终面试证据 Prompt 应受总字符预算约束")
+  void limitsFinalEvidencePromptLength() {
+    PromptSanitizer promptSanitizer = mock(PromptSanitizer.class);
+    when(promptSanitizer.sanitize(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(promptSanitizer.wrapWithDelimiters(eq("interview_evidence"), anyString()))
+        .thenAnswer(invocation -> invocation.getArgument(1));
+    InterviewKnowledgeRetrievalService service = new InterviewKnowledgeRetrievalService(
+        mock(KnowledgeBaseQueryService.class), promptSanitizer);
+    InterviewEvidence evidence = new InterviewEvidence(
+        "e-1", 9L, "chunk-1", "embedding-1", "s".repeat(4000),
+        "Java", 0.9d, "x".repeat(600));
+    Bundle bundle = new Bundle("query", List.of(evidence), List.of(evidence));
+
+    String prompt = service.buildEvidencePrompt(bundle);
+
+    assertThat(prompt).hasSizeLessThanOrEqualTo(3000).endsWith("…");
   }
 }

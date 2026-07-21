@@ -42,8 +42,14 @@ public class RagEvaluationRunEntity {
 
     private Double ndcg;
 
+    private Double retrievalRecall;
+
+    private Double retrievalPrecision;
+
+    /** 兼容旧列；与 retrievalRecall 同值。 */
     private Double citationHitRate;
 
+    /** 兼容旧列；与 retrievalPrecision 同值。 */
     private Double citationCoverage;
 
     private Double minScore;

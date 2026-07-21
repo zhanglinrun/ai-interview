@@ -3,6 +3,8 @@ target/
 **/target/
 !.mvn/wrapper/maven-wrapper.jar
 *.class
+# IDE/local mistaken output under backend (not Maven target/)
+backend/bin/
 
 # Node.js / frontend
 node_modules/

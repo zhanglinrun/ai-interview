@@ -52,8 +52,10 @@ public class DistributeLockAspect {
         RLock lock = redissonClient.getLock(lockKey);
         boolean acquired;
         try {
-            acquired = lock.tryLock(
-                distributeLock.waitTime(), distributeLock.leaseTime(), distributeLock.unit());
+            acquired = distributeLock.leaseTime() > 0
+                ? lock.tryLock(
+                    distributeLock.waitTime(), distributeLock.leaseTime(), distributeLock.unit())
+                : lock.tryLock(distributeLock.waitTime(), distributeLock.unit());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "获取分布式锁被中断: " + lockKey, e);

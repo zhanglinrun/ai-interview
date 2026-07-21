@@ -2,8 +2,6 @@
 # 用法：
 #   cd dev-ops
 #   docker compose -f docker-compose-app.yml up -d --build
-# 或在项目根目录：
-#   docker compose -f docker-compose.yml up -d --build
 #
 # name 显式钉死，防止与 ai-group 的 docs/dev-ops compose 撞默认项目名 "dev-ops"（详见
 # docker-compose-environment.yml 头注）。
@@ -146,11 +144,6 @@ services:
       ES_HOST: http://elasticsearch:9200
       ES_INDEX_NAME: ai-interview-vector
       ES_DIMENSIONS: ${ES_DIMENSIONS:-1536}
-      APP_STORAGE_ENDPOINT: http://minio:9000
-      APP_STORAGE_ACCESS_KEY: minioadmin
-      APP_STORAGE_SECRET_KEY: minioadmin
-      APP_STORAGE_BUCKET: ai-interview
-      APP_STORAGE_REGION: us-east-1
       MINIO_ENDPOINT: http://minio:9000
       MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-}
       MINIO_ACCESS_KEY: minioadmin

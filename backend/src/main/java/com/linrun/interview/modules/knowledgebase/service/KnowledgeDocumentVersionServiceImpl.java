@@ -75,6 +75,12 @@ public class KnowledgeDocumentVersionServiceImpl implements KnowledgeDocumentVer
 
   @Override
   @Transactional
+  public boolean beginRechunk(Long versionId, Long docId) {
+    return versionMapper.beginRechunk(versionId, docId) == 1;
+  }
+
+  @Override
+  @Transactional
   public int physicalDeleteByDocId(Long docId) {
     int deleted = versionMapper.physicalDeleteByDocId(docId);
     log.info("按docId物理删除版本: docId={}, deleted={}", docId, deleted);

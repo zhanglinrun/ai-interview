@@ -3,6 +3,37 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '../..')
 $devOps = Join-Path $repoRoot 'dev-ops'
 
+$upgradeRunner = Join-Path $devOps 'Apply-DatabaseUpgrades.ps1'
+$vectorizationUpgrade = Join-Path $repoRoot `
+  'backend/src/main/resources/sql/upgrade/2026-07-rag-vectorization-task.sql'
+$evaluationMetricsUpgrade = Join-Path $repoRoot `
+  'backend/src/main/resources/sql/upgrade/2026-07-rag-evaluation-metrics.sql'
+foreach ($requiredFile in @($upgradeRunner, $vectorizationUpgrade, $evaluationMetricsUpgrade)) {
+  if (-not (Test-Path -LiteralPath $requiredFile)) {
+    throw "Missing database upgrade asset: $requiredFile"
+  }
+}
+$upgradeSql = Get-Content -LiteralPath $vectorizationUpgrade -Raw -Encoding UTF8
+foreach ($requiredToken in @(
+    'embedding_attempt',
+    'embedding_claimed_at',
+    'embedding_next_retry_at',
+    'embedding_terminal_failure',
+    'idx_kbv_embedding_recovery'
+  )) {
+  if ($upgradeSql -notmatch [regex]::Escape($requiredToken)) {
+    throw "Database upgrade is missing required token: $requiredToken"
+  }
+}
+Write-Host 'Validated database upgrade assets'
+
+$evaluationSql = Get-Content -LiteralPath $evaluationMetricsUpgrade -Raw -Encoding UTF8
+foreach ($requiredToken in @('retrieval_recall', 'retrieval_precision')) {
+  if ($evaluationSql -notmatch [regex]::Escape($requiredToken)) {
+    throw "RAG evaluation upgrade is missing required token: $requiredToken"
+  }
+}
+
 $dashboard = Join-Path $devOps 'monitor/grafana/dashboards/ai-interview-overview.json'
 Get-Content -LiteralPath $dashboard -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
 Write-Host 'Validated Grafana dashboard JSON'
