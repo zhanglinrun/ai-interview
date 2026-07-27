@@ -29,13 +29,13 @@ class ResumeGradingServiceTest {
     );
     BusinessException missingByok = new BusinessException(
         ErrorCode.USER_LLM_NOT_CONFIGURED,
-        "尚未配置你的模型 Key，请先在设置中配置"
+        "尚未配置你的模型访问凭证，请先在设置中配置"
     );
     when(registry.getUserChatModel(3L)).thenThrow(missingByok);
 
     assertThatThrownBy(() -> service.analyzeResume("Java 后端简历", 3L))
         .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("尚未配置你的模型 Key")
+        .hasMessageContaining("尚未配置你的模型访问凭证")
         .extracting("code")
         .isEqualTo(ErrorCode.RESUME_ANALYSIS_FAILED.getCode());
   }

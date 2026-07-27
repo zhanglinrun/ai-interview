@@ -51,7 +51,7 @@ async function ensureStreamResponse(response: Response): Promise<void> {
     message = null;
   }
 
-  // 流式 chat（RAG 问答/面试）未配置模型 Key 时同样触发全局引导
+  // 流式 chat（RAG 问答/面试）未配置模型访问凭证时同样触发全局引导
   notifyIfUserLlmNotConfigured(code, message ?? undefined);
   throw new Error(message ?? `请求失败 (${response.status})`);
 }

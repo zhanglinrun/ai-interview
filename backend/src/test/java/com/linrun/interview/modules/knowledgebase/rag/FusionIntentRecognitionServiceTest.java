@@ -65,4 +65,22 @@ class FusionIntentRecognitionServiceTest {
           assertThat(strategyScore.confidence()).isZero();
         });
   }
+
+  @Test
+  @DisplayName("明显越域闲聊应判为 OFF_TOPIC 且 related=false")
+  void offTopicIdleChatMarkedUnrelated() {
+    when(llmIntentRecognitionAiService.recognize(anyString()))
+        .thenReturn(new LlmIntentRecognitionResult(
+            "天气闲聊，与面试无关",
+            false,
+            InterviewIntent.OFF_TOPIC.name(),
+            0.95,
+            null));
+
+    IntentRecognitionResult result = service.recognize("今天天气怎么样");
+
+    assertThat(result.related()).isFalse();
+    assertThat(result.resolvedIntent()).isEqualTo(InterviewIntent.OFF_TOPIC);
+    assertThat(result.confidence()).isGreaterThan(0.0);
+  }
 }

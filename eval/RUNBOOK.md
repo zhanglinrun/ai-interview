@@ -4,7 +4,7 @@
 Agent Critic 质量门与统一评测，并把结果回填到根 `README.md` 的对应表格。
 
 检索评测需要 MySQL / Redis / Elasticsearch / MinIO 和平台 Embedding；生成与 Agent 评测还需要可用
-模型 Key。产物写到各自的 `.work/` 临时目录（不进 git），把关键数字和运行参数一起保存。
+模型访问凭证。产物写到各自的 `.work/` 临时目录（不进 git），把关键数字和运行参数一起保存。
 
 ---
 
@@ -16,9 +16,9 @@ Agent Critic 质量门与统一评测，并把结果回填到根 `README.md` 的
 | JDK 21 + Maven 3.9+ | 后端 + JUnit 评测 | - |
 | [k6](https://k6.io/docs/get-started/installation/) | 压测 | `winget install k6` / `brew install k6` |
 | Python 3.11+ + [uv](https://docs.astral.sh/uv/) | RAGAS 评测 | `pip install uv` |
-| DashScope API Key | LLM / Embedding / 评测 judge | 阿里云百炼控制台 |
+| 模型服务访问凭证 | LLM / Embedding / 评测 judge | 各云厂商控制台 |
 
-DashScope Key 必填：`.env` 里 `AI_BAILIAN_API_KEY=sk-...`。
+平台侧模型配置必填：`.env` 里 `AI_BAILIAN_API_KEY`（占位符，勿提交真实值）。
 
 ---
 

@@ -211,6 +211,8 @@ public class InterviewOrchestrator {
           ? aiServiceFactory.critic(request.userId()) : null;
 
       OrchestrationState state = OrchestrationState.ASKING;
+      AgentTraceCollector.append(AgentTraceStep.ROLE_ORCHESTRATOR, "state",
+          OrchestrationState.ASKING.name(), "进入出题状态");
       AgentQuestionOutput output = null;
       boolean approved = false;
       int reflexionRounds = 0;
@@ -229,6 +231,8 @@ public class InterviewOrchestrator {
         }
 
         state = OrchestrationState.CRITIQUING;
+        AgentTraceCollector.append(AgentTraceStep.ROLE_ORCHESTRATOR, "state",
+            OrchestrationState.CRITIQUING.name(), "进入审题状态");
         CriticVerdict verdict = critiqueQuietly(critic, request, decision, output);
         recordCriticVerdict(verdict.approved());
         AgentTraceCollector.append(AgentTraceStep.ROLE_CRITIC, "critique",
@@ -249,6 +253,8 @@ public class InterviewOrchestrator {
           retryHint = verdict.retryHint() == null || verdict.retryHint().isBlank()
               ? verdict.feedback() : verdict.retryHint();
           state = OrchestrationState.ASKING;
+          AgentTraceCollector.append(AgentTraceStep.ROLE_ORCHESTRATOR, "state",
+              "REFLEXION", "Critic 打回，携带 retryHint 重回 ASKING，round=" + reflexionRounds);
         }
       }
 

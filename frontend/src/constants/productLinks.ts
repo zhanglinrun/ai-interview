@@ -23,9 +23,9 @@ export const RECRUITMENT_SOURCES: readonly ExternalResource[] = [
   },
   {
     id: 'tencent-sheet',
-    name: '秋招信息腾讯文档',
+    name: '校招信息腾讯文档',
     url: 'https://docs.qq.com/smartsheet/DTkRMUVhoUWJXZEhJ?tab=tvVDZj&viewId=vmLdET',
-    description: '人工整理的秋招信息表，作为企业官网之外的补充信息源。',
+    description: '人工整理的校招信息表，作为企业官网之外的补充信息源。',
     badge: '人工整理',
   },
 ] as const;

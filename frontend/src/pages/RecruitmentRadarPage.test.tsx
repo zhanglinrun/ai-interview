@@ -14,7 +14,7 @@ describe('RecruitmentRadarPage', () => {
       'href',
       'https://toudi.kamacoder.com/',
     );
-    expect(screen.getByRole('link', { name: /秋招信息腾讯文档/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /校招信息腾讯文档/ })).toHaveAttribute(
       'href',
       'https://docs.qq.com/smartsheet/DTkRMUVhoUWJXZEhJ?tab=tvVDZj&viewId=vmLdET',
     );

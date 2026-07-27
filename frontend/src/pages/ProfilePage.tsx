@@ -9,7 +9,7 @@ import { getCapabilityDisplayName } from '../utils/displayLabels';
 const PROFILE_AREAS = [
   ['/history', FileStack, '我的简历', '上传简历，查看解析和修改建议'],
   ['/knowledgebase', Database, '复习资料', '管理面试资料和 RAG 文档'],
-  ['/settings', KeyRound, '模型设置', '配置自己的模型 Key，查看调用记录'],
+  ['/settings', KeyRound, '模型设置', '配置自己的模型访问凭证，查看调用记录'],
   ['/interview-schedule', CalendarDays, '面试日程', '记录已确认的面试安排'],
   ['/eval', BrainCircuit, 'RAG 评测', '检查检索和回答效果'],
 ] as const;

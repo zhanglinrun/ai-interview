@@ -40,7 +40,7 @@ public class InterviewQueryTransformer implements QueryTransformer {
 
     private static final int MAX_HISTORY_CHARS = 200;
     /** 改写前推给前端的进度文案（不带前缀，前缀由调用方加）。 */
-    private static final String PROGRESS_REWRITING = "正在优化您的问题...";
+    private static final String PROGRESS_REWRITING = "正在改写问题...";
 
     private final ChatModel chatModel;
     private final PromptTemplate rewritePromptTemplate;

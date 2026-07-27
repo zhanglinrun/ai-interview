@@ -21,7 +21,7 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const AI_REQUEST_TIMEOUT_MS = 180_000;
 export const UPLOAD_REQUEST_TIMEOUT_MS = 300_000;
 
-/** 后端错误码：用户尚未配置自己的模型 Key（BYOK）。见后端 ErrorCode.USER_LLM_NOT_CONFIGURED。 */
+/** 后端错误码：用户尚未配置自己的模型访问凭证。见后端 ErrorCode.USER_LLM_NOT_CONFIGURED。 */
 export const USER_LLM_NOT_CONFIGURED_CODE = 7006;
 /** 全局事件：某次请求因用户未配置「我的模型」被拒绝，供全局引导监听。 */
 export const USER_LLM_NOT_CONFIGURED_EVENT = 'ai-interview-user-llm-not-configured';
@@ -38,12 +38,15 @@ export class ApiError extends Error {
 }
 
 /**
- * 若响应命中「未配置模型 Key」（code 7006，或消息含该提示），派发全局事件。
+ * 若响应命中「未配置模型访问凭证」（code 7006，或消息含该提示），派发全局事件。
  * 覆盖 RAG 问答、出题与评估等所有走统一 Result 的 chat 入口；返回是否命中。
  */
 export function notifyIfUserLlmNotConfigured(code?: number, message?: string): boolean {
   const matched = code === USER_LLM_NOT_CONFIGURED_CODE
-    || (typeof message === 'string' && message.includes('配置你的模型 Key'));
+    || (typeof message === 'string' && (
+      message.includes('配置你的模型访问凭证')
+      || message.includes('配置你的模型 Key')
+    ));
   if (matched && typeof window !== 'undefined') {
     window.dispatchEvent(new Event(USER_LLM_NOT_CONFIGURED_EVENT));
   }

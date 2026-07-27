@@ -106,7 +106,7 @@ export default function MyModelForm({
     }
     // 已配置后仅改 baseUrl/模型名时 Key 可留空（后端保留原 Key）；首次配置必须填写。
     if (!trimmedApiKey && !configured) {
-      setError('请输入 API Key');
+      setError('请输入访问凭证');
       return null;
     }
     return { baseUrl: trimmedBaseUrl, apiKey: trimmedApiKey, chatModel: trimmedModel };
@@ -160,7 +160,7 @@ export default function MyModelForm({
     }
     // /mine/test 测的是「已保存」的配置。未配置且未填 Key 无从测起，先提示。
     if (!trimmedApiKey && !configured) {
-      setError('请先输入 API Key');
+      setError('请先输入访问凭证');
       return;
     }
     setTesting(true);
@@ -208,7 +208,7 @@ export default function MyModelForm({
       {configured && (
         <div className="flex items-center gap-2 rounded-lg bg-primary-50 dark:bg-primary-900/20 px-3 py-2 text-xs font-medium text-primary-700 dark:text-primary-300">
           <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>模型 Key 已保存{maskedApiKey ? `：${maskedApiKey}` : ''}。只修改其他字段时，Key 可以留空。</span>
+          <span>模型访问凭证已保存{maskedApiKey ? `：${maskedApiKey}` : ''}。只修改其他字段时，凭证可以留空。</span>
         </div>
       )}
 
@@ -243,10 +243,10 @@ export default function MyModelForm({
         <p className="mt-1 text-xs text-slate-400">兼容 OpenAI 的 /chat/completions 接口地址即可。</p>
       </div>
 
-      {/* API Key */}
+      {/* 访问凭证 */}
       <div>
         <label className={LABEL_CLASS}>
-          API Key {configured
+          访问凭证 {configured
             ? <span className="text-slate-400 font-normal">(留空则不修改)</span>
             : <span className="text-red-500">*</span>}
         </label>
@@ -255,7 +255,7 @@ export default function MyModelForm({
             type={showApiKey ? 'text' : 'password'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder={configured ? '留空则保持已配置的 Key 不变' : '输入你自己的模型 API Key'}
+            placeholder={configured ? '留空则保持已配置的凭证不变' : '输入你自己的模型访问凭证'}
             autoComplete="off"
             className={`${INPUT_CLASS} pr-10`}
           />
@@ -372,7 +372,7 @@ export default function MyModelForm({
       <ConfirmDialog
         open={confirmDelete}
         title="删除「我的模型」配置"
-        message="删除后，知识问答、面试出题和评估将暂时不可用，重新填写模型 Key 后即可恢复。确定删除吗？"
+        message="删除后，知识问答、面试出题和评估将暂时不可用，重新填写模型访问凭证后即可恢复。确定删除吗？"
         confirmText="确定删除"
         cancelText="取消"
         confirmVariant="danger"

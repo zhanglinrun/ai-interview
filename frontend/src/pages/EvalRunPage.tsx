@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Play, Plus, Trash2 } from 'lucide-react';
+import { ClipboardCopy, Play, Plus, Trash2 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { getErrorMessage } from '../api/request';
 import { knowledgeBaseApi, type KnowledgeBaseItem } from '../api/knowledgebase';
@@ -17,38 +17,114 @@ const num = (v: number) => v.toFixed(3);
 
 const INPUT_CLASS = 'dark-input w-full px-3 py-2 text-sm';
 
+function formatEvalReport(result: EvalRunResponse): string {
+  const lines: string[] = [
+    `# ${result.title}`,
+    `runId: ${result.runId}`,
+    `时间: ${result.createdAt}`,
+    `总分: ${pct(result.overallScore)}${result.regression ? '（低于历史基准）' : ''}`,
+    '',
+  ];
+  if (result.intent) {
+    lines.push(
+      '## 意图门 / 问题分类',
+      `准确率 ${pct(result.intent.accuracy)} · Macro-F1 ${num(result.intent.macroF1)} · ${result.intent.correct}/${result.intent.total}`,
+    );
+    for (const it of result.intent.items) {
+      lines.push(
+        `- [${it.correct ? 'OK' : 'FAIL'}] ${it.question} → 期望=${it.expectedIntent ?? '-'} 实际=${it.actualIntent} (${pct(it.confidence)})`,
+      );
+    }
+    lines.push('');
+  }
+  if (result.rag) {
+    lines.push(
+      '## 资料检索',
+      `Hit ${pct(result.rag.hitRate)} · MRR ${num(result.rag.mrr)} · NDCG ${num(result.rag.ndcg)} · Top-${result.rag.k}`,
+    );
+    for (const it of result.rag.items) {
+      lines.push(
+        `- [${it.hit ? 'HIT' : 'MISS'}] ${it.question} · firstRank=${it.firstHitRank} · RR=${num(it.reciprocalRank)}`,
+      );
+    }
+    lines.push('');
+  }
+  if (result.judge) {
+    lines.push(
+      '## 回答质量',
+      `通过率 ${pct(result.judge.passRate)} · 平均分 ${num(result.judge.averageOverall)} · ${result.judge.passed}/${result.judge.total}`,
+    );
+    for (const it of result.judge.items) {
+      lines.push(
+        `- [${it.passed ? 'PASS' : 'FAIL'}] ${it.question} · overall=${num(it.overall)} (门槛 ${num(it.minOverallScore)})`,
+      );
+    }
+    lines.push('');
+  }
+  if (result.baselineComparison) {
+    lines.push(
+      '## 基线对比',
+      `baseline=${result.baselineComparison.baselineRunId} · 阈值=${num(result.baselineComparison.threshold)}`,
+    );
+    for (const m of result.baselineComparison.metrics) {
+      lines.push(
+        `- ${m.metric}: 当前 ${num(m.current)} vs 基线 ${num(m.baseline)} (Δ ${num(m.delta)})${m.regressed ? ' [回归]' : ''}`,
+      );
+    }
+  }
+  lines.push(
+    '',
+    '复现：侧栏「RAG 评测」→ 默认 Agent Demo → 选择 VECTOR_STORED 资料 → 运行评测。',
+    'Agent Critic 质量门：数据集 eval/interview-agent/critic-badcase-dataset.yaml；本地报告 eval/.work/critic-badcase-report.md（小样本）。',
+    '更深报告：eval/rag-retrieval、eval/ragas（见 eval/README.md）。',
+  );
+  return lines.join('\n');
+}
+
 export default function EvalRunPage() {
-  const [title, setTitle] = useState('RAG 检索基础评测');
-  const [baselineKey, setBaselineKey] = useState('interview-routing-basic');
+  const [title, setTitle] = useState('Agent Demo');
+  const [baselineKey, setBaselineKey] = useState('agent-demo-baseline');
   const [updateBaseline, setUpdateBaseline] = useState(false);
   const [regressionThreshold, setRegressionThreshold] = useState(0.03);
 
-  const [intentCases, setIntentCases] = useState<IntentCase[]>([]);
-  const [judgeCases, setJudgeCases] = useState<JudgeCase[]>([]);
+  const [intentCases, setIntentCases] = useState<IntentCase[]>([
+    { question: '讲讲 JVM 垃圾回收原理', expectedIntent: 'TECH_KB', expectedRelated: true },
+    { question: 'Redis 缓存穿透怎么解决？', expectedIntent: 'TECH_KB', expectedRelated: true },
+    { question: '今天天气怎么样', expectedIntent: 'OFF_TOPIC', expectedRelated: false },
+    { question: '帮我点一份外卖', expectedIntent: 'OFF_TOPIC', expectedRelated: false },
+  ]);
+  const [judgeCases, setJudgeCases] = useState<JudgeCase[]>([
+    {
+      question: 'Redis 缓存穿透怎么解决？',
+      answer: '可以用布隆过滤器拦截不存在的 key，并对不存在的数据做短 TTL 空值缓存。',
+      referenceAnswer: '布隆过滤器、参数校验、空值缓存、热点保护。',
+      context: '缓存穿透指查询不存在的数据导致请求打到数据库。',
+      minOverallScore: 0.75,
+    },
+  ]);
   const [ragKbIds, setRagKbIds] = useState<number[]>([]);
   const [ragK, setRagK] = useState(5);
-  const [ragItems, setRagItems] = useState<RagEvalItem[]>([]);
+  const [ragItems, setRagItems] = useState<RagEvalItem[]>([
+    { question: 'Redis 缓存穿透怎么解决？', expectedKeywords: ['布隆过滤器', '空值缓存'] },
+    { question: 'JVM 垃圾回收有哪些常见收集器？', expectedKeywords: ['G1', '垃圾回收'] },
+  ]);
 
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalRunResponse | null>(null);
-
-  useEffect(() => {
-    knowledgeBaseApi
-      .getAllKnowledgeBases('time', 'VECTOR_STORED')
-      .then(setKnowledgeBases)
-      .catch(err => console.error('Failed to load knowledge bases:', err));
-  }, []);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
 
   const loadExample = () => {
-    setTitle('RAG 检索基础评测');
-    setBaselineKey('interview-routing-basic');
+    setTitle('Agent Demo');
+    setBaselineKey('agent-demo-baseline');
     setUpdateBaseline(false);
     setRegressionThreshold(0.03);
     setIntentCases([
-      { question: '讲讲 JVM 垃圾回收原理', expectedIntent: 'TECH_KB' },
-      { question: '今天天气怎么样', expectedIntent: 'OFF_TOPIC' },
+      { question: '讲讲 JVM 垃圾回收原理', expectedIntent: 'TECH_KB', expectedRelated: true },
+      { question: 'Redis 缓存穿透怎么解决？', expectedIntent: 'TECH_KB', expectedRelated: true },
+      { question: '今天天气怎么样', expectedIntent: 'OFF_TOPIC', expectedRelated: false },
+      { question: '帮我点一份外卖', expectedIntent: 'OFF_TOPIC', expectedRelated: false },
     ]);
     setJudgeCases([
       {
@@ -61,12 +137,29 @@ export default function EvalRunPage() {
     ]);
     setRagItems([
       { question: 'Redis 缓存穿透怎么解决？', expectedKeywords: ['布隆过滤器', '空值缓存'] },
+      { question: 'JVM 垃圾回收有哪些常见收集器？', expectedKeywords: ['G1', '垃圾回收'] },
     ]);
+    if (knowledgeBases.length > 0) {
+      setRagKbIds([knowledgeBases[0].id]);
+    }
   };
+
+  useEffect(() => {
+    knowledgeBaseApi
+      .getAllKnowledgeBases('time', 'VECTOR_STORED')
+      .then((list) => {
+        setKnowledgeBases(list);
+        if (list.length > 0) {
+          setRagKbIds((prev) => (prev.length === 0 ? [list[0].id] : prev));
+        }
+      })
+      .catch(err => console.error('Failed to load knowledge bases:', err));
+  }, []);
 
   const run = async () => {
     setError(null);
     setResult(null);
+    setCopyHint(null);
     const body: EvalRunRequest = {
       title: title.trim() || undefined,
       baselineKey: baselineKey.trim() || undefined,
@@ -100,17 +193,35 @@ export default function EvalRunPage() {
     }
   };
 
+  const copyReport = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(formatEvalReport(result));
+      setCopyHint('报告已复制到剪贴板，可直接贴进答辩笔记。');
+    } catch {
+      setCopyHint('复制失败，请手动选中下方报告文本。');
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-5">
       <PageHeader
-        eyebrow="效果检查"
-        title="效果评测"
-        description="用固定样例检查问题分类、资料检索和回答质量，并与历史结果比较。"
+        eyebrow="Agent Demo"
+        title="RAG 效果评测"
+        description="默认载入固定集；一键检查意图 Macro-F1、检索 Hit/MRR/NDCG、Judge 与基线对比。Critic bad-case 见 eval/.work 作为 Agent 质量门备注。"
       />
+
+      <div className="rounded-lg border border-primary-100 bg-primary-50/60 px-4 py-3 text-sm text-primary-900 dark:border-primary-900 dark:bg-primary-950/30 dark:text-primary-200">
+        建议：确认已选 VECTOR_STORED 资料后直接「运行评测」。Agent Critic 固定集在
+        {' '}<code className="text-xs">eval/interview-agent/critic-badcase-dataset.yaml</code>
+        ，本地跑 <code className="text-xs">InterviewCriticEvalTest</code> 后报告落
+        {' '}<code className="text-xs">eval/.work/critic-badcase-report.md</code>（小样本质量门，非端到端成功率）。
+        离线四档 / RAGAS 见 <code className="text-xs">eval/rag-retrieval</code> 与 <code className="text-xs">eval/ragas</code>。
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <button onClick={loadExample} className="px-4 py-2 rounded-lg btn-secondary text-sm font-medium">
-          加载示例
+          加载 Agent Demo
         </button>
         <button
           onClick={run}
@@ -120,7 +231,19 @@ export default function EvalRunPage() {
           <Play className="w-4 h-4" />
           {running ? '评测运行中…' : '运行评测'}
         </button>
+        {result && (
+          <button
+            onClick={() => void copyReport()}
+            className="px-4 py-2 rounded-lg btn-secondary text-sm font-medium inline-flex items-center gap-2"
+          >
+            <ClipboardCopy className="w-4 h-4" />
+            复制报告
+          </button>
+        )}
       </div>
+      {copyHint && (
+        <p className="text-xs text-emerald-600 dark:text-emerald-400">{copyHint}</p>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
@@ -128,7 +251,6 @@ export default function EvalRunPage() {
         </div>
       )}
 
-      {/* 运行配置 */}
       <section className="surface-card p-4 space-y-3">
         <h2 className="font-semibold text-sm text-slate-900 dark:text-white">运行配置</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -157,10 +279,9 @@ export default function EvalRunPage() {
         </div>
       </section>
 
-      {/* 意图识别用例 */}
       <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">问题分类用例</h2>
+          <h2 className="font-semibold text-sm text-slate-900 dark:text-white">意图门 / 问题分类用例</h2>
           <button
             onClick={() => setIntentCases(prev => [...prev, { question: '', expectedIntent: '' }])}
             className="text-primary-600 dark:text-primary-400 text-sm inline-flex items-center gap-1"
@@ -190,7 +311,6 @@ export default function EvalRunPage() {
         ))}
       </section>
 
-      {/* RAG 检索用例 */}
       <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-sm text-slate-900 dark:text-white">资料检索用例</h2>
@@ -250,7 +370,6 @@ export default function EvalRunPage() {
         )}
       </section>
 
-      {/* LLM-as-Judge 用例 */}
       <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-sm text-slate-900 dark:text-white">回答质量用例</h2>
@@ -302,12 +421,12 @@ export default function EvalRunPage() {
         ))}
       </section>
 
-      {result && <EvalResult result={result} />}
+      {result && <EvalResult result={result} reportText={formatEvalReport(result)} />}
     </div>
   );
 }
 
-function EvalResult({ result }: { result: EvalRunResponse }) {
+function EvalResult({ result, reportText }: { result: EvalRunResponse; reportText: string }) {
   return (
     <section className="surface-card p-4 space-y-5">
       <div className="flex flex-wrap items-center gap-4">
@@ -334,7 +453,7 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
 
       {result.intent && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">问题分类</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">意图门 / 问题分类</h3>
           <p className="text-sm text-slate-500">
             准确率 {pct(result.intent.accuracy)} · Macro-F1 {num(result.intent.macroF1)} · {result.intent.correct}/{result.intent.total} 正确
           </p>
@@ -344,6 +463,9 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
                 <span className={it.correct ? 'text-emerald-500' : 'text-red-500'}>{it.correct ? '✓' : '✗'}</span>
                 <span className="text-slate-600 dark:text-slate-300">{it.question}</span>
                 <span className="text-slate-400">期望={it.expectedIntent ?? '-'} 实际={it.actualIntent}（{pct(it.confidence)}）</span>
+                {it.actualRelated != null && (
+                  <span className="text-slate-400">related={String(it.actualRelated)}</span>
+                )}
               </div>
             ))}
           </div>
@@ -405,6 +527,13 @@ function EvalResult({ result }: { result: EvalRunResponse }) {
           </div>
         </div>
       )}
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">可复制报告</h3>
+        <pre className="max-h-64 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-200 whitespace-pre-wrap">
+          {reportText}
+        </pre>
+      </div>
     </section>
   );
 }

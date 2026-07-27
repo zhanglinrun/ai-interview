@@ -122,7 +122,7 @@ public class InterviewElasticsearchContentRetriever implements ContentRetriever 
     @Override
     public List<Content> retrieve(Query query) {
         if (progressCallback != null && retrieveProgressSent.compareAndSet(false, true)) {
-            progressCallback.accept("正在检索知识库...");
+            progressCallback.accept("正在召回候选...");
         }
         EmbeddingSearchResult<TextSegment> result;
         if (isFullTextMode()) {

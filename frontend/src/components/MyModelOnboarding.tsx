@@ -67,7 +67,7 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
     };
   }, [userId]);
 
-  // 监听全局「未配置模型 Key」事件（覆盖 RAG 问答、出题与评估等 chat 入口）
+  // 监听全局「未配置模型访问凭证」事件（覆盖 RAG 问答、出题与评估等 chat 入口）
   useEffect(() => {
     const handler = () => {
       if (!getStoredUser()) {
@@ -106,10 +106,10 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
     setWizardOpen(false);
   }, []);
 
-  const title = step === 1 ? '配置你的模型 Key' : '填写你的模型';
+  const title = step === 1 ? '配置你的模型访问凭证' : '填写你的模型';
   const subtitle =
     step === 1
-      ? '使用你自己的模型服务（BYOK）'
+      ? '使用你自己的模型服务'
       : '兼容 OpenAI 接口的服务都可以，保存前可先测试';
 
   return (
@@ -163,7 +163,7 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                 {step === 1 ? (
                   <div className="space-y-4">
                     <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                      面试提问、回答评估和知识问答使用你自己的模型 API Key，调用记录按账号保存，费用由你的模型账号承担。
+                      面试提问、回答评估和知识问答使用你自己的模型访问凭证，调用记录按账号保存，费用由你的模型账号承担。
                     </p>
                     <ul className="space-y-2.5">
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
@@ -174,12 +174,12 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
                       </li>
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
                         <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-500" />
-                        <span>Key 仅用于你的模型调用，加密保存，页面不会再次显示完整内容。</span>
+                        <span>访问凭证仅用于你的模型调用，加密保存，页面不会再次显示完整内容。</span>
                       </li>
                       <li className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300">
                         <Database className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-500" />
                         <span>
-                          文档向量化由平台统一处理；没有配置 Key 时仍可浏览页面和上传资料。
+                          文档向量化由平台统一处理；没有配置访问凭证时仍可浏览页面和上传资料。
                         </span>
                       </li>
                     </ul>
@@ -234,8 +234,8 @@ export default function MyModelOnboarding({ user }: MyModelOnboardingProps) {
         )}
       <ConfirmDialog
         open={promptOpen}
-        title="需要配置模型 Key"
-        message="请先在设置里配置你的模型 Key，配置后即可使用 RAG 问答、出题、面试评估等 AI 功能。"
+        title="需要配置模型访问凭证"
+        message="请先在设置里配置你的模型访问凭证，配置后即可使用 RAG 问答、出题、面试评估等 AI 功能。"
         confirmText="去配置"
         cancelText="以后再说"
         onConfirm={openWizardFromPrompt}

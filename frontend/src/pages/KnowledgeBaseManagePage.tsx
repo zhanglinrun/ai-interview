@@ -63,6 +63,16 @@ function parseTraceList(json: string | null): TraceContent[] {
   }
 }
 
+function parseJsonList(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseSourceList(json: string | null): Array<{ documentTitle?: string; snippet?: string; similarity?: number | null }> {
   if (!json) return [];
   try {
@@ -933,10 +943,34 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500 dark:text-slate-400">
                         <span>耗时：{trace.latencyMs ?? '-'}ms</span>
                         <span>置信度：{trace.confidence ?? '-'}</span>
+                        {activeTrace.evidenceStatus && (
+                          <span>证据状态：{activeTrace.evidenceStatus}</span>
+                        )}
+                        {(activeTrace.cragGrade || activeTrace.cragAction) && (
+                          <span>
+                            CRAG：{activeTrace.cragGrade ?? '-'}
+                            {activeTrace.cragAction ? ` / ${activeTrace.cragAction}` : ''}
+                          </span>
+                        )}
                       </div>
-                      {trace.rewrittenQuestion && (
+                      {activeTrace.rewrittenQuestion && (
                         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                          改写：{trace.rewrittenQuestion}
+                          改写：{activeTrace.rewrittenQuestion}
+                        </p>
+                      )}
+                      {parseJsonList(activeTrace.decomposedQueriesJson).length > 0 && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          子查询：{parseJsonList(activeTrace.decomposedQueriesJson).join(' · ')}
+                        </p>
+                      )}
+                      {parseJsonList(activeTrace.degradedReasonsJson).length > 0 && (
+                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          降级：{parseJsonList(activeTrace.degradedReasonsJson).join(' · ')}
+                        </p>
+                      )}
+                      {parseJsonList(activeTrace.invalidCitationsJson).length > 0 && (
+                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          无效引用编号：[{parseJsonList(activeTrace.invalidCitationsJson).join(', ')}]
                         </p>
                       )}
                       <div className="mt-3 grid gap-3 lg:grid-cols-3">

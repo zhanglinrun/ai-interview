@@ -9,7 +9,7 @@ import {
   type RagQaExportResponse,
   type SortOption
 } from '../api/knowledgebase';
-import {ragChatApi, type RagCardChoice, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
+import {ragChatApi, type IntentStreamResult, type RagCardChoice, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
 import {ragModuleApi} from '../api/ragModule';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
@@ -65,6 +65,36 @@ export function citationStatusLabel(source: RagSourceDTO, finalized: boolean): s
   return source.cited ? '已引用' : '未引用';
 }
 
+type GroundedStatus = 'pass' | 'grounded' | 'need_escalate';
+
+function isGroundedStatus(status: string): status is GroundedStatus {
+  return status === 'pass' || status === 'grounded' || status === 'need_escalate';
+}
+
+export function groundedStatusLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  if (!isGroundedStatus(status)) {
+    return `grounded: ${status}`;
+  }
+  switch (status) {
+    case 'pass':
+      return 'grounded: pass';
+    case 'grounded':
+      return 'grounded: grounded';
+    case 'need_escalate':
+      return 'grounded: need_escalate';
+    default: {
+      const _exhaustive: never = status;
+      return `grounded: ${_exhaustive}`;
+    }
+  }
+}
+
+function strategyScore(intent: IntentStreamResult, name: string): number | null {
+  const hit = (intent.strategies ?? []).find(s => s.strategy === name);
+  return hit ? hit.confidence : null;
+}
+
 export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBaseQueryPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   // 知识库状态
@@ -99,6 +129,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   // 当前流式回答的引用来源（来自 reference: 前缀事件），显示在助手气泡下方
   const [activeSources, setActiveSources] = useState<RagSourceDTO[] | null>(null);
   const [citationFinalized, setCitationFinalized] = useState(false);
+  const [citationConfidence, setCitationConfidence] = useState<number | null>(null);
+  const [invalidCitations, setInvalidCitations] = useState<number[]>([]);
+  const [groundedStatus, setGroundedStatus] = useState<string | null>(null);
+  const [intentResult, setIntentResult] = useState<IntentStreamResult | null>(null);
   const [cardMessage, setCardMessage] = useState('');
   const [cardChoices, setCardChoices] = useState<RagCardChoice[]>([]);
   const [evalOpen, setEvalOpen] = useState(false);
@@ -255,6 +289,14 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setSessionBoundKbIds(new Set());
     setActiveSources(null);
     setCitationFinalized(false);
+    setCitationConfidence(null);
+    setInvalidCitations([]);
+    setGroundedStatus(null);
+    setIntentResult(null);
+    setRewrittenQuestion('');
+    setProgressText('');
+    setCardMessage('');
+    setCardChoices([]);
   };
 
   const handleLoadSession = async (sessionId: number) => {
@@ -268,6 +310,11 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       setSessionBoundKbIds(kbIds);
       setActiveSources(null);
       setCitationFinalized(false);
+      setCitationConfidence(null);
+      setInvalidCitations([]);
+      setGroundedStatus(null);
+      setIntentResult(null);
+      setRewrittenQuestion('');
       setMessages(detail.messages.map(m => ({
         id: m.id,
         type: m.type,
@@ -350,6 +397,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setRewrittenQuestion('');
     setActiveSources(null);
     setCitationFinalized(false);
+    setCitationConfidence(null);
+    setInvalidCitations([]);
+    setGroundedStatus(null);
+    setIntentResult(null);
     setCardMessage('');
     setCardChoices([]);
 
@@ -423,7 +474,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           }
           setLoading(false);
           setProgressText('');
-          setRewrittenQuestion('');
+          // 改写问法与引用来源在回答结束后仍保留，便于答辩时对照 Trace。
           loadSessions();
         },
         (error: Error) => {
@@ -434,6 +485,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setRewrittenQuestion('');
           setActiveSources(null);
           setCitationFinalized(false);
+          setCitationConfidence(null);
+          setInvalidCitations([]);
+          setGroundedStatus(null);
+          setIntentResult(null);
         },
         (text: string) => {
           setProgressText(text);
@@ -444,6 +499,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         (metadata) => {
           setActiveSources(metadata.sources);
           setCitationFinalized(true);
+          setCitationConfidence(metadata.confidence);
+          setInvalidCitations(metadata.invalidCitations ?? []);
+          setGroundedStatus(metadata.groundedStatus ?? null);
         },
         (text: string) => {
           cardContent = text;
@@ -454,6 +512,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         (text: string) => {
           setRewrittenQuestion(text);
+        },
+        (intent) => {
+          setIntentResult(intent);
         }
       );
     } catch (err) {
@@ -462,6 +523,10 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       setLoading(false);
       setActiveSources(null);
       setCitationFinalized(false);
+      setCitationConfidence(null);
+      setInvalidCitations([]);
+      setGroundedStatus(null);
+      setIntentResult(null);
     }
   };
 
@@ -817,7 +882,31 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                       {progressText}
                                     </div>
                                   )}
-                                  {loading && index === messages.length - 1 && rewrittenQuestion && (
+                                  {index === messages.length - 1 && intentResult && (
+                                    <div className="mt-2 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                                      <p>
+                                        意图门：
+                                        <span className="font-medium">{intentResult.intent}</span>
+                                        {intentResult.confidence != null && (
+                                          <span className="ml-1 text-slate-400">
+                                            置信度 {(intentResult.confidence * 100).toFixed(0)}%
+                                          </span>
+                                        )}
+                                        <span className="ml-1 text-slate-400">
+                                          · related={String(intentResult.related)}
+                                        </span>
+                                      </p>
+                                      <p className="text-slate-500 dark:text-slate-400">
+                                        三路分数 llm=
+                                        {strategyScore(intentResult, 'llm')?.toFixed(2) ?? '-'}
+                                        {' / '}vector=
+                                        {strategyScore(intentResult, 'vector')?.toFixed(2) ?? '-'}
+                                        {' / '}rule=
+                                        {strategyScore(intentResult, 'rule')?.toFixed(2) ?? '-'}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {index === messages.length - 1 && rewrittenQuestion && (
                                     <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2">
                                       检索优化：{rewrittenQuestion}
                                     </div>
@@ -825,21 +914,52 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                   {/* 当前回答的引用来源；citation 终态到达后显示实际引用状态。 */}
                                   {index === messages.length - 1 && activeSources && activeSources.length > 0 && (
                                     <div className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2 space-y-1">
-                                      <p className="text-xs text-slate-400 dark:text-slate-500">参考来源</p>
-                                      {activeSources.slice(0, 3).map((s, i) => (
-                                        <div key={i} className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                                          {i + 1}. {s.documentTitle}
-                                          {s.similarity != null && (
-                                            <span className="ml-1 text-slate-400">（相关度 {s.similarity.toFixed(2)}）</span>
-                                          )}
-                                          {citationStatusLabel(s, citationFinalized) && (
-                                            <span className={`ml-1 ${s.cited ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                                              {citationStatusLabel(s, citationFinalized)}
-                                            </span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="text-xs text-slate-400 dark:text-slate-500">参考来源</p>
+                                        {citationFinalized && citationConfidence != null && (
+                                          <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                                            引用置信度 {(citationConfidence * 100).toFixed(0)}%
+                                          </span>
+                                        )}
+                                        {citationFinalized && groundedStatusLabel(groundedStatus) && (
+                                          <span className={`text-xs ${
+                                            groundedStatus === 'need_escalate'
+                                              ? 'text-amber-600 dark:text-amber-400'
+                                              : 'text-emerald-600 dark:text-emerald-400'
+                                          }`}>
+                                            {groundedStatusLabel(groundedStatus)}
+                                          </span>
+                                        )}
+                                        {citationFinalized && invalidCitations.length > 0 && (
+                                          <span className="text-xs text-amber-600 dark:text-amber-400">
+                                            无效编号 [{invalidCitations.join(', ')}]
+                                          </span>
+                                        )}
+                                      </div>
+                                      {activeSources.slice(0, 5).map((s, i) => (
+                                        <div key={i} className="text-xs text-slate-500 dark:text-slate-400">
+                                          <span className="truncate block">
+                                            {i + 1}. {s.documentTitle}
+                                            {s.sectionTitle && (
+                                              <span className="ml-1 text-slate-400">· {s.sectionTitle}</span>
+                                            )}
+                                            {s.similarity != null && (
+                                              <span className="ml-1 text-slate-400">（相关度 {s.similarity.toFixed(2)}）</span>
+                                            )}
+                                            {citationStatusLabel(s, citationFinalized) && (
+                                              <span className={`ml-1 ${s.cited ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                                {citationStatusLabel(s, citationFinalized)}
+                                              </span>
+                                            )}
+                                          </span>
+                                          {s.snippet && (
+                                            <p className="mt-0.5 line-clamp-2 text-slate-400 dark:text-slate-500">
+                                              {s.snippet}
+                                            </p>
                                           )}
                                         </div>
                                       ))}
-                                      {activeSources.length > 3 && (
+                                      {activeSources.length > 5 && (
                                         <p className="text-xs text-slate-400">等 {activeSources.length} 个来源</p>
                                       )}
                                     </div>

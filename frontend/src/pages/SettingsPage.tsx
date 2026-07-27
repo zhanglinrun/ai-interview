@@ -636,7 +636,7 @@ export default function SettingsPage() {
         description="配置用于知识问答和模拟面试的模型服务。"
       />
 
-      {/* 我的模型（BYOK，当前登录用户自带 Key） */}
+      {/* 我的模型（当前登录用户自带访问凭证） */}
       <div className="mb-6">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -645,7 +645,7 @@ export default function SettingsPage() {
           <div>
             <h2 className="text-lg font-bold text-slate-800 dark:text-white">我的模型</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              填写自己的模型 API Key，用于知识问答、面试出题和评估；文档向量化由平台处理。
+              填写自己的模型访问凭证，用于知识问答、面试出题和评估；文档向量化由平台处理。
             </p>
           </div>
         </div>
@@ -767,7 +767,7 @@ export default function SettingsPage() {
                           <ConfigRow label="温度" value={formatTemperatureInput(provider.temperature)} />
                         )}
                         <ConfigRow
-                          label="API Key"
+                          label="访问凭证"
                           value={provider.maskedApiKey}
                           title={provider.maskedApiKey}
                           monospace
@@ -908,10 +908,10 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {/* API Key */}
+                  {/* 访问凭证 */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                      API Key{' '}
+                      访问凭证{' '}
                       {editingProvider && (
                         <span className="text-slate-400 font-normal">(留空则不修改)</span>
                       )}
@@ -922,7 +922,7 @@ export default function SettingsPage() {
                         type={showApiKey ? 'text' : 'password'}
                         value={formApiKey}
                         onChange={(e) => setFormApiKey(e.target.value)}
-                        placeholder={editingProvider ? '留空则保持原值' : '输入 API Key'}
+                        placeholder={editingProvider ? '留空则保持原值' : '输入访问凭证'}
                         className="dark-input w-full px-3 py-2.5 pr-10 text-sm"
                       />
                       <button

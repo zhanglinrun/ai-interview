@@ -14,8 +14,8 @@ import java.util.function.Consumer;
 public class ProgressAwareContentRetriever implements ContentRetriever {
 
   public enum Kind {
-    ES("正在检索知识库..."),
-    GENERIC("正在检索文档...");
+    ES("正在召回候选..."),
+    GENERIC("正在召回候选...");
 
     private final String message;
 

@@ -25,7 +25,6 @@ import com.linrun.interview.modules.knowledgebase.rag.InterviewIntent;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewQueryTransformer;
 import com.linrun.interview.modules.knowledgebase.rag.InterviewReRankingContentAggregator;
-import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentAggregator;
 import com.linrun.interview.modules.knowledgebase.rag.ProgressAwareContentRetriever;
 import com.linrun.interview.modules.knowledgebase.rag.RagQueryTrace;
 import com.linrun.interview.modules.knowledgebase.mapper.RagChatMessageMapper;
@@ -121,6 +120,8 @@ public class KnowledgeBaseQueryService {
     static final String CITATION_PREFIX = "citation:";
     /** SSE 改写后问题（检索优化结果）。 */
     static final String REWRITTEN_PREFIX = "rewritten:";
+    /** SSE 意图识别结果（三路分数 + 最终 intent/confidence）。 */
+    static final String INTENT_PREFIX = "intent:";
     /** SSE 交互卡片提示。 */
     static final String CARD_PREFIX = "card:";
     /** SSE 交互卡片选项 JSON。 */
@@ -404,8 +405,8 @@ public class KnowledgeBaseQueryService {
      */
     public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question,
                                              List<ChatMessage> history, Long assistantMessageId) {
-        log.info("收到知识库流式提问: kbIds={}, question={}, historySize={}", knowledgeBaseIds, question,
-                history != null ? history.size() : 0);
+        log.info("收到知识库流式提问: kbIds={}, questionLen={}, historySize={}", knowledgeBaseIds,
+                question != null ? question.length() : 0, history != null ? history.size() : 0);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return Flux.just(NO_RESULT_RESPONSE);
         }
@@ -445,9 +446,10 @@ public class KnowledgeBaseQueryService {
                         sink.next(PROGRESS_PREFIX + "正在理解您的问题...");
                     }
                     IntentRecognitionResult intent = recognizeIntent(question, history);
+                    emitIntent(sink, intent);
                     if (intent != null && !intent.related()) {
-                        log.info("意图识别判定不相关，走通用对话兜底: question='{}', reason={}",
-                            question, intent.reason());
+                        log.info("意图识别判定不相关，走通用对话兜底: questionLen={}, intent={}",
+                            question != null ? question.length() : 0, intent.intent());
                         if (!sink.isCancelled()) {
                             sink.next(PROGRESS_PREFIX + "正在生成回答...");
                         }
@@ -511,6 +513,9 @@ public class KnowledgeBaseQueryService {
                     })
                     .doOnNext(answerBuffer::append);
                 Flux<String> finalFlux = answerFlux.concatWith(Flux.defer(() -> {
+                    if (!sink.isCancelled()) {
+                        sink.next(PROGRESS_PREFIX + "正在校验引用...");
+                    }
                     String answer = answerBuffer.toString();
                     StreamCitationResult citationResult = analyzeStreamCitation(
                         answer, contents, initialSources);
@@ -523,11 +528,12 @@ public class KnowledgeBaseQueryService {
                     }
                     String citationEvent = serializeCitationMetadata(
                         citationResult.sources(), citationResult.confidence(),
-                        citationResult.invalidCitations());
+                        citationResult.invalidCitations(), citationResult.groundedStatus());
                     if (citationEvent != null) {
                         suffix.add(citationEvent);
                     }
-                    log.info("流式输出完成: kbIds={}", knowledgeBaseIds);
+                    log.info("流式输出完成: kbIds={}, grounded={}",
+                        knowledgeBaseIds, citationResult.groundedStatus());
                     return Flux.fromIterable(suffix);
                 })).doOnCancel(() -> {
                     String answer = answerBuffer.toString();
@@ -552,8 +558,8 @@ public class KnowledgeBaseQueryService {
                     }
                 });
             } catch (Exception e) {
-                log.error("知识库流式问答失败: {}", e.getMessage(), e);
-                String errorAnswer = "【错误】知识库查询失败：" + e.getMessage();
+                log.error("知识库流式问答失败: kbIds={}", knowledgeBaseIds, e);
+                String errorAnswer = "【错误】知识库查询失败，请稍后重试";
                 StreamCitationResult citationResult = analyzeStreamCitation(
                     errorAnswer, traceContents, traceSources);
                 saveStreamTraceOnce(traceSaved, traceService, userId, knowledgeBaseIds,
@@ -790,20 +796,20 @@ public class KnowledgeBaseQueryService {
                 .maxResults(rerankAvailable && rerankTopN > 0
                     ? rerankTopN : hybrid.getFusionTopK())
                 .querySelector(qtc -> qtc.keySet().iterator().next())
-                .progressCallback(null)
+                .progressCallback(progressCallback)
                 .trace(trace)
                 .hybridRrfK(hybrid.getRrfK())
                 .fusionRrfK(fusion.getRrfK())
                 .fusionFinalTopK(fusion.getFinalTopK())
                 .build();
         ContentInjector contentInjector = new DefaultContentInjector();
-        ContentAggregator rankedAggregator = rerankAvailable
-            ? ProgressAwareContentAggregator.wrap(rerankAggregator, progressCallback)
-            : rerankAggregator;
+        // 进度口播由 InterviewReRanking（RRF→精排）与 ContextExpanding（扩展）自行推送，
+        // 不再套 ProgressAware 以免重复「精排」文案。
         ContentAggregator finalAggregator = new ContextExpandingContentAggregator(
-            rankedAggregator,
+            rerankAggregator,
             new ContextExpansionService(segmentService, parentExpand),
-            contextMaxTotalChars);
+            contextMaxTotalChars,
+            progressCallback);
 
         DefaultRetrievalAugmentor.DefaultRetrievalAugmentorBuilder builder = DefaultRetrievalAugmentor.builder()
             .queryRouter(query -> esRouterRetrievers)
@@ -977,10 +983,35 @@ public class KnowledgeBaseQueryService {
         List<RagSourceDTO> sources,
         CitationAnalyzer.CitationAnalysis citation,
         Double confidence) {
+        String groundedStatus = resolveGroundedStatus(sources, citation, confidence);
         return new StreamCitationResult(
             markCitedSources(sources, Set.copyOf(citation.citedIndexes())),
             confidence,
-            List.copyOf(citation.invalidIndexes()));
+            List.copyOf(citation.invalidIndexes()),
+            groundedStatus);
+    }
+
+    /**
+     * 知识库问答专用 grounded 闸门：pass / grounded / need_escalate。
+     * 不用于 Interviewer 出题链路。
+     */
+    static String resolveGroundedStatus(
+        List<RagSourceDTO> sources,
+        CitationAnalyzer.CitationAnalysis citation,
+        Double confidence) {
+        boolean hasSources = sources != null && !sources.isEmpty();
+        boolean hasInvalid = citation != null && citation.invalidIndexes() != null
+            && !citation.invalidIndexes().isEmpty();
+        boolean hasCited = citation != null && citation.citedIndexes() != null
+            && !citation.citedIndexes().isEmpty();
+        double conf = confidence == null ? 0.0d : confidence;
+        if (!hasSources || hasInvalid || conf < 0.35d) {
+            return "need_escalate";
+        }
+        if (hasCited && conf >= 0.65d) {
+            return "pass";
+        }
+        return "grounded";
     }
 
     private StreamCitationResult analyzeStreamCitation(
@@ -1042,17 +1073,29 @@ public class KnowledgeBaseQueryService {
                 sink.next(REFERENCE_PREFIX + json);
             }
         } catch (Exception e) {
-            log.warn("序列化引用来源失败，跳过 reference 事件: {}", e.getMessage());
+            log.warn("序列化引用来源失败，跳过 reference 事件", e);
+        }
+    }
+
+    private void emitIntent(reactor.core.publisher.FluxSink<String> sink, IntentRecognitionResult intent) {
+        if (intent == null || sink.isCancelled()) {
+            return;
+        }
+        try {
+            sink.next(INTENT_PREFIX + objectMapper.writeValueAsString(intent));
+        } catch (Exception e) {
+            log.warn("序列化意图识别结果失败，跳过 intent 事件", e);
         }
     }
 
     private String serializeCitationMetadata(
-        List<RagSourceDTO> sources, Double confidence, List<Integer> invalidCitations) {
+        List<RagSourceDTO> sources, Double confidence, List<Integer> invalidCitations,
+        String groundedStatus) {
         try {
             return CITATION_PREFIX + objectMapper.writeValueAsString(
-                new RagCitationMetadata(sources, confidence, invalidCitations));
+                new RagCitationMetadata(sources, confidence, invalidCitations, groundedStatus));
         } catch (Exception e) {
-            log.warn("序列化流式引用校验结果失败，跳过 citation 事件: {}", e.getMessage());
+            log.warn("序列化流式引用校验结果失败，跳过 citation 事件", e);
             return null;
         }
     }
@@ -1236,6 +1279,7 @@ public class KnowledgeBaseQueryService {
     record StreamCitationResult(
         List<RagSourceDTO> sources,
         Double confidence,
-        List<Integer> invalidCitations
+        List<Integer> invalidCitations,
+        String groundedStatus
     ) {}
 }

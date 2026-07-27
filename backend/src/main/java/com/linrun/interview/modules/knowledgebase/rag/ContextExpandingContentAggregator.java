@@ -6,6 +6,7 @@ import dev.langchain4j.rag.query.Query;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** 在召回融合和 rerank 完成后执行 small-to-big 上下文扩展。 */
 public class ContextExpandingContentAggregator implements ContentAggregator {
@@ -13,20 +14,35 @@ public class ContextExpandingContentAggregator implements ContentAggregator {
   private final ContentAggregator delegate;
   private final ContextExpansionService expansionService;
   private final int maxTotalChars;
+  private final Consumer<String> progressCallback;
 
   public ContextExpandingContentAggregator(
       ContentAggregator delegate,
       ContextExpansionService expansionService,
       int maxTotalChars
   ) {
+    this(delegate, expansionService, maxTotalChars, null);
+  }
+
+  public ContextExpandingContentAggregator(
+      ContentAggregator delegate,
+      ContextExpansionService expansionService,
+      int maxTotalChars,
+      Consumer<String> progressCallback
+  ) {
     this.delegate = delegate;
     this.expansionService = expansionService;
     this.maxTotalChars = maxTotalChars;
+    this.progressCallback = progressCallback;
   }
 
   @Override
   public List<Content> aggregate(Map<Query, Collection<List<Content>>> queryToContents) {
-    return limitByTotalChars(expansionService.expand(delegate.aggregate(queryToContents)));
+    List<Content> aggregated = delegate.aggregate(queryToContents);
+    if (progressCallback != null && aggregated != null && !aggregated.isEmpty()) {
+      progressCallback.accept("正在扩展上下文...");
+    }
+    return limitByTotalChars(expansionService.expand(aggregated));
   }
 
   public static List<Content> limitByTotalChars(List<Content> contents, int maxTotalChars) {

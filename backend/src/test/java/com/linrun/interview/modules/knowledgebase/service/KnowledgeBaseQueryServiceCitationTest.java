@@ -35,6 +35,20 @@ class KnowledgeBaseQueryServiceCitationTest {
         .isEqualTo(sources.get(1));
     assertThat(result.confidence()).isEqualTo(0.73);
     assertThat(result.invalidCitations()).containsExactly(9);
+    assertThat(result.groundedStatus()).isEqualTo("need_escalate");
+  }
+
+  @Test
+  @DisplayName("高置信且有有效引用时 grounded 为 pass")
+  void resolvesPassWhenCitedAndConfident() {
+    List<RagSourceDTO> sources = List.of(source(1L, "RAG.md", "检索片段", 0.91));
+    CitationAnalyzer.CitationAnalysis citation =
+        new CitationAnalyzer(0.5, 0.1).analyze("回答引用 [1]", 1);
+
+    KnowledgeBaseQueryService.StreamCitationResult result =
+        KnowledgeBaseQueryService.buildStreamCitationResult(sources, citation, 0.8);
+
+    assertThat(result.groundedStatus()).isEqualTo("pass");
   }
 
   @Test
@@ -44,7 +58,7 @@ class KnowledgeBaseQueryServiceCitationTest {
     RagQueryTrace trace = new RagQueryTrace();
     KnowledgeBaseQueryService.StreamCitationResult result =
         new KnowledgeBaseQueryService.StreamCitationResult(
-            List.of(source(1L, "RAG.md", "检索片段", 0.91)), 0.73, List.of(9));
+            List.of(source(1L, "RAG.md", "检索片段", 0.91)), 0.73, List.of(9), "need_escalate");
     AtomicBoolean saved = new AtomicBoolean(false);
 
     KnowledgeBaseQueryService.saveStreamTraceOnce(

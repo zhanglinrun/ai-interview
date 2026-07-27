@@ -51,6 +51,7 @@ const PROGRESS_PREFIX = 'progress:';
 const REFERENCE_PREFIX = 'reference:';
 const CITATION_PREFIX = 'citation:';
 const REWRITTEN_PREFIX = 'rewritten:';
+const INTENT_PREFIX = 'intent:';
 const CARD_PREFIX = 'card:';
 const CARD_CHOICE_PREFIX = 'card_choice:';
 
@@ -60,8 +61,26 @@ export interface RagCardChoice {
   type: string;
 }
 
+export interface IntentStrategyScore {
+  strategy: string;
+  intent: string;
+  confidence: number;
+  weight: number;
+  weightedScore: number;
+  reason: string;
+}
+
+export interface IntentStreamResult {
+  reason: string;
+  related: boolean;
+  intent: string;
+  confidence: number | null;
+  strategies: IntentStrategyScore[];
+  cached?: boolean | null;
+}
+
 /**
- * progress:/reference:/citation:/rewritten:/card: 前缀事件是 RAG 元数据（不进回答正文），
+ * progress:/reference:/citation:/rewritten:/intent:/card: 前缀事件是 RAG 元数据（不进回答正文），
  * 其内容需原样保留（reference 内是 JSON，不能做 \\n→\n 转义，否则破坏 JSON）。
  */
 function isPrefixedEvent(content: string): boolean {
@@ -69,6 +88,7 @@ function isPrefixedEvent(content: string): boolean {
     || content.startsWith(REFERENCE_PREFIX)
     || content.startsWith(CITATION_PREFIX)
     || content.startsWith(REWRITTEN_PREFIX)
+    || content.startsWith(INTENT_PREFIX)
     || content.startsWith(CARD_PREFIX)
     || content.startsWith(CARD_CHOICE_PREFIX);
 }
@@ -173,6 +193,8 @@ export interface RagCitationMetadata {
   sources: RagSourceDTO[];
   confidence: number | null;
   invalidCitations: number[];
+  /** pass / grounded / need_escalate */
+  groundedStatus?: string | null;
 }
 
 export const ragChatApi = {
@@ -231,13 +253,14 @@ export const ragChatApi = {
   },
 
   /**
-   * 发送消息（流式SSE），解析 progress:/reference:/citation: 前缀事件并分流回调。
+   * 发送消息（流式SSE），解析 progress:/reference:/citation:/intent: 前缀事件并分流回调。
    *
    * @param onToken 回答 token 片段（无前缀）
    * @param onProgress 阶段进度文案（progress: 前缀）
    * @param onReference 引用来源（reference: 前缀，已 JSON.parse）
    * @param onCitation 生成完成后的引用校验结果（citation: 前缀，已 JSON.parse）
    * @param onRewritten 改写后问题（rewritten: 前缀）
+   * @param onIntent 意图识别结果（intent: 前缀，三路分数）
    */
   async sendMessageStream(
     sessionId: number,
@@ -251,6 +274,7 @@ export const ragChatApi = {
     onCard?: (text: string) => void,
     onCardChoice?: (choices: RagCardChoice[]) => void,
     onRewritten?: (text: string) => void,
+    onIntent?: (intent: IntentStreamResult) => void,
   ): Promise<void> {
     return fetchTextStream({
       url: `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
@@ -284,6 +308,15 @@ export const ragChatApi = {
             onCitation?.(JSON.parse(payload) as RagCitationMetadata);
           } catch {
             // 忽略解析失败，不中断流
+          }
+          return;
+        }
+        if (raw.startsWith(INTENT_PREFIX)) {
+          const payload = raw.substring(INTENT_PREFIX.length);
+          try {
+            onIntent?.(JSON.parse(payload) as IntentStreamResult);
+          } catch {
+            // ignore
           }
           return;
         }

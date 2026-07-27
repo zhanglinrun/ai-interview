@@ -21,6 +21,7 @@ const KnowledgeBaseUploadPage = lazy(() => import('./pages/KnowledgeBaseUploadPa
 const KnowledgeBaseManagePage = lazy(() => import('./pages/KnowledgeBaseManagePage'));
 const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage'));
 const EvalRunPage = lazy(() => import('./pages/EvalRunPage'));
+const AgentTracePage = lazy(() => import('./pages/AgentTracePage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -250,6 +251,9 @@ function App() {
 
               {/* RAG 效果评测 */}
               <Route path="eval" element={<EvalRunPage />} />
+
+              {/* Multi-Agent 编排 Trace */}
+              <Route path="agent-trace" element={<AgentTracePage />} />
 
               {/* 已下线入口：旧链接安全回到 RAG 问答 */}
               <Route path="knowledge-graph" element={<Navigate to="/knowledgebase/chat" replace />} />

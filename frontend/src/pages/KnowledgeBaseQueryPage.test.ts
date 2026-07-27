@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRagCardFollowUp,
   citationStatusLabel,
+  groundedStatusLabel,
   removeQuestionSearchParam,
 } from './KnowledgeBaseQueryPage';
 
@@ -40,5 +41,13 @@ describe('KnowledgeBaseQueryPage card follow-up', () => {
     expect(citationStatusLabel(source, false)).toBeNull();
     expect(citationStatusLabel(source, true)).toBe('已引用');
     expect(citationStatusLabel({ ...source, cited: false }, true)).toBe('未引用');
+  });
+
+  it('grounded 闸门状态展示 pass / grounded / need_escalate', () => {
+    expect(groundedStatusLabel(null)).toBeNull();
+    expect(groundedStatusLabel('pass')).toBe('grounded: pass');
+    expect(groundedStatusLabel('grounded')).toBe('grounded: grounded');
+    expect(groundedStatusLabel('need_escalate')).toBe('grounded: need_escalate');
+    expect(groundedStatusLabel('other')).toBe('grounded: other');
   });
 });

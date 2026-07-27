@@ -193,7 +193,7 @@ public class RagChatController {
         return chunk != null
             && (chunk.startsWith("progress:") || chunk.startsWith("reference:")
             || chunk.startsWith("citation:") || chunk.startsWith("rewritten:")
-            || chunk.startsWith("route:")
+            || chunk.startsWith("intent:") || chunk.startsWith("route:")
             || chunk.startsWith("card:") || chunk.startsWith("card_choice:"));
     }
 

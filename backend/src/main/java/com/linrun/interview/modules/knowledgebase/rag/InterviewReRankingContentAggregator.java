@@ -59,7 +59,8 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
     private final int hybridRrfK;
     private final int fusionRrfK;
     private final int fusionFinalTopK;
-    /** rerank 进度只发一次（聚合可能对多 query 多次调用 aggregate）。 */
+    /** RRF / rerank 进度各只发一次（聚合可能对多 query 多次调用 aggregate）。 */
+    private final AtomicBoolean fusionProgressSent = new AtomicBoolean(false);
     private final AtomicBoolean rerankProgressSent = new AtomicBoolean(false);
 
     public InterviewReRankingContentAggregator(ScoringModel scoringModel) {
@@ -113,10 +114,9 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         if (queryToContents.isEmpty()) {
             return Collections.emptyList();
         }
-        // 亮点2：rerank 前推一次"正在排序筛选结果"进度
-        if (scoringModel != null && progressCallback != null
-            && rerankProgressSent.compareAndSet(false, true)) {
-            progressCallback.accept("正在排序筛选结果...");
+        // 口播顺序：先 RRF/融合，再精排（各只推一次，避免多 query 重复口播）
+        if (progressCallback != null && fusionProgressSent.compareAndSet(false, true)) {
+            progressCallback.accept("正在 RRF 融合...");
         }
 
         Query query = querySelector.apply(queryToContents);
@@ -124,25 +124,30 @@ public class InterviewReRankingContentAggregator implements ContentAggregator {
         // 每个 query 内融合多检索源结果
         Map<Query, List<Content>> queryToFusedContents = fuse(queryToContents);
 
-        List<List<InterviewDefaultContent>> 参考实现DefaultContents = queryToFusedContents.values().stream()
+        List<List<InterviewDefaultContent>> queryDefaultContents = queryToFusedContents.values().stream()
             .map(contents -> contents.stream()
                 .map(content -> new InterviewDefaultContent((DefaultContent) content))
                 .toList())
             .toList();
 
-        if (参考实现DefaultContents.isEmpty()) {
+        if (queryDefaultContents.isEmpty()) {
             return Collections.emptyList();
         }
 
         // 跨 query 二次 RRF 融合
         List<Content> fusedContents = InterviewReciprocalRankFuser.fuse(
-            参考实现DefaultContents, fusionRrfK);
+            queryDefaultContents, fusionRrfK);
         if (fusedContents.size() > fusionFinalTopK) {
             fusedContents = fusedContents.subList(0, fusionFinalTopK);
         }
 
         if (fusedContents.isEmpty()) {
             return fusedContents;
+        }
+
+        if (scoringModel != null && progressCallback != null
+            && rerankProgressSent.compareAndSet(false, true)) {
+            progressCallback.accept("正在精排...");
         }
 
         List<Content> reranked = scoringModel == null

@@ -78,8 +78,7 @@ GEMINI.md
 .DS_Store
 Thumbs.db
 
-# Project notes copied from upstream are kept local by default
-study/
+study/**
 
 # RAG evaluation corpus (third-party PDFs) and eval run artifacts — local only
 eval/corpus/

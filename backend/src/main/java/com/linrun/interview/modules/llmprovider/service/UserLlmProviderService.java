@@ -67,7 +67,7 @@ public class UserLlmProviderService {
     UserLlmProviderEntity existing = userLlmProviderMapper.selectById(resolvedUserId);
     if (existing == null) {
       if (!keyProvided) {
-        throw new BusinessException(ErrorCode.BAD_REQUEST, "首次配置「我的模型」必须填写 API Key");
+        throw new BusinessException(ErrorCode.BAD_REQUEST, "首次配置「我的模型」必须填写访问凭证");
       }
       ApiKeyEncryptionService.EncryptedValue encrypted = encryptionService.encrypt(apiKey);
       userLlmProviderMapper.insert(UserLlmProviderEntity.builder()

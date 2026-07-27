@@ -143,6 +143,13 @@ export interface RagQueryTrace {
   traceId: string;
   question: string;
   rewrittenQuestion: string | null;
+  decomposedQueriesJson?: string | null;
+  cragGrade?: string | null;
+  cragAction?: string | null;
+  evidenceScopeJson?: string | null;
+  evidenceStatus?: string | null;
+  evidenceRefsJson?: string | null;
+  degradedReasonsJson?: string | null;
   retrievedJson: string | null;
   rerankedJson: string | null;
   finalSourcesJson: string | null;

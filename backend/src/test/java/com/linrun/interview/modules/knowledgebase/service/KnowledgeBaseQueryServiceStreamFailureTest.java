@@ -66,7 +66,7 @@ class KnowledgeBaseQueryServiceStreamFailureTest {
         .collectList()
         .block(Duration.ofSeconds(5));
 
-    String errorAnswer = "【错误】知识库查询失败：count unavailable";
+    String errorAnswer = "【错误】知识库查询失败，请稍后重试";
     assertThat(chunks).containsExactly(errorAnswer);
     verify(traceService).save(
         eq(7L), eq(List.of(1L)), eq("问题"), any(RagQueryTrace.class),

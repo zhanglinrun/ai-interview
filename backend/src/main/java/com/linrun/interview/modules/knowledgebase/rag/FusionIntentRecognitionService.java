@@ -47,7 +47,7 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
       InterviewIntent.SCHEDULE, List.of(
           "解析面试邀请", "明天面试提醒我", "安排下周的面试日程", "帮我记录面试时间"),
       InterviewIntent.CAREER, List.of(
-          "我适合投后端还是算法", "秋招怎么规划", "offer 怎么选择", "如何准备跳槽"),
+          "我适合投后端还是算法", "校招怎么规划", "offer 怎么选择", "如何准备跳槽"),
       InterviewIntent.OFF_TOPIC, List.of(
           "今天天气怎么样", "讲个笑话", "帮我写旅游攻略", "推荐一部电影"));
 
@@ -63,7 +63,7 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
       InterviewIntent.SCHEDULE, List.of(
           "日程", "提醒", "安排", "面试邀请", "时间", "明天", "下周", "calendar"),
       InterviewIntent.CAREER, List.of(
-          "职业", "offer", "秋招", "跳槽", "成长", "规划", "方向", "求职"),
+          "职业", "offer", "校招", "跳槽", "成长", "规划", "方向", "求职"),
       InterviewIntent.OFF_TOPIC, List.of(
           "天气", "旅游", "电影", "音乐", "笑话", "菜谱", "星座", "游戏"));
 

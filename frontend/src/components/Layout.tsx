@@ -1,14 +1,19 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {
   BookOpen,
+  BrainCircuit,
   BriefcaseBusiness,
+  CalendarDays,
   ChevronRight,
+  Database,
   Dumbbell,
+  GitBranch,
   History,
   Home,
   LogIn,
   LogOut,
   Menu,
+  MessageSquareText,
   Radar,
   Moon,
   Sun,
@@ -56,6 +61,7 @@ export function resolveDocumentTitle(pathname: string): string {
   if (pathname === '/knowledgebase/upload') return `上传文档 · ${APP_NAME}`;
   if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
   if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
+  if (pathname === '/agent-trace') return `Agent 编排 Trace · ${APP_NAME}`;
   if (pathname === '/eval') return `RAG 效果评测 · ${APP_NAME}`;
   if (pathname === '/settings') return `设置 · ${APP_NAME}`;
   return APP_NAME;
@@ -104,18 +110,35 @@ export default function Layout() {
     navigate(`/job-practice?resume=${resumeId}`);
   };
 
-  // 一级导航只呈现求职者真正会反复使用的七个入口；旧工具页保留为二级能力。
+  // 主叙事前置：意图问答 / Agent Trace / 评测；求职外围保留但后置。
   const navGroups: NavGroup[] = [
     {
+      id: 'demo',
+      title: '核心演示',
+      items: [
+        { id: 'kb-chat', path: '/knowledgebase/chat', label: '知识库问答', icon: MessageSquareText, description: '意图 + RAG' },
+        { id: 'agent-trace', path: '/agent-trace', label: 'Agent 编排 Trace', icon: GitBranch, description: '状态机 + Reflexion' },
+        { id: 'eval', path: '/eval', label: 'RAG 评测', icon: BrainCircuit, description: '一键固定集' },
+        { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database },
+      ],
+    },
+    {
       id: 'primary',
-      title: '主要功能',
+      title: '面试训练',
       items: [
         { id: 'dashboard', path: '/dashboard', label: '工作台', icon: Home },
         { id: 'job-practice', path: '/job-practice', label: '岗位实战', icon: BriefcaseBusiness },
         { id: 'training', path: '/training', label: '专项训练', icon: Dumbbell },
         { id: 'records', path: '/interviews', label: '面试记录', icon: History },
+      ],
+    },
+    {
+      id: 'peripheral',
+      title: '求职工具',
+      items: [
         { id: 'recruitment', path: '/recruitment', label: '招聘雷达', icon: Radar },
         { id: 'resources', path: '/resources', label: '求职资源', icon: BookOpen },
+        { id: 'schedule', path: '/interview-schedule', label: '面试日程', icon: CalendarDays },
         { id: 'profile', path: '/profile', label: '我的资料', icon: UserRound },
       ],
     },
@@ -126,6 +149,18 @@ export default function Layout() {
     if (path.startsWith('#')) return false;
     if (path === '/dashboard') {
       return currentPath === '/' || currentPath === '/dashboard';
+    }
+    if (path === '/knowledgebase/chat') {
+      return currentPath === '/knowledgebase/chat';
+    }
+    if (path === '/knowledgebase') {
+      return currentPath === '/knowledgebase' || currentPath === '/knowledgebase/upload';
+    }
+    if (path === '/eval') {
+      return currentPath === '/eval' || currentPath.startsWith('/eval/');
+    }
+    if (path === '/agent-trace') {
+      return currentPath === '/agent-trace' || currentPath.startsWith('/agent-trace/');
     }
     if (path === '/job-practice') {
       return currentPath.startsWith('/job-practice')
@@ -138,10 +173,7 @@ export default function Layout() {
         || currentPath === '/history'
         || currentPath.startsWith('/history/')
         || currentPath === '/upload'
-        || currentPath === '/knowledgebase'
-        || currentPath === '/knowledgebase/upload'
-        || currentPath === '/settings'
-        || currentPath === '/interview-schedule';
+        || currentPath === '/settings';
     }
     return currentPath.startsWith(path);
   };
@@ -313,7 +345,7 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* BYOK 全局引导：首登两步向导 + 未配置 Key 的全局提示 */}
+      {/* 模型配置全局引导：首登向导 + 未配置访问凭证时的提示 */}
       <MyModelOnboarding user={user} />
     </div>
   );
