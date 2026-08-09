@@ -274,7 +274,7 @@ export const knowledgeBaseApi = {
     if (options?.expireDate) {
       formData.append('expireDate', options.expireDate);
     }
-    return request.upload<UploadKnowledgeBaseResponse>('/api/knowledgebase/upload', formData);
+    return request.upload<UploadKnowledgeBaseResponse>('/api/v1/knowledge-bases/upload', formData);
   },
 
   async uploadKnowledgeBaseBatch(
@@ -288,7 +288,7 @@ export const knowledgeBaseApi = {
       formData.append('category', category.trim());
     }
     formData.append('accessibleBy', accessibleBy);
-    return request.upload<BatchUploadResponse>('/api/knowledgebase/upload/batch', formData);
+    return request.upload<BatchUploadResponse>('/api/v1/knowledge-bases/upload/batch', formData);
   },
 
   async generateDataset(question: string, knowledgeBaseIds: number[]) {
@@ -296,7 +296,7 @@ export const knowledgeBaseApi = {
     params.set('question', question);
     knowledgeBaseIds.forEach((id) => params.append('knowledgeBaseIds', String(id)));
     return request.get<{ question: string; answer: string; sources: unknown[] }>(
-      `/api/knowledgebase/dataset/generate?${params.toString()}`,
+      `/api/v1/knowledge-bases/dataset/generate?${params.toString()}`,
     );
   },
 
@@ -312,7 +312,7 @@ export const knowledgeBaseApi = {
     },
   ): Promise<{ segmentCount: number }> {
     return request.post<{ segmentCount: number }>(
-      `/api/knowledgebase/${id}/split`,
+      `/api/v1/knowledge-bases/${id}/split`,
       splitParam,
     );
   },
@@ -321,7 +321,7 @@ export const knowledgeBaseApi = {
      * 下载知识库文件
      */
     async downloadKnowledgeBase(id: number): Promise<Blob> {
-        return request.getBlob(`/api/knowledgebase/${id}/download`);
+        return request.getBlob(`/api/v1/knowledge-bases/${id}/download`);
     },
 
   /**
@@ -336,21 +336,21 @@ export const knowledgeBaseApi = {
       params.append('docStatus', docStatus);
     }
     const queryString = params.toString();
-    return request.get<KnowledgeBaseItem[]>(`/api/knowledgebase/list${queryString ? `?${queryString}` : ''}`);
+    return request.get<KnowledgeBaseItem[]>(`/api/v1/knowledge-bases/list${queryString ? `?${queryString}` : ''}`);
   },
 
   /**
    * 获取知识库详情
    */
   async getKnowledgeBase(id: number): Promise<KnowledgeBaseItem> {
-    return request.get<KnowledgeBaseItem>(`/api/knowledgebase/${id}`);
+    return request.get<KnowledgeBaseItem>(`/api/v1/knowledge-bases/${id}`);
   },
 
   /**
    * 删除知识库
    */
   async deleteKnowledgeBase(id: number): Promise<void> {
-    return request.delete(`/api/knowledgebase/${id}`);
+    return request.delete(`/api/v1/knowledge-bases/${id}`);
   },
 
   // ========== 分类管理 ==========
@@ -359,28 +359,28 @@ export const knowledgeBaseApi = {
    * 获取所有分类
    */
   async getAllCategories(): Promise<string[]> {
-    return request.get<string[]>('/api/knowledgebase/categories');
+    return request.get<string[]>('/api/v1/knowledge-bases/categories');
   },
 
   /**
    * 根据分类获取知识库
    */
   async getByCategory(category: string): Promise<KnowledgeBaseItem[]> {
-    return request.get<KnowledgeBaseItem[]>(`/api/knowledgebase/category/${encodeURIComponent(category)}`);
+    return request.get<KnowledgeBaseItem[]>(`/api/v1/knowledge-bases/category/${encodeURIComponent(category)}`);
   },
 
   /**
    * 获取未分类的知识库
    */
   async getUncategorized(): Promise<KnowledgeBaseItem[]> {
-    return request.get<KnowledgeBaseItem[]>('/api/knowledgebase/uncategorized');
+    return request.get<KnowledgeBaseItem[]>('/api/v1/knowledge-bases/uncategorized');
   },
 
   /**
    * 更新知识库分类
    */
   async updateCategory(id: number, category: string | null): Promise<void> {
-    return request.put(`/api/knowledgebase/${id}/category`, { category });
+    return request.put(`/api/v1/knowledge-bases/${id}/category`, { category });
   },
 
   // ========== 搜索 ==========
@@ -389,7 +389,7 @@ export const knowledgeBaseApi = {
    * 搜索知识库
    */
   async search(keyword: string): Promise<KnowledgeBaseItem[]> {
-    return request.get<KnowledgeBaseItem[]>(`/api/knowledgebase/search?keyword=${encodeURIComponent(keyword)}`);
+    return request.get<KnowledgeBaseItem[]>(`/api/v1/knowledge-bases/search?keyword=${encodeURIComponent(keyword)}`);
   },
 
   // ========== 统计 ==========
@@ -398,7 +398,7 @@ export const knowledgeBaseApi = {
    * 获取知识库统计信息
    */
   async getStatistics(): Promise<KnowledgeBaseStats> {
-    return request.get<KnowledgeBaseStats>('/api/knowledgebase/stats');
+    return request.get<KnowledgeBaseStats>('/api/v1/knowledge-bases/stats');
   },
 
   // ========== 向量化管理 ==========
@@ -407,21 +407,21 @@ export const knowledgeBaseApi = {
    * 重新向量化知识库（手动重试）
    */
   async revectorize(id: number): Promise<void> {
-    return request.post(`/api/knowledgebase/${id}/revectorize`);
+    return request.post(`/api/v1/knowledge-bases/${id}/revectorize`);
   },
 
   async evaluateRetrieval(req: RagEvalRequest): Promise<RagEvalResponse> {
-    return request.post<RagEvalResponse>('/api/knowledgebase/evaluate-retrieval', req, {
+    return request.post<RagEvalResponse>('/api/v1/knowledge-bases/evaluate-retrieval', req, {
       timeout: AI_REQUEST_TIMEOUT_MS,
     });
   },
 
   async listTraces(limit = 20): Promise<RagQueryTrace[]> {
-    return request.get<RagQueryTrace[]>(`/api/knowledgebase/traces?limit=${limit}`);
+    return request.get<RagQueryTrace[]>(`/api/v1/knowledge-bases/traces?limit=${limit}`);
   },
 
   async getTrace(traceId: string): Promise<RagQueryTrace> {
-    return request.get<RagQueryTrace>(`/api/knowledgebase/traces/${encodeURIComponent(traceId)}`);
+    return request.get<RagQueryTrace>(`/api/v1/knowledge-bases/traces/${encodeURIComponent(traceId)}`);
   },
 
   async exportQa(
@@ -429,7 +429,7 @@ export const knowledgeBaseApi = {
     items: RagQaExportRequestItem[],
   ): Promise<RagQaExportResponse> {
     return request.post<RagQaExportResponse>(
-      '/api/knowledgebase/eval/export-qa',
+      '/api/v1/knowledge-bases/eval/export-qa',
       { knowledgeBaseIds, items },
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
@@ -450,7 +450,7 @@ export const knowledgeBaseApi = {
       params.set('documentVersion', String(documentVersion));
     }
     return request.get<KnowledgeBaseSegmentPage>(
-      `/api/knowledgebase/segment/page-by-document?${params.toString()}`,
+      `/api/v1/knowledge-bases/segment/page-by-document?${params.toString()}`,
     );
   },
 
@@ -459,7 +459,7 @@ export const knowledgeBaseApi = {
     if (documentVersion != null) {
       params.set('documentVersion', String(documentVersion));
     }
-    return request.get<number>(`/api/knowledgebase/segment/count-by-document?${params.toString()}`);
+    return request.get<number>(`/api/v1/knowledge-bases/segment/count-by-document?${params.toString()}`);
   },
 
   // ========== 版本管理 ==========
@@ -468,42 +468,43 @@ export const knowledgeBaseApi = {
    * 查询知识库所有版本（降序，最新在前）
    */
   async listVersions(id: number): Promise<KnowledgeBaseVersion[]> {
-    return request.get<KnowledgeBaseVersion[]>(`/api/knowledgebase/${id}/versions`);
+    return request.get<KnowledgeBaseVersion[]>(`/api/v1/knowledge-bases/${id}/versions`);
   },
 
   /**
    * 切换当前激活版本（已向量化版本零重建热切换，未向量化版本先激活再切换）
    */
   async switchVersion(id: number, versionId: number): Promise<void> {
-    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/switch`);
+    return request.post(`/api/v1/knowledge-bases/${id}/versions/${versionId}/switch`);
   },
 
   async activateVersion(id: number, versionId: number): Promise<void> {
-    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/activate`);
+    return request.post(`/api/v1/knowledge-bases/${id}/versions/${versionId}/activate`);
   },
 
   async deactivateVersion(id: number, versionId: number): Promise<void> {
-    return request.post(`/api/knowledgebase/${id}/versions/${versionId}/deactivate`);
+    return request.post(`/api/v1/knowledge-bases/${id}/versions/${versionId}/deactivate`);
   },
 
   async uploadNewVersion(
     id: number,
     file: File,
     changelog?: string,
-  ): Promise<{ docId: number; versionId: number; message: string }> {
+  ): Promise<{ documentId: number; versionId: number; status: string; segmentCount: number }> {
     const formData = new FormData();
     formData.append('file', file);
     if (changelog?.trim()) {
       formData.append('changelog', changelog.trim());
     }
-    return request.upload(`/api/knowledgebase/${id}/versions`, formData);
+    // 新版文档入口会在上传转换后立即切块，并由事件驱动后续向量化。
+    return request.upload(`/api/v1/documents/${id}/versions`, formData);
   },
 
   /**
    * 基于知识库回答问题
    */
   async queryKnowledgeBase(req: QueryRequest): Promise<QueryResponse> {
-    return request.post<QueryResponse>('/api/knowledgebase/query', req, {
+    return request.post<QueryResponse>('/api/v1/knowledge-bases/query', req, {
       timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时
     });
   },
@@ -519,7 +520,7 @@ export const knowledgeBaseApi = {
     onError: (error: Error) => void
   ): Promise<void> {
     return fetchTextStream({
-      url: `${API_BASE_URL}/api/knowledgebase/query/stream`,
+      url: `${API_BASE_URL}/api/v1/knowledge-bases/query/stream`,
       init: {
         method: 'POST',
         headers: {

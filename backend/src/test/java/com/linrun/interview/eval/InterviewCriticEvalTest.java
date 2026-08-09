@@ -1,7 +1,7 @@
 package com.linrun.interview.eval;
 
-import com.linrun.interview.modules.interview.agent.CriticAiService;
-import com.linrun.interview.modules.interview.agent.model.CriticVerdict;
+import com.linrun.interview.business.service.CriticAiService;
+import com.linrun.interview.business.vo.CriticVerdict;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;

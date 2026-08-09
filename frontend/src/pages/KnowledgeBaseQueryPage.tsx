@@ -9,7 +9,7 @@ import {
   type RagQaExportResponse,
   type SortOption
 } from '../api/knowledgebase';
-import {ragChatApi, type IntentStreamResult, type RagCardChoice, type RagChatSessionListItem, type RagSourceDTO} from '../api/ragChat';
+import {ragChatApi, type IntentStreamResult, type RagCardChoice, type RagChatSessionListItem, type RagRouteResult, type RagSourceDTO} from '../api/ragChat';
 import {ragModuleApi} from '../api/ragModule';
 import {getErrorMessage} from '../api/request';
 import {formatTimeAgo} from '../utils/date';
@@ -133,6 +133,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
   const [invalidCitations, setInvalidCitations] = useState<number[]>([]);
   const [groundedStatus, setGroundedStatus] = useState<string | null>(null);
   const [intentResult, setIntentResult] = useState<IntentStreamResult | null>(null);
+  const [routeResult, setRouteResult] = useState<RagRouteResult | null>(null);
   const [cardMessage, setCardMessage] = useState('');
   const [cardChoices, setCardChoices] = useState<RagCardChoice[]>([]);
   const [evalOpen, setEvalOpen] = useState(false);
@@ -293,6 +294,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setInvalidCitations([]);
     setGroundedStatus(null);
     setIntentResult(null);
+    setRouteResult(null);
     setRewrittenQuestion('');
     setProgressText('');
     setCardMessage('');
@@ -489,6 +491,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
           setInvalidCitations([]);
           setGroundedStatus(null);
           setIntentResult(null);
+          setRouteResult(null);
         },
         (text: string) => {
           setProgressText(text);
@@ -515,6 +518,9 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         (intent) => {
           setIntentResult(intent);
+        },
+        (route) => {
+          setRouteResult(route);
         }
       );
     } catch (err) {
@@ -527,6 +533,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       setInvalidCitations([]);
       setGroundedStatus(null);
       setIntentResult(null);
+      setRouteResult(null);
     }
   };
 
@@ -904,6 +911,19 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                         {' / '}rule=
                                         {strategyScore(intentResult, 'rule')?.toFixed(2) ?? '-'}
                                       </p>
+                                    </div>
+                                  )}
+                                  {index === messages.length - 1 && routeResult && (
+                                    <div className="mt-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300">
+                                      数据源路由：<span className="font-medium">{routeResult.source}</span>
+                                      {routeResult.confidence != null && (
+                                        <span className="ml-1 text-indigo-500 dark:text-indigo-400">
+                                          置信度 {(routeResult.confidence * 100).toFixed(0)}%
+                                        </span>
+                                      )}
+                                      {routeResult.reasoning && (
+                                        <span className="ml-1 text-indigo-500 dark:text-indigo-400">· {routeResult.reasoning}</span>
+                                      )}
                                     </div>
                                   )}
                                   {index === messages.length - 1 && rewrittenQuestion && (

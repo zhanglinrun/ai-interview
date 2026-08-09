@@ -17,28 +17,28 @@ export interface RagIntentResult {
 export const ragModuleApi = {
   testIntent(question: string) {
     return request.get<RagIntentResult>(
-      `/api/rag/module/intent?question=${encodeURIComponent(question)}`,
+      `/api/v1/rag/module/intent?question=${encodeURIComponent(question)}`,
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
   },
 
   testPrompt(question: string) {
     return request.get<string>(
-      `/api/rag/module/prompt?question=${encodeURIComponent(question)}`,
+      `/api/v1/rag/module/prompt?question=${encodeURIComponent(question)}`,
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
   },
 
   testRewrite(question: string) {
     return request.get<string[]>(
-      `/api/rag/module/rewrite?question=${encodeURIComponent(question)}`,
+      `/api/v1/rag/module/rewrite?question=${encodeURIComponent(question)}`,
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
   },
 
   testRerank(question?: string) {
     const qs = question ? `?question=${encodeURIComponent(question)}` : '';
-    return request.get<string>(`/api/rag/module/rerank${qs}`, {
+    return request.get<string>(`/api/v1/rag/module/rerank${qs}`, {
       timeout: AI_REQUEST_TIMEOUT_MS,
     });
   },

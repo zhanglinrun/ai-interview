@@ -1,15 +1,15 @@
 package com.linrun.interview.eval;
 
-import com.linrun.interview.modules.interview.agent.InterviewTurnDecisionService;
-import com.linrun.interview.modules.interview.agent.InterviewTurnDecisionService.DecisionRequest;
-import com.linrun.interview.modules.interview.agent.model.InterviewEvidence.Bundle;
-import com.linrun.interview.modules.interview.agent.model.InterviewPlan;
-import com.linrun.interview.modules.interview.agent.model.InterviewPlan.PlanTopic;
-import com.linrun.interview.modules.interview.agent.model.TurnDecision;
-import com.linrun.interview.modules.interview.service.InterviewKnowledgeRetrievalService;
-import com.linrun.interview.modules.interview.topic.InterviewTopic;
-import com.linrun.interview.modules.interview.topic.InterviewTopic.Category;
-import com.linrun.interview.modules.interview.topic.InterviewTopicCatalog;
+import com.linrun.interview.business.service.InterviewTurnDecisionService;
+import com.linrun.interview.business.service.InterviewTurnDecisionService.DecisionRequest;
+import com.linrun.interview.business.vo.InterviewEvidence.Bundle;
+import com.linrun.interview.business.vo.InterviewPlan;
+import com.linrun.interview.business.vo.InterviewPlan.PlanTopic;
+import com.linrun.interview.business.vo.TurnDecision;
+import com.linrun.interview.business.service.InterviewKnowledgeRetrievalService;
+import com.linrun.interview.business.service.InterviewTopic;
+import com.linrun.interview.business.service.InterviewTopic.Category;
+import com.linrun.interview.business.service.InterviewTopicCatalog;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;

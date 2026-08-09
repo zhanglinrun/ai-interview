@@ -1,14 +1,3 @@
-# 本地开发依赖服务（对齐 agent-group docs/dev-ops 约定）
-# 用法：
-#   cd dev-ops
-#   docker compose -f docker-compose-environment.yml up -d
-#
-# 宿主机端口刻意避开 agent-group（13306/16379/19200/9000/18081 等）及常见默认端口。
-#
-# name 显式钉死：ai-group 的 compose 也在各自 docs/dev-ops 目录下运行，默认项目名同为
-# "dev-ops"，会互相识别成同一项目（up 时把对方容器当 orphan/待 Recreate，可能覆盖对方基础设施）。
-# 本机已有容器/卷均属于 ai-interview 项目（卷名 ai-interview_*），与此保持一致。
-
 name: ai-interview
 
 services:
@@ -17,7 +6,7 @@ services:
     container_name: interview-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
-      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview}
+      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview_v2}
       MYSQL_USER: ${MYSQL_USER:-ai_interview}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
     volumes:
@@ -81,22 +70,6 @@ services:
       timeout: 3s
       retries: 5
 
-  createbuckets:
-    image: minio/mc
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-ai-interview}
-    entrypoint: >
-      /bin/sh -c "
-      set -e
-      /usr/bin/mc alias set myminio http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY
-      /usr/bin/mc mb --ignore-existing myminio/$$MINIO_BUCKET
-      "
-
   # RabbitMQ 是唯一异步任务引擎；管理台 http://localhost:15672（guest/guest）。
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -115,6 +88,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # Neo4j 与其他本地依赖一起启动，不再使用 Compose profile。
+  # 应用侧使用 NEO4J_URI=bolt://localhost:27687。
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: interview-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-change-me-neo4j-password}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "${NEO4J_BOLT_HOST_PORT:-27687}:7687"
+      - "${NEO4J_HTTP_HOST_PORT:-27474}:7474"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
 # 宿主机端口（与 .env.example 一致）：
 #   MySQL 33306 | Redis 26379 | ES 29200 | MinIO 29000/29001 | RabbitMQ 5672/15672
 
@@ -124,3 +117,5 @@ volumes:
   redis_data:
   minio_data:
   rabbitmq_data:
+  neo4j_data:
+  neo4j_logs:

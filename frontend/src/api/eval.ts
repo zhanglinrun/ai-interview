@@ -129,6 +129,23 @@ export interface EvalRunResponse {
   rag: RagEvalResponse | null;
   judge: JudgeEvaluationResult | null;
   baselineComparison: BaselineComparison | null;
+  qualityGate: QualityGate;
+  createdAt: string;
+}
+
+export interface QualityGate {
+  passed: boolean;
+  metrics: Record<string, number>;
+  thresholds: Record<string, number>;
+  failures: string[];
+}
+
+export interface EvalRunSummary {
+  runId: string;
+  title: string;
+  overallScore: number;
+  regression: boolean;
+  qualityGate: QualityGate;
   createdAt: string;
 }
 
@@ -138,8 +155,16 @@ export const evalApi = {
    * 后端会跑真实 LLM/检索链路，耗时较长，故沿用 AI 请求超时。
    */
   run(body: EvalRunRequest): Promise<EvalRunResponse> {
-    return request.post<EvalRunResponse>('/api/eval/run', body, {
+    return request.post<EvalRunResponse>('/api/v1/rag/evaluations/run', body, {
       timeout: AI_REQUEST_TIMEOUT_MS,
     });
+  },
+
+  list(limit = 20): Promise<EvalRunSummary[]> {
+    return request.get<EvalRunSummary[]>(`/api/v1/rag/evaluations?limit=${limit}`);
+  },
+
+  get(runId: string): Promise<EvalRunResponse> {
+    return request.get<EvalRunResponse>(`/api/v1/rag/evaluations/${encodeURIComponent(runId)}`);
   },
 };

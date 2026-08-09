@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeaders, request } from './request';
+import { createTraceId, rememberTraceId } from '../stores/traceStore';
 
 export type PreparationStatus = 'DRAFT' | 'PREPARING' | 'READY' | 'FAILED';
 export type JobInterviewStatus =
@@ -128,6 +129,7 @@ export interface JobInterviewEvent {
   sessionVersion: number;
   payload: Record<string, unknown>;
   createdAt: string;
+  sourceTraceId?: string | null;
 }
 
 export interface JobInterviewCodeDraft {
@@ -142,11 +144,20 @@ export interface JobInterviewCodeDraft {
   submittedAt?: string | null;
 }
 
-function commandId(prefix: string): string {
+/**
+ * Creates the idempotency key at the beginning of a user operation.  Callers
+ * may keep the returned value and pass it again when a network retry is
+ * needed; the server then returns the original command result.
+ */
+export function createJobInterviewCommandId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${suffix}`.slice(0, 64);
+}
+
+function resolveCommandId(prefix: string, value?: string): string {
+  return value && value.trim() ? value.trim().slice(0, 64) : createJobInterviewCommandId(prefix);
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -182,16 +193,18 @@ export function subscribeJobInterviewEvents(
     while (!controller.signal.aborted) {
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/events?afterEventId=${cursor}`,
+          `${API_BASE_URL}/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/events?afterEventId=${cursor}`,
           {
             headers: {
               Accept: 'text/event-stream',
               'Last-Event-ID': String(cursor),
+              'X-Trace-Id': createTraceId(),
               ...getAuthHeaders(),
             },
             signal: controller.signal,
           },
         );
+        rememberTraceId(response.headers.get('X-Trace-Id'));
         if (!response.ok || !response.body) {
           throw new Error(`SSE ${response.status}`);
         }
@@ -233,70 +246,74 @@ export function subscribeJobInterviewEvents(
 
 export const jobInterviewApi = {
   createPreparation: (body: CreatePreparationRequest) => request.post<PreparationView>(
-    '/api/job-interviews/preparations',
+    '/api/v1/job-interviews/preparations',
     body,
   ),
   getPreparation: (runId: string) => request.get<PreparationView>(
-    `/api/job-interviews/preparations/${encodeURIComponent(runId)}`,
+    `/api/v1/job-interviews/preparations/${encodeURIComponent(runId)}`,
   ),
   waitForPreparation,
   getSession: (sessionId: string) => request.get<JobInterviewSession>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}`,
   ),
   getCodeDraft: (sessionId: string, questionId: number) => request.get<JobInterviewCodeDraft | null>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/code`,
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/code`,
     { params: { questionId } },
   ),
-  start: (sessionId: string, expectedSessionVersion: number) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/start`,
-    { commandId: commandId('start'), expectedSessionVersion },
+  start: (sessionId: string, expectedSessionVersion: number, commandId?: string) => request.post<CommandResult>(
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/start`,
+    { commandId: resolveCommandId('start', commandId), expectedSessionVersion },
   ),
   submitAnswer: (
     sessionId: string,
     expectedSessionVersion: number,
     questionId: number,
     answer: string,
+    commandId?: string,
   ) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/answers`,
-    { commandId: commandId('answer'), expectedSessionVersion, questionId, answer },
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/answers`,
+    { commandId: resolveCommandId('answer', commandId), expectedSessionVersion, questionId, answer },
   ),
   clarify: (
     sessionId: string,
     expectedSessionVersion: number,
     question: string,
+    commandId?: string,
   ) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/clarification`,
-    { commandId: commandId('clarify'), expectedSessionVersion, question: question || null },
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/clarification`,
+    { commandId: resolveCommandId('clarify', commandId), expectedSessionVersion, question: question || null },
   ),
   saveCode: (
     sessionId: string,
     expectedSessionVersion: number,
     questionId: number,
     sourceCode: string,
+    commandId?: string,
   ) => request.put<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/code`,
-    { commandId: commandId('save-code'), expectedSessionVersion, questionId, sourceCode },
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/code`,
+    { commandId: resolveCommandId('save-code', commandId), expectedSessionVersion, questionId, sourceCode },
   ),
   submitCode: (
     sessionId: string,
     expectedSessionVersion: number,
     questionId: number,
     sourceCode: string,
+    commandId?: string,
   ) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/code/submit`,
-    { commandId: commandId('submit-code'), expectedSessionVersion, questionId, sourceCode },
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/code/submit`,
+    { commandId: resolveCommandId('submit-code', commandId), expectedSessionVersion, questionId, sourceCode },
   ),
-  continue: (sessionId: string, expectedSessionVersion: number) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/continue`,
-    { commandId: commandId('continue'), expectedSessionVersion },
+  continue: (sessionId: string, expectedSessionVersion: number, commandId?: string) => request.post<CommandResult>(
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/continue`,
+    { commandId: resolveCommandId('continue', commandId), expectedSessionVersion },
   ),
-  finish: (sessionId: string, expectedSessionVersion: number) => request.post<CommandResult>(
-    `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/finish`,
-    { commandId: commandId('finish'), expectedSessionVersion },
+  finish: (sessionId: string, expectedSessionVersion: number, commandId?: string) => request.post<CommandResult>(
+    `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/finish`,
+    { commandId: resolveCommandId('finish', commandId), expectedSessionVersion },
   ),
-  abort: (sessionId: string, expectedSessionVersion: number, reason: string) =>
+  abort: (sessionId: string, expectedSessionVersion: number, reason: string, commandId?: string) =>
     request.post<CommandResult>(
-      `/api/job-interviews/sessions/${encodeURIComponent(sessionId)}/abort`,
-      { commandId: commandId('abort'), expectedSessionVersion, reason },
+      `/api/v1/job-interviews/sessions/${encodeURIComponent(sessionId)}/abort`,
+      { commandId: resolveCommandId('abort', commandId), expectedSessionVersion, reason },
     ),
 };

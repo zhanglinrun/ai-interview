@@ -89,6 +89,9 @@ app:
         topk-long: 8
         min-score-short: 0.18
         min-score-default: 0.28
+      multi-source:
+        neo4j:
+          enabled: false
   interview:
     follow-up-count: 1
     evaluation:

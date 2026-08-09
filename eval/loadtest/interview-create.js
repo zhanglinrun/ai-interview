@@ -1,6 +1,6 @@
 // 面试创建接口压测（k6）
 //
-// 压测目标：POST /api/interview/sessions，覆盖 Skill 出题链路（同步生成题目）。
+// 压测目标：POST /api/v1/interviews/sessions，覆盖 Skill 出题链路（同步生成题目）。
 // 这是一条 CPU + LLM 混合的写接口，和 RAG 问答互补，用来观察出题在并发下的延迟与吞吐。
 //
 // 运行：
@@ -60,7 +60,7 @@ export default function (data) {
   });
   const params = { headers: authHeaders(data.token) };
 
-  const res = http.post(`${BASE_URL}/api/interview/sessions`, payload, params);
+  const res = http.post(`${BASE_URL}/api/v1/interviews/sessions`, payload, params);
   bizLatency.add(res.timings.duration);
 
   let ok = res.status === 200;

@@ -17,7 +17,7 @@ AI 面试平台是一套面向技术面试场景的全栈应用，覆盖知识�
 - **证据化 RAG**：MinIO 私有对象、结构化切块、Elasticsearch 混合检索与可追溯引用
 - **显式状态机编排**：Planner / Interviewer / Critic，有界 Reflexion，不引入第二状态源
 - **异步可靠**：RabbitMQ 承载长任务；文档向量化走提交后事件与补偿
-- **数据隔离**：JWT 登录与按用户隔离；用户触发的生成请求走自带模型配置
+- **数据隔离**：Sa-Token + Redis 会话与按用户隔离；用户触发的生成请求走自带模型配置
 - **可观测**：业务 Trace、Micrometer / Prometheus / Grafana
 
 ### 核心链路
@@ -37,7 +37,7 @@ AI 面试平台是一套面向技术面试场景的全栈应用，覆盖知识�
 ```mermaid
 flowchart LR
   UI["React / TypeScript"] --> API["Spring Boot REST / SSE"]
-  API --> Auth["JWT + User Isolation"]
+  API --> Auth["Sa-Token + Redis + User Isolation"]
   API --> Interview["Job Interview State Machine"]
   Interview --> RAG["Evidence-aware RAG"]
   RAG --> MySQL[(MySQL)]
@@ -58,7 +58,7 @@ ai-interview/
 ├── backend/          # Spring Boot 后端（业务、RAG、面试编排、评测接口）
 ├── frontend/         # React 18 + TypeScript 前端
 ├── eval/             # 检索 / 生成 / Critic 评测与负载脚本
-├── dev-ops/          # 依赖 Compose、生产编排、监控与发布检查
+├── dev-ops/          # 本地 Compose、监控与开发检查
 └── study/            # 本地学习与答辩笔记（默认不纳入版本控制）
 ```
 
@@ -104,7 +104,7 @@ ai-interview/
 | 项 | 选型 |
 | --- | --- |
 | 语言 / 运行时 | Java 21 |
-| 框架 | Spring Boot 3.5.x、Spring Security |
+| 框架 | Spring Boot 3.5.x、Sa-Token + Redis |
 | ORM | MyBatis-Plus 3.5.x |
 | AI | LangChain4j 1.11.x |
 | 数据 | MySQL 8、Redis、Elasticsearch、MinIO |
@@ -118,7 +118,7 @@ ai-interview/
 | 前端 | React 18、TypeScript、Vite、Tailwind CSS 4、Monaco Editor |
 | 构建 | Maven 3.9+、pnpm |
 | 测试 | JUnit 5、Mockito、AssertJ、Vitest |
-| 部署 | Docker Compose、Caddy |
+| 部署 | Docker Compose |
 
 ## 技术亮点
 
@@ -180,15 +180,25 @@ $ErrorActionPreference = 'Stop'
 docker compose -f dev-ops/docker-compose-environment.yml up -d
 ```
 
-### 4. 数据库升级（复用旧数据卷时必做）
+### 4. 初始化全新数据库
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-./dev-ops/Apply-DatabaseUpgrades.ps1
+docker compose -f dev-ops/docker-compose-environment.yml down -v
+docker compose -f dev-ops/docker-compose-environment.yml up -d
 ```
 
-仅更新 `schema.sql` 不会改变已有数据卷；跳过升级可能导致知识库上传、向量化补偿等链路出现
-字段缺失错误。
+本地依赖包含 MySQL、Redis、Elasticsearch、MinIO、RabbitMQ 和 Neo4j；Neo4j 不使用 profile，执行上面的
+命令会直接启动。需要日志查询或监控时，分别使用 `dev-ops/docker-compose-elk.yml` 和
+`dev-ops/docker-compose-grafana.yml`。
+
+知识库默认按 `PARENT_CHILD` 父子策略切块。父子、兄弟关系只用于 ES 命中后的上下文扩展，
+由 MySQL/Redis 保存和读取，不会写入 Neo4j。Neo4j 启动后自动导入
+`backend/src/main/resources/neo4j/ai-interview-domain.json`，用于 Agent、LangChain、
+LangGraph、RAG 等平台实体关系查询；失败时由补偿任务重试。
+
+V2 不迁移旧数据，也不提供旧表兼容层。切换版本时删除旧 MySQL/ES/Redis 数据卷，
+由 `backend/src/main/resources/sql/schema.sql` 在全新数据卷首次初始化完整结构。
 
 ### 5. 启动后端
 
@@ -225,38 +235,26 @@ pnpm -C frontend build
 ./dev-ops/ci/Test-ReleaseContent.ps1
 ./dev-ops/ci/Test-ComposeConfig.ps1
 ./dev-ops/ci/Test-PowerShellSyntax.ps1
-./dev-ops/ci/Test-DeploymentAssets.ps1
 ./dev-ops/ci/Test-FreshSchema.ps1
 ```
 
 上述结果证明构建、单测与 Compose 配置门禁；不代表全部外部服务 E2E 或 24 小时稳定性已验收。
 
-## 部署说明
+## Docker 说明
 
-本地全栈、生产 Compose、Caddy HTTPS、健康检查与故障处理见：
-
-- `dev-ops/README.md`
-- `dev-ops/DEPLOY.md`
-- `dev-ops/.env.prod.example`
-
-没有目标服务器与外部服务验收时，仓库可以完成本地构建与关键流程，但不能宣称已经完整上线。
-
-生产环境建议：
-
-- 使用强随机签名与配置加密材料（见 `.env.example` 说明）
-- JVM 与连接池按实际并发调整
-- 消息队列开启持久化；监控叠加 Prometheus / Grafana
+本地启动、IDEA 调试、日志查询和监控统一使用 `dev-ops/` 下的四个 Compose 文件。
 
 ## 项目边界
 
 - 产品主叙事是意图、Multi-Agent、RAG、记忆与评测；招聘雷达、刷题导航等为外围入口。
-- 不引入 Neo4j / Text2SQL / 语音面试 / 平台对外 MCP Server / RocketMQ 双引擎作为当前主范围。
+- 当前主范围包括 Neo4j 和 Text2SQL；不引入语音面试、平台对外 MCP Server 或 RocketMQ 双引擎。
+  Neo4j 作为本地 RAG 依赖随 Compose 默认启动。
 - GitHub 只读固定 SHA；不读私库、不接收候选人私有令牌、不执行写操作。
 - 候选人简历、JD、资料、回答与源码属于用户数据，不进入公共知识域。
 - 题库只保存 Hot 100 映射与平台重述题面，不复制第三方原题或隐藏用例。
 
 ## 开发规范
 
-- 后端遵循现有模块分包与异常码约定；新增表结构放在可重复执行的 upgrade 脚本中。
+- 后端采用领域化分包与异常码约定；新版本以完整 `schema.sql` 初始化，不保留旧表迁移脚本。
 - 前端路由与侧栏分组保持一致；用户可见文案避免暴露内部实现黑话。
 - 真实访问凭证、完整 Prompt、简历与源码正文不得写入日志、脚本参数或提交记录。

@@ -12,7 +12,7 @@ function hasLocalAccessToken(): boolean {
 }
 
 /**
- * 路由级登录守卫只检查本地是否有 access token，不解析 JWT 来推断权限。
+ * 路由级登录守卫只检查本地是否有 Sa-Token 会话，不解析不透明 token 来推断权限。
  * token 是否有效以及用户是否有权访问资源，仍由后端最终裁决。
  */
 export default function RequireAuth() {

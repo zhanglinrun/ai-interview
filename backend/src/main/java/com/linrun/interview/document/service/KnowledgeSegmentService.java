@@ -1,0 +1,99 @@
+package com.linrun.interview.document.service;
+
+import com.linrun.interview.document.constant.SegmentStatus;
+import com.linrun.interview.document.entity.KnowledgeBaseSegmentEntity;
+import com.baomidou.mybatisplus.extension.service.IService;
+
+import java.util.List;
+
+/**
+ * 知识库分段 Service（对齐业界实践 KnowledgeSegmentService）。
+ */
+public interface KnowledgeSegmentService extends IService<KnowledgeBaseSegmentEntity> {
+
+    /**
+     * 保存切片并补齐审计时间。通用的 saveBatch 由 MyBatis-Plus 提供。
+     */
+    boolean saveSegments(List<KnowledgeBaseSegmentEntity> segments);
+
+    List<KnowledgeBaseSegmentEntity> listPendingEmbedding(
+        Long docId, Long versionId, SegmentStatus status, int limit);
+
+    /**
+     * 按 docId 查所有分段（顺序排列）。
+     */
+    List<KnowledgeBaseSegmentEntity> findByDocumentId(Long docId);
+
+    /**
+     * 按 versionId 查所有分段。
+     */
+    List<KnowledgeBaseSegmentEntity> findByVersionId(Long versionId);
+
+    /**
+     * 按 docId 物理删除所有分段。
+     */
+    int physicalDeleteByDocumentId(Long docId);
+
+    /**
+     * 按 versionId 物理删除所有分段。
+     */
+    int physicalDeleteByDocumentVersion(Long versionId);
+
+    /**
+     * 向量化每批完成后批量回写 embeddingId + 升 VECTOR_STORED（一条 UPDATE，独立小事务）。
+     */
+    int batchUpdateEmbedding(
+        Long docId, Long versionId, int attempt, java.time.LocalDateTime claimedAt,
+        List<KnowledgeBaseSegmentEntity> segments);
+
+    /**
+     * 统计某版本已回写 embeddingId 的分段数（向量对账用）。
+     */
+    long countWithEmbedding(Long docId, Long versionId);
+
+    /**
+     * 按 versionId 统计分段数。
+     */
+    long countByDocumentVersion(Long versionId);
+
+    /**
+     * 失效版本时批量降级分段状态（VECTOR_STORED → STORED + 清空 embeddingId）。
+     */
+    int downgradeStatus(Long docId, Long versionId,
+        com.linrun.interview.document.constant.SegmentStatus fromStatus,
+        com.linrun.interview.document.constant.SegmentStatus toStatus);
+
+    /**
+     * 按文档 ID + 非当前版本 统计残留分段数（补偿任务用）。
+     */
+    long countStaleByDocumentId(Long docId, Long currentVersionId);
+
+    /**
+     * 按 chunkId 集合查分段（父子扩展：用命中 chunk 的 parentChunkId 取父块文本）。
+     */
+    List<KnowledgeBaseSegmentEntity> findByChunkIdIn(List<String> chunkIds);
+
+    /**
+     * 按 brotherChunkId 集合查同组兄弟分段（兄弟扩展：按 brotherChunkIndex 顺序拼接成完整段落）。
+     */
+    List<KnowledgeBaseSegmentEntity> findByBrotherChunkIdIn(List<String> brotherChunkIds);
+
+    /** 清理父子/兄弟正文 Redis 缓存。 */
+    void evictExpansionCache();
+
+    /**
+     * 按 ID 查分段（需校验文档归属）。
+     */
+    KnowledgeBaseSegmentEntity findById(Long segmentId);
+
+    /**
+     * 按文档分页查分段。
+     */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<KnowledgeBaseSegmentEntity> pageByDocument(
+        Long docId, Long versionId, int page, int size);
+
+    /**
+     * 按文档统计分段数。
+     */
+    long countByDocument(Long docId, Long versionId);
+}

@@ -1,14 +1,14 @@
 package com.linrun.interview.eval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.linrun.interview.common.ai.LlmProviderRegistry;
-import com.linrun.interview.modules.knowledgebase.config.ElasticSearchProperties;
-import com.linrun.interview.modules.knowledgebase.constant.MetadataKeyConstant;
-import com.linrun.interview.modules.knowledgebase.rag.ContextExpansionService;
-import com.linrun.interview.modules.knowledgebase.rag.InterviewElasticsearchContentRetriever;
-import com.linrun.interview.modules.knowledgebase.service.KnowledgeBaseQueryProperties;
-import com.linrun.interview.modules.knowledgebase.service.KnowledgeSegmentService;
-import com.linrun.interview.modules.knowledgebase.service.RerankService;
+import com.linrun.interview.ai.service.LlmProviderRegistry;
+import com.linrun.interview.rag.config.ElasticSearchProperties;
+import com.linrun.interview.rag.constant.MetadataKeyConstant;
+import com.linrun.interview.rag.service.ContextExpansionService;
+import com.linrun.interview.rag.service.InterviewElasticsearchContentRetriever;
+import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
+import com.linrun.interview.document.service.KnowledgeSegmentService;
+import com.linrun.interview.rag.service.RerankService;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.content.Content;

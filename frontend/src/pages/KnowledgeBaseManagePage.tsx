@@ -25,6 +25,7 @@ import {
   RagQueryTrace,
   SortOption,
 } from '../api/knowledgebase';
+import {getErrorMessage} from '../api/request';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import KnowledgeBaseSortSelect from '../components/KnowledgeBaseSortSelect';
 import LoadingButtonContent from '../components/LoadingButtonContent';
@@ -103,7 +104,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   // 重新向量化状态
   const [revectorizing, setRevectorizing] = useState<number | null>(null);
   const [splitModalKb, setSplitModalKb] = useState<KnowledgeBaseItem | null>(null);
-  const [splitType, setSplitType] = useState('BROTHER');
+  const [splitType, setSplitType] = useState('PARENT_CHILD');
   const [splitChunkSize, setSplitChunkSize] = useState(800);
   const [splitOverlap, setSplitOverlap] = useState(80);
   const [splitting, setSplitting] = useState(false);
@@ -116,6 +117,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [versionUploadFile, setVersionUploadFile] = useState<File | null>(null);
   const [versionChangelog, setVersionChangelog] = useState('');
   const [versionUploading, setVersionUploading] = useState(false);
+  const [versionUploadError, setVersionUploadError] = useState('');
   const [traceOpen, setTraceOpen] = useState(false);
   const [traces, setTraces] = useState<RagQueryTrace[]>([]);
   const [tracesLoading, setTracesLoading] = useState(false);
@@ -243,12 +245,14 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     setVersionUploadFile(null);
     setVersionChangelog('');
     setVersionUploading(false);
+    setVersionUploadError('');
   };
 
   const handleUploadNewVersion = async () => {
     if (!versionModalKb || !versionUploadFile) return;
     try {
       setVersionUploading(true);
+      setVersionUploadError('');
       await knowledgeBaseApi.uploadNewVersion(
         versionModalKb.id,
         versionUploadFile,
@@ -260,6 +264,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       await loadDataSilent();
     } catch (error) {
       console.error('上传新版本失败:', error);
+      setVersionUploadError(getErrorMessage(error, '上传新版本失败，请检查后端日志'));
     } finally {
       setVersionUploading(false);
     }
@@ -517,7 +522,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                 <option key={cat} value={cat}>
                   {cat}
                 </option>
-              ))}
+                              ))}
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
@@ -789,7 +794,10 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <input
                     type="file"
                     accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls"
-                    onChange={(e) => setVersionUploadFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                      setVersionUploadFile(e.target.files?.[0] ?? null);
+                      setVersionUploadError('');
+                    }}
                     className="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-primary-50 file:text-primary-700"
                   />
                   <input
@@ -809,8 +817,13 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-2">
-                  上传完成后状态为 CONVERTED，请在列表中对文档执行「切块」以触发向量化。
+                  上传后会自动解析并切块，向量化在后台执行；可在列表查看处理状态。
                 </p>
+                {versionUploadError && (
+                  <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+                    {versionUploadError}
+                  </p>
+                )}
               </div>
 
               <div className="flex-1 overflow-y-auto p-5">
@@ -1065,9 +1078,29 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   <div className="py-12 text-center text-slate-400">暂无分段</div>
                 ) : segments.map((seg) => (
                   <div key={seg.id} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3">
-                    <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      第 {seg.chunkOrder + 1} 段
-                    </p>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-medium text-slate-500 dark:text-slate-400">
+                        第 {seg.chunkOrder + 1} 段
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                        {seg.parentChunkId ? '子块' : '顶层块'}
+                      </span>
+                      {seg.brotherChunkId && (
+                        <span
+                          className="rounded-full bg-primary-50 px-2 py-0.5 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
+                          title={`兄弟组：${seg.brotherChunkId}`}
+                        >
+                          兄弟组 · 第 {seg.brotherChunkIndex ?? '?'} 段
+                        </span>
+                      )}
+                    </div>
+                    {(seg.parentChunkId || seg.brotherChunkId) && (
+                      <p className="mb-2 text-[11px] text-slate-400 dark:text-slate-500">
+                        {seg.parentChunkId && `父块 ${seg.parentChunkId.slice(0, 12)}…`}
+                        {seg.parentChunkId && seg.brotherChunkId && ' · '}
+                        {seg.brotherChunkId && `兄弟组 ${seg.brotherChunkId.slice(0, 12)}…`}
+                      </p>
+                    )}
                     <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{seg.textPreview}</p>
                   </div>
                 ))}
@@ -1106,11 +1139,14 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
               onChange={e => setSplitType(e.target.value)}
               className="w-full mb-3 rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm bg-white dark:bg-slate-700"
             >
-              <option value="BROTHER">BROTHER（兄弟分段，默认）</option>
-              <option value="SMART">SMART（标题 + 10% overlap）</option>
-              <option value="TITLE">TITLE（按标题层级）</option>
+              <option value="PARENT_CHILD">PARENT_CHILD（父子分段，默认）</option>
+              <option value="BROTHER">BROTHER（兄弟分段 + 层级关系）</option>
+              <option value="SMART">SMART（父子分段 + 10% overlap）</option>
               <option value="LENGTH">LENGTH（按长度）</option>
             </select>
+            <p className="mb-4 text-xs leading-5 text-slate-400">
+              默认按标题层级生成父块与子块：子块负责向量检索，命中后扩展父块上下文；需要同级连续内容时再选择 BROTHER。
+            </p>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">分段长度</label>

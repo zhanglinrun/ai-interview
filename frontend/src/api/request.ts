@@ -6,6 +6,7 @@ import {
   getRefreshToken,
   setAuthSession,
 } from './authStorage';
+import { createTraceId, rememberTraceId } from '../stores/traceStore';
 
 /**
  * 后端统一响应结构
@@ -14,6 +15,7 @@ interface Result<T = unknown> {
   code: number;
   message: string;
   data: T;
+  traceId?: string | null;
 }
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -60,14 +62,24 @@ const instance = axios.create({
 
 export function getAuthHeaders(): Record<string, string> {
   const token = getAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  // Sa-Token reads the configured token-name header. Keep Authorization as a
+  // compatibility signal for proxies and older clients during the cutover.
+  return token ? {
+    satoken: token,
+    Authorization: `Bearer ${token}`,
+  } : {};
 }
 
 instance.interceptors.request.use((config) => {
   const authHeaders = getAuthHeaders();
-  if (authHeaders.Authorization) {
+  if (authHeaders.satoken) {
     config.headers = config.headers ?? {};
+    config.headers.satoken = authHeaders.satoken;
     config.headers.Authorization = authHeaders.Authorization;
+  }
+  config.headers = config.headers ?? {};
+  if (!config.headers['X-Trace-Id']) {
+    config.headers['X-Trace-Id'] = createTraceId();
   }
   return config;
 });
@@ -99,7 +111,7 @@ function refreshAuthSession(): Promise<AuthSession> {
     }
     // 用裸 axios 避开实例拦截器（防递归刷新）
     refreshPromise = axios
-      .post<Result<AuthSession>>(`${API_BASE_URL}/api/auth/refresh`, null, {
+      .post<Result<AuthSession>>(`${API_BASE_URL}/api/v1/auth/refresh`, null, {
         headers: { 'Refresh-Token': refreshToken },
         timeout: DEFAULT_REQUEST_TIMEOUT_MS,
       })
@@ -123,7 +135,7 @@ function canSilentRefresh(result: Result, config?: RetriableConfig): boolean {
   return Boolean(
     config
     && !config._authRetried
-    && !config.url?.includes('/api/auth/')
+    && !config.url?.includes('/api/v1/auth/')
     && (result.code === 401 || result.message?.includes('token'))
     && getRefreshToken(),
   );
@@ -171,9 +183,11 @@ async function parseBlobResult(blob: Blob): Promise<Blob> {
  */
 instance.interceptors.response.use(
   async (response) => {
+    rememberTraceId(response.headers?.['x-trace-id'] ?? response.headers?.['X-Trace-Id']);
     // 检查是否是 Result 格式
     if (isResult(response.data)) {
       const result = response.data;
+      rememberTraceId(result.traceId);
       if (result.code === 200) {
         // 成功：返回 data
         response.data = result.data;
@@ -190,6 +204,7 @@ instance.interceptors.response.use(
         }
         config._authRetried = true;
         config.headers.Authorization = `Bearer ${session.accessToken}`;
+        config.headers.satoken = session.accessToken;
         return instance.request(config);
       }
       // 失败：直接抛出 message
@@ -200,6 +215,8 @@ instance.interceptors.response.use(
     return response;
   },
   (error) => {
+    rememberTraceId(error.response?.headers?.['x-trace-id']
+      ?? error.response?.headers?.['X-Trace-Id']);
     // 有响应的情况：后端返回了结果（即使是错误）
     if (error.response) {
       const { data } = error.response;
@@ -265,7 +282,6 @@ export const request = {
   upload<T>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
     return instance.post(url, formData, {
       timeout: UPLOAD_REQUEST_TIMEOUT_MS, // 5分钟，与Nginx proxy_read_timeout对齐
-      headers: { 'Content-Type': 'multipart/form-data' },
       ...config,
     }).then(res => res.data);
   },

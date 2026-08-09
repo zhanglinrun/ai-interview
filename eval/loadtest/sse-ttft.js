@@ -1,6 +1,6 @@
 // SSE 首字延迟（TTFT / TTFB）量化（k6）
 //
-// 目标：POST /api/knowledgebase/query/stream —— 流式 RAG 问答，SSE 推送 progress/reference/token。
+// 目标：POST /api/v1/knowledge-bases/query/stream —— 流式 RAG 问答，SSE 推送 progress/reference/token。
 // 大厂关注「流式首字延迟」：用户多久能看到第一个字。这里量化两个指标：
 //   - ttft_proxy_ms = http_req_waiting（首字节/首个 SSE 事件到达延迟）。
 //     注意：本接口会先推 progress（理解/检索/排序）事件再推 LLM token，
@@ -14,9 +14,9 @@
 //   k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=xxx -e KB_IDS=1 eval/loadtest/sse-ttft.js
 //
 // 精确首 token（PowerShell + curl，记录第一条 token 事件相对起始的毫秒）：
-//   $t0=Get-Date; curl.exe -N -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
+//   $t0=Get-Date; curl.exe -N -s -H "satoken: $TOKEN" -H "Content-Type: application/json" `
 //     -d '{"knowledgeBaseIds":[1],"question":"什么是缓存穿透"}' `
-//     http://localhost:8082/api/knowledgebase/query/stream | ForEach-Object {
+//     http://localhost:8082/api/v1/knowledge-bases/query/stream | ForEach-Object {
 //       if ($_ -match 'token') { Write-Output ("TTFT_ms=" + ((Get-Date)-$t0).TotalMilliseconds); break } }
 
 import http from 'k6/http';
@@ -61,7 +61,7 @@ export default function (data) {
   const payload = JSON.stringify({ knowledgeBaseIds: KB_IDS, question });
   const headers = authHeaders(data.token, { Accept: 'text/event-stream' });
 
-  const res = http.post(`${BASE_URL}/api/knowledgebase/query/stream`, payload, { headers });
+  const res = http.post(`${BASE_URL}/api/v1/knowledge-bases/query/stream`, payload, { headers });
   ttftProxy.add(res.timings.waiting);
   streamTotal.add(res.timings.duration);
 

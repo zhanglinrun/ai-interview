@@ -64,7 +64,7 @@ export default function DashboardPage() {
   const latestTarget = targets[0];
   const statCards = [
     { icon: BriefcaseBusiness, label: '目标岗位', value: stats.targets, note: '已保存' },
-    { icon: Code2, label: '算法题', value: stats.problems, note: '可练习' },
+    { icon: Code2, label: '算法题', value: stats.problems, note: 'Hot 100' },
     { icon: History, label: '面试记录', value: stats.interviews, note: '已创建' },
   ];
 

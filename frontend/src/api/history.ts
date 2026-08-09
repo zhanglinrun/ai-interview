@@ -93,55 +93,55 @@ export const historyApi = {
    * 获取所有简历列表
    */
   async getResumes(): Promise<ResumeListItem[]> {
-    return request.get<ResumeListItem[]>('/api/resumes');
+    return request.get<ResumeListItem[]>('/api/v1/resumes');
   },
 
   /**
    * 获取简历详情
    */
   async getResumeDetail(id: number): Promise<ResumeDetail> {
-    return request.get<ResumeDetail>(`/api/resumes/${id}/detail`);
+    return request.get<ResumeDetail>(`/api/v1/resumes/${id}/detail`);
   },
 
   /**
    * 获取面试详情
    */
   async getInterviewDetail(sessionId: string): Promise<InterviewDetail> {
-    return request.get<InterviewDetail>(`/api/interview/sessions/${sessionId}/details`);
+    return request.get<InterviewDetail>(`/api/v1/interviews/sessions/${sessionId}/details`);
   },
 
   /**
    * 导出简历分析报告PDF
    */
   async exportAnalysisPdf(resumeId: number): Promise<Blob> {
-    return request.getBlob(`/api/resumes/${resumeId}/export`);
+    return request.getBlob(`/api/v1/resumes/${resumeId}/export`);
   },
 
   /**
    * 导出面试报告PDF
    */
   async exportInterviewPdf(sessionId: string): Promise<Blob> {
-    return request.getBlob(`/api/interview/sessions/${sessionId}/export`);
+    return request.getBlob(`/api/v1/interviews/sessions/${sessionId}/export`);
   },
 
   /**
    * 删除简历
    */
   async deleteResume(id: number): Promise<void> {
-    return request.delete(`/api/resumes/${id}`);
+    return request.delete(`/api/v1/resumes/${id}`);
   },
 
   /**
    * 删除面试记录
    */
   async deleteInterview(sessionId: string): Promise<void> {
-    return request.delete(`/api/interview/sessions/${sessionId}`);
+    return request.delete(`/api/v1/interviews/sessions/${sessionId}`);
   },
 
   /**
    * 重新分析简历
    */
   async reanalyze(id: number): Promise<void> {
-    return request.post(`/api/resumes/${id}/reanalyze`);
+    return request.post(`/api/v1/resumes/${id}/reanalyze`);
   },
 };

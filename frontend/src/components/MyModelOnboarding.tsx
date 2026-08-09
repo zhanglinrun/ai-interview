@@ -15,7 +15,7 @@ type WizardMode = 'onboarding' | 'edit';
 
 /**
  * BYOK 全局引导：
- * - 登录后拉取 `/api/llm-provider/mine`，未配置（configured=false）则弹出两步向导；
+ * - 登录后拉取 `/api/v1/llm-provider/mine`，未配置（configured=false）则弹出两步向导；
  * - 监听全局 7006 事件（任意 chat 入口因未配置 Key 被拒），弹出「去配置」提示并可直达向导；
  * - 是否再次弹出完全由后端 `configured` 派生，不引入额外 onboarded 标记。
  */

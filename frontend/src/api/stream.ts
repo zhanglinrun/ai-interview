@@ -1,4 +1,5 @@
 import { API_BASE_URL, getErrorMessage, notifyIfUserLlmNotConfigured } from './request';
+import { createTraceId, rememberTraceId } from '../stores/traceStore';
 
 export { API_BASE_URL };
 
@@ -67,7 +68,18 @@ export async function fetchTextStream(options: FetchTextStreamOptions): Promise<
   } = options;
 
   try {
-    const response = await fetch(url, init);
+    // Keep a plain object when callers provide one (some adapters inspect the
+    // fetch init directly), while still accepting every HeadersInit variant.
+    const headers: Record<string, string> = init.headers instanceof Headers
+      ? Object.fromEntries(init.headers.entries())
+      : Array.isArray(init.headers)
+        ? Object.fromEntries(init.headers)
+        : { ...((init.headers ?? {}) as Record<string, string>) };
+    if (!Object.keys(headers).some(name => name.toLowerCase() === 'x-trace-id')) {
+      headers['X-Trace-Id'] = createTraceId();
+    }
+    const response = await fetch(url, { ...init, headers });
+    rememberTraceId(response.headers.get('X-Trace-Id'));
     await ensureStreamResponse(response);
 
     const reader = response.body?.getReader();

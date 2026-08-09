@@ -69,18 +69,18 @@ export interface GithubSyncResult {
 }
 
 export const githubEvidenceApi = {
-  list: () => request.get<GithubRepository[]>('/api/github/repositories'),
-  detail: (id: number) => request.get<GithubRepositoryDetail>(`/api/github/repositories/${id}`),
+  list: () => request.get<GithubRepository[]>('/api/v1/github/repositories'),
+  detail: (id: number) => request.get<GithubRepositoryDetail>(`/api/v1/github/repositories/${id}`),
   bind: (body: BindGithubRepositoryRequest) => request.post<GithubRepositoryDetail>(
-    '/api/github/repositories',
+    '/api/v1/github/repositories',
     body,
     { timeout: AI_REQUEST_TIMEOUT_MS },
   ),
   sync: (id: number, expectedCommitSha: string, includePaths: string[] = []) =>
-    request.post<GithubSyncResult>(`/api/github/repositories/${id}/sync`, {
+    request.post<GithubSyncResult>(`/api/v1/github/repositories/${id}/sync`, {
       expectedCommitSha,
       includePaths,
       excludePrefixes: [],
     }, { timeout: AI_REQUEST_TIMEOUT_MS }),
-  delete: (id: number) => request.delete<void>(`/api/github/repositories/${id}`),
+  delete: (id: number) => request.delete<void>(`/api/v1/github/repositories/${id}`),
 };

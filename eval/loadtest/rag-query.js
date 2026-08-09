@@ -1,6 +1,6 @@
 // RAG 问答接口压测（k6）
 //
-// 压测目标：POST /api/knowledgebase/query（非流式），这是 RAG 全链路最重的同步接口，
+// 压测目标：POST /api/v1/knowledge-bases/query（非流式），这是 RAG 全链路最重的同步接口，
 // 覆盖查询改写 + ES KNN/全文检索 + rerank + LLM 生成。
 //
 // 运行：
@@ -71,7 +71,7 @@ export default function (data) {
   const payload = JSON.stringify({ knowledgeBaseIds: KB_IDS, question });
   const params = { headers: authHeaders(data.token) };
 
-  const res = http.post(`${BASE_URL}/api/knowledgebase/query`, payload, params);
+  const res = http.post(`${BASE_URL}/api/v1/knowledge-bases/query`, payload, params);
   bizLatency.add(res.timings.duration);
 
   // 统一响应 Result<T>：HTTP 200 且 code==0 才算成功。限流(8001)、业务异常都计入失败。

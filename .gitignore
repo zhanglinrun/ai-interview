@@ -69,10 +69,11 @@ GEMINI.md
 **/*.md
 !/README.md
 !/SETUP_API_KEYS.md
-!/docs/
-!/docs/**/*.md
 !/dev-ops/**/*.md
 !backend/src/test/resources/test-files/sample-resume.md
+
+# Local design and implementation notes
+docs/
 
 # OS files
 .DS_Store

@@ -1,4 +1,4 @@
-// frontend/src/api/interviewSchedule.ts
+// frontend/src/api/v1/interviewSchedule.ts
 
 import { request } from './request';
 import type {
@@ -12,15 +12,15 @@ import type {
 export const interviewScheduleApi = {
   parse: async (rawText: string, source?: 'feishu' | 'tencent' | 'zoom' | 'other'): Promise<ParseResponse> => {
     const payload: ParseRequest = { rawText, source };
-    return await request.post<ParseResponse>('/api/interview-schedule/parse', payload);
+    return await request.post<ParseResponse>('/api/v1/interview-schedule/parse', payload);
   },
 
   create: async (data: CreateInterviewRequest): Promise<InterviewSchedule> => {
-    return await request.post<InterviewSchedule>('/api/interview-schedule', data);
+    return await request.post<InterviewSchedule>('/api/v1/interview-schedule', data);
   },
 
   getById: async (id: number): Promise<InterviewSchedule> => {
-    return await request.get<InterviewSchedule>(`/api/interview-schedule/${id}`);
+    return await request.get<InterviewSchedule>(`/api/v1/interview-schedule/${id}`);
   },
 
   getAll: async (params?:{
@@ -28,19 +28,19 @@ export const interviewScheduleApi = {
     start?: string;
     end?: string;
   }): Promise<InterviewSchedule[]> => {
-    return await request.get<InterviewSchedule[]>('/api/interview-schedule', { params });
+    return await request.get<InterviewSchedule[]>('/api/v1/interview-schedule', { params });
   },
 
   update: async (id: number, data: CreateInterviewRequest): Promise<InterviewSchedule> => {
-    return await request.put<InterviewSchedule>(`/api/interview-schedule/${id}`, data);
+    return await request.put<InterviewSchedule>(`/api/v1/interview-schedule/${id}`, data);
   },
 
   delete: async (id: number): Promise<void> => {
-    await request.delete(`/api/interview-schedule/${id}`);
+    await request.delete(`/api/v1/interview-schedule/${id}`);
   },
 
   updateStatus: async (id: number, status: InterviewStatus): Promise<InterviewSchedule> => {
-    return await request.patch<InterviewSchedule>(`/api/interview-schedule/${id}/status`, null, {
+    return await request.patch<InterviewSchedule>(`/api/v1/interview-schedule/${id}/status`, null, {
       params: { status }
     });
   },

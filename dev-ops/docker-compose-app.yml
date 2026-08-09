@@ -14,7 +14,8 @@ services:
     container_name: interview-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
-      MYSQL_DATABASE: ${MYSQL_DB:-ai_interview}
+      # 应用栈使用独立 V2 数据库，避免复用旧版本卷中的表结构和数据。
+      MYSQL_DATABASE: ${APP_MYSQL_DB:-ai_interview_v2}
       MYSQL_USER: ${MYSQL_USER:-ai_interview}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
     volumes:
@@ -79,20 +80,6 @@ services:
       timeout: 3s
       retries: 5
 
-  createbuckets:
-    image: minio/mc
-    depends_on:
-      minio:
-        condition: service_healthy
-    # 仅创建桶，不设匿名公开读：桶内含简历、资料等 PII，前端一律通过后端签发的
-    # 预签名 URL / 鉴权接口访问，禁止对象直链公开下载。
-    entrypoint: |
-      /bin/sh -c "
-      set -e
-      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin
-      /usr/bin/mc mb --ignore-existing myminio/ai-interview
-      "
-
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: interview-rabbitmq
@@ -110,6 +97,64 @@ services:
       timeout: 5s
       retries: 10
 
+  # Neo4j 图检索：对应 RAG 的 Text2Cypher 数据源。
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: interview-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-change-me-neo4j-password}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "${NEO4J_BOLT_HOST_PORT:-27687}:7687"
+      - "${NEO4J_HTTP_HOST_PORT:-27474}:7474"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  # XXL-Job 仅负责补偿任务调度，业务数据仍在 ai_interview_v2 库中。
+  xxl-job-mysql:
+    image: mysql:8.0
+    container_name: interview-xxl-job-mysql
+    environment:
+      MYSQL_DATABASE: xxl_job
+      MYSQL_USER: xxl_job
+      MYSQL_PASSWORD: ${XXL_JOB_MYSQL_PASSWORD:-xxl_job_dev}
+      MYSQL_ROOT_PASSWORD: ${XXL_JOB_MYSQL_ROOT_PASSWORD:-xxl_job_root_dev}
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - xxl_job_mysql_data:/var/lib/mysql
+      - ./docker/xxl-job/tables_xxl_job.sql:/docker-entrypoint-initdb.d/01-tables_xxl_job.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping --protocol=TCP -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:2.4.0
+    container_name: interview-xxl-job-admin
+    depends_on:
+      xxl-job-mysql:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      PARAMS: >-
+        --spring.datasource.url=jdbc:mysql://xxl-job-mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+        --spring.datasource.username=xxl_job
+        --spring.datasource.password=${XXL_JOB_MYSQL_PASSWORD:-xxl_job_dev}
+        --xxl.job.accessToken=${XXL_JOB_ACCESS_TOKEN:-local_xxl_token}
+    ports:
+      - "${XXL_JOB_ADMIN_HOST_PORT:-28081}:8080"
+    volumes:
+      - xxl_job_admin_logs:/data/applogs
+    restart: unless-stopped
+
   app:
     build:
       context: ..
@@ -124,19 +169,22 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      createbuckets:
-        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      xxl-job-admin:
+        condition: service_started
     environment:
       SERVER_PORT: 8080
-      # 安全必填项：未设置直接拒绝启动，杜绝使用源码内公开默认值
-      APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET 必填：请设置至少 32 字节的强随机密钥}
-      APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:?APP_AI_CONFIG_ENCRYPTION_KEY 必填：用于加密 Provider API Key}
+      # Provider 密钥使用独立加密密钥；登录会话由 Sa-Token + Redis 管理
+      # 开发编排使用固定本地默认值；生产 compose 仍要求显式配置强随机密钥。
+      # 与 ApiKeyEncryptionService 的本地开发回退值保持一致；生产 Compose 仍要求显式注入密钥。
+      APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:-ai-interview-dev-only-provider-api-key-encryption}
       APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: ${MYSQL_DB:-ai_interview}
+      MYSQL_DB: ${APP_MYSQL_DB:-ai_interview_v2}
       MYSQL_USER: ${MYSQL_USER:-ai_interview}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ai_interview}
       REDIS_HOST: redis
@@ -185,16 +233,53 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      APP_JOB_XXL_ENABLED: ${APP_JOB_XXL_ENABLED:-true}
+      XXL_JOB_ADMIN_ADDRESSES: http://xxl-job-admin:8080/xxl-job-admin
+      XXL_JOB_APP_NAME: ${XXL_JOB_APP_NAME:-ai-interview-backend}
+      XXL_JOB_EXECUTOR_ADDRESS: ${XXL_JOB_EXECUTOR_ADDRESS:-http://app:9999/}
+      XXL_JOB_EXECUTOR_IP: ${XXL_JOB_EXECUTOR_IP:-}
+      XXL_JOB_EXECUTOR_PORT: ${XXL_JOB_EXECUTOR_PORT:-9999}
+      XXL_JOB_ACCESS_TOKEN: ${XXL_JOB_ACCESS_TOKEN:-local_xxl_token}
+      XXL_JOB_LOG_PATH: /app/logs/xxl-job
+      XXL_JOB_LOG_RETENTION_DAYS: ${XXL_JOB_LOG_RETENTION_DAYS:-30}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me-neo4j-password}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+      APP_AI_RAG_NEO4J_ENABLED: ${APP_AI_RAG_NEO4J_ENABLED:-true}
+      APP_AI_RAG_NEO4J_SEED_ENABLED: ${APP_AI_RAG_NEO4J_SEED_ENABLED:-true}
+      APP_AI_RAG_NEO4J_PLATFORM_OWNER_ID: ${APP_AI_RAG_NEO4J_PLATFORM_OWNER_ID:-0}
+      APP_AI_RAG_NEO4J_KB_SCOPE_REQUIRED: ${APP_AI_RAG_NEO4J_KB_SCOPE_REQUIRED:-false}
+      APP_AI_RAG_NEO4J_USER_SCOPE_REQUIRED: ${APP_AI_RAG_NEO4J_USER_SCOPE_REQUIRED:-true}
+      APP_AI_RAG_NEO4J_USER_SCOPE_PROPERTY: ${APP_AI_RAG_NEO4J_USER_SCOPE_PROPERTY:-ownerUserId}
+    expose:
+      - "9999"
     ports:
       - "${APP_HOST_PORT:-28082}:8080"
+    volumes:
+      - app_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
 
   frontend:
     build: ../frontend
     container_name: interview-frontend
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     ports:
       - "${FRONTEND_HOST_PORT:-28080}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
 volumes:
   mysql_data:
@@ -202,3 +287,8 @@ volumes:
   redis_data:
   minio_data:
   rabbitmq_data:
+  neo4j_data:
+  neo4j_logs:
+  xxl_job_mysql_data:
+  xxl_job_admin_logs:
+  app_logs:

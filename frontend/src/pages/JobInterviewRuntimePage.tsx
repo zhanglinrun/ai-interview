@@ -18,6 +18,7 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   jobInterviewApi,
+  createJobInterviewCommandId,
   subscribeJobInterviewEvents,
   type CommandResult,
   type JobInterviewAssessment,
@@ -122,6 +123,20 @@ export default function JobInterviewRuntimePage() {
   const [now, setNow] = useState(Date.now());
   const lastEventId = useRef(0);
   const lastQuestionId = useRef<number | null>(null);
+  const commandIds = useRef(new Map<string, string>());
+
+  /** Keep one command id for the same UI operation/version so a network
+   * retry replays the original command instead of advancing the session. */
+  const commandIdFor = useCallback((prefix: string, version: number, scope = '') => {
+    const key = `${prefix}:${version}:${scope}`;
+    const existing = commandIds.current.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = createJobInterviewCommandId(prefix);
+    commandIds.current.set(key, created);
+    return created;
+  }, []);
 
   const refreshSession = useCallback(async () => {
     if (!sessionId) return null;
@@ -317,7 +332,9 @@ export default function JobInterviewRuntimePage() {
           <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-stone-500 dark:text-stone-400">面试分为四个部分。刷新页面不会丢失进度，24 小时内可以继续。</p>
           <button
             disabled={Boolean(busy)}
-            onClick={() => applyCommand('start', () => jobInterviewApi.start(sessionId, session.sessionVersion), '面试已开始')}
+            onClick={() => applyCommand('start', () => jobInterviewApi.start(
+              sessionId, session.sessionVersion,
+              commandIdFor('start', session.sessionVersion)), '面试已开始')}
             className="btn-primary mt-6 inline-flex items-center gap-2 px-5 py-3 text-sm disabled:opacity-60"
           >
             {busy === 'start' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}开始面试
@@ -336,12 +353,18 @@ export default function JobInterviewRuntimePage() {
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-3">
             {session.canResume && (
-              <button disabled={Boolean(busy)} onClick={() => applyCommand('continue', () => jobInterviewApi.continue(sessionId, session.sessionVersion), '会话已恢复')} className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm disabled:opacity-60"><ArrowRight className="h-4 w-4" />继续面试</button>
+              <button disabled={Boolean(busy)} onClick={() => applyCommand('continue', () => jobInterviewApi.continue(
+                sessionId, session.sessionVersion,
+                commandIdFor('continue', session.sessionVersion)), '会话已恢复')} className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm disabled:opacity-60"><ArrowRight className="h-4 w-4" />继续面试</button>
             )}
-            <button disabled={Boolean(busy)} onClick={() => applyCommand('finish', () => jobInterviewApi.finish(sessionId, session.sessionVersion), '正在生成面试报告')} className="btn-secondary inline-flex items-center gap-2 px-4 py-2.5 text-sm disabled:opacity-60"><CheckCircle2 className="h-4 w-4" />结束并生成报告</button>
+            <button disabled={Boolean(busy)} onClick={() => applyCommand('finish', () => jobInterviewApi.finish(
+              sessionId, session.sessionVersion,
+              commandIdFor('finish', session.sessionVersion)), '正在生成面试报告')} className="btn-secondary inline-flex items-center gap-2 px-4 py-2.5 text-sm disabled:opacity-60"><CheckCircle2 className="h-4 w-4" />结束并生成报告</button>
             <button disabled={Boolean(busy)} onClick={() => {
               if (window.confirm('确认中止本次面试吗？中止记录不会更新能力画像。')) {
-                void applyCommand('abort', () => jobInterviewApi.abort(sessionId, session.sessionVersion, '用户主动中止'), '面试已中止');
+                void applyCommand('abort', () => jobInterviewApi.abort(
+                  sessionId, session.sessionVersion, '用户主动中止',
+                  commandIdFor('abort', session.sessionVersion)), '面试已中止');
               }
             }} className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60 dark:hover:bg-red-950/30"><StopCircle className="h-4 w-4" />中止</button>
           </div>
@@ -371,8 +394,12 @@ export default function JobInterviewRuntimePage() {
                   height={430}
                 />
                 <div className="flex flex-wrap gap-2 border-t border-stone-200/80 p-4 dark:border-stone-800">
-                  <button disabled={Boolean(busy) || !sourceCode.trim()} onClick={() => applyCommand('save-code', () => jobInterviewApi.saveCode(sessionId, session.sessionVersion, question.questionId, sourceCode), '代码草稿已保存')} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-50"><Save className="h-4 w-4" />保存代码</button>
-                  <button disabled={Boolean(busy) || !sourceCode.trim()} onClick={() => applyCommand('submit-code', () => jobInterviewApi.submitCode(sessionId, session.sessionVersion, question.questionId, sourceCode), '代码已提交判题')} className="btn-primary ml-auto inline-flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50">{busy === 'submit-code' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Code2 className="h-4 w-4" />}提交代码</button>
+                  <button disabled={Boolean(busy) || !sourceCode.trim()} onClick={() => applyCommand('save-code', () => jobInterviewApi.saveCode(
+                    sessionId, session.sessionVersion, question.questionId, sourceCode,
+                    commandIdFor('save-code', session.sessionVersion, String(question.questionId))), '代码草稿已保存')} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-50"><Save className="h-4 w-4" />保存代码</button>
+                  <button disabled={Boolean(busy) || !sourceCode.trim()} onClick={() => applyCommand('submit-code', () => jobInterviewApi.submitCode(
+                    sessionId, session.sessionVersion, question.questionId, sourceCode,
+                    commandIdFor('submit-code', session.sessionVersion, String(question.questionId))), '代码已提交判题')} className="btn-primary ml-auto inline-flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50">{busy === 'submit-code' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Code2 className="h-4 w-4" />}提交代码</button>
                 </div>
               </div>
             ) : (
@@ -382,12 +409,16 @@ export default function JobInterviewRuntimePage() {
                 </label>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button disabled={Boolean(busy) || !answer.trim()} onClick={async () => {
-                    const submitted = await applyCommand('answer', () => jobInterviewApi.submitAnswer(sessionId, session.sessionVersion, question.questionId, answer.trim()), '回答已提交');
+                    const submitted = await applyCommand('answer', () => jobInterviewApi.submitAnswer(
+                      sessionId, session.sessionVersion, question.questionId, answer.trim(),
+                      commandIdFor('answer', session.sessionVersion, String(question.questionId))), '回答已提交');
                     if (submitted) setAnswer('');
                   }} className="btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm disabled:opacity-50">{busy === 'answer' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}提交回答</button>
                   <div className="ml-auto flex min-w-[260px] flex-1 gap-2 sm:flex-initial">
                     <input value={clarification} onChange={(event) => setClarification(event.target.value)} maxLength={500} className="dark-input min-w-0 flex-1 px-3 py-2 text-sm" placeholder="可选：说明哪里需要澄清" />
-                    <button disabled={Boolean(busy)} onClick={() => applyCommand('clarify', () => jobInterviewApi.clarify(sessionId, session.sessionVersion, clarification.trim()), '已请求面试官澄清')} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm"><HelpCircle className="h-4 w-4" />澄清</button>
+                    <button disabled={Boolean(busy)} onClick={() => applyCommand('clarify', () => jobInterviewApi.clarify(
+                      sessionId, session.sessionVersion, clarification.trim(),
+                      commandIdFor('clarify', session.sessionVersion, clarification.trim())), '已请求题意澄清')} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm"><HelpCircle className="h-4 w-4" />请求题意澄清</button>
                   </div>
                 </div>
               </div>
@@ -419,10 +450,14 @@ export default function JobInterviewRuntimePage() {
               <h2 className="text-sm font-semibold text-stone-900 dark:text-white">会话控制</h2>
               <p className="mt-2 text-xs leading-5 text-stone-400">可以提前结束并生成报告；中止的面试不会更新能力画像。</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button disabled={Boolean(busy)} onClick={() => applyCommand('finish', () => jobInterviewApi.finish(sessionId, session.sessionVersion), '正在生成面试报告')} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm"><CheckCircle2 className="h-4 w-4" />结束并生成报告</button>
+                <button disabled={Boolean(busy)} onClick={() => applyCommand('finish', () => jobInterviewApi.finish(
+                  sessionId, session.sessionVersion,
+                  commandIdFor('finish', session.sessionVersion)), '正在生成面试报告')} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm"><CheckCircle2 className="h-4 w-4" />结束并生成报告</button>
                 <button disabled={Boolean(busy)} onClick={() => {
                   if (window.confirm('确认中止本次面试吗？中止记录不会更新能力画像。')) {
-                    void applyCommand('abort', () => jobInterviewApi.abort(sessionId, session.sessionVersion, '用户主动中止'), '面试已中止');
+                    void applyCommand('abort', () => jobInterviewApi.abort(
+                      sessionId, session.sessionVersion, '用户主动中止',
+                      commandIdFor('abort', session.sessionVersion)), '面试已中止');
                   }
                 }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"><StopCircle className="h-4 w-4" />中止</button>
               </div>

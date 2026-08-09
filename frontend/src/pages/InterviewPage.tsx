@@ -52,6 +52,7 @@ export default function Interview({
   const [draftSaved, setDraftSaved] = useState(false);
   const startedRef = useRef(false);
   const saveTimerRef = useRef<number>();
+  const submitCommandRef = useRef(new Map<string, string>());
 
   const questionCount = initialConfig?.questionCount ?? 8;
   const llmProvider = initialConfig?.llmProvider ?? '';
@@ -194,11 +195,18 @@ export default function Interview({
     setMessages(prev => [...prev, userMessage]);
 
     try {
+      const commandKey = `${session.sessionId}:${currentQuestion.questionIndex}`;
+      const commandId = submitCommandRef.current.get(commandKey) ?? `cmd-${crypto.randomUUID()}`;
+      submitCommandRef.current.set(commandKey, commandId);
       const response = await interviewApi.submitAnswer({
         sessionId: session.sessionId,
+        commandId,
+        expectedSessionVersion: session.sessionVersion,
         questionIndex: currentQuestion.questionIndex,
         answer: answer.trim()
       });
+
+      setSession(prev => prev ? {...prev, sessionVersion: response.sessionVersion} : prev);
 
       setAnswer('');
 

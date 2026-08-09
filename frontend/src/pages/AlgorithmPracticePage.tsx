@@ -144,7 +144,7 @@ export default function AlgorithmPracticePage() {
   };
 
   const startAttempt = async () => {
-    if (!problem) return;
+    if (!problem || problem.problemVersionId === null) return;
     setBusy('start');
     setError('');
     try {

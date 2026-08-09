@@ -18,6 +18,7 @@ export interface InterviewSession {
   currentQuestionIndex: number;
   questions: InterviewQuestion[];
   status: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'EVALUATED';
+  sessionVersion: number;
 }
 
 export interface InterviewQuestion {
@@ -57,6 +58,8 @@ export interface CreateInterviewRequest {
 
 export interface SubmitAnswerRequest {
   sessionId: string;
+  commandId?: string;
+  expectedSessionVersion?: number;
   questionIndex: number;
   answer: string;
 }
@@ -66,6 +69,7 @@ export interface SubmitAnswerResponse {
   nextQuestion: InterviewQuestion | null;
   currentIndex: number;
   totalQuestions: number;
+  sessionVersion: number;
 }
 
 export interface CurrentQuestionResponse {

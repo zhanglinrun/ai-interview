@@ -3,7 +3,7 @@
 // 为什么单独一个脚本：rag-query / interview-create / agent-ab 都打 LLM 链路，单请求就要
 // 数秒，且受 API 成本和 @RateLimit 约束，只能做「单请求延迟 smoke」，QPS 没有吞吐意义。
 // 要证明「后端 Web 层在高并发下的吞吐与延迟」，必须压一个不打 LLM、不打外部 embedding 的
-// 纯 DB/Redis 接口。这里选 GET /api/knowledgebase/list（列表查询，走 MySQL + 可能的 Redis）。
+// 纯 DB/Redis 接口。这里选 GET /api/v1/knowledge-bases/list（列表查询，走 MySQL + 可能的 Redis）。
 //
 // 运行：
 //   k6 run -e BASE_URL=http://localhost:8082 -e TOKEN=xxx eval/loadtest/kb-list-throughput.js
@@ -16,7 +16,7 @@
 //
 // 提示：GET 列表接口通常无强限流；若返回 8001，说明命中 @RateLimit，压系统极限时临时调高阈值。
 //
-// 附带用法：把 MODE=missing 传进来会改压 GET /api/knowledgebase/{randomBigId}，
+// 附带用法：把 MODE=missing 传进来会改压 GET /api/v1/knowledge-bases/{randomBigId}，
 // 全部命中「不存在 ID」，用于验证短 TTL 空值缓存对缓存穿透的防护效果
 // （对照：MODE=missing 且后端关闭空值缓存时，DB 查询次数应显著升高）。
 
@@ -58,9 +58,9 @@ function targetUrl() {
   if (MODE === 'missing') {
     // 稳定命中「不存在的知识库 ID」，走空值缓存防穿透路径
     const bigId = 900000000 + Math.floor(Math.random() * 1000);
-    return `${BASE_URL}/api/knowledgebase/${bigId}`;
+    return `${BASE_URL}/api/v1/knowledge-bases/${bigId}`;
   }
-  return `${BASE_URL}/api/knowledgebase/list`;
+  return `${BASE_URL}/api/v1/knowledge-bases/list`;
 }
 
 export function setup() {

@@ -9,14 +9,16 @@ export interface StoredUser {
   userId: number;
   username: string;
   displayName?: string;
+  role?: UserRole;
 }
 
 export interface AuthSession {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string | null;
   userId: number;
   username: string;
   displayName?: string;
+  role?: UserRole;
 }
 
 function hasStorage() {
@@ -41,26 +43,9 @@ export function getRefreshToken(): string | null {
   return window.localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
-/** 解析 JWT payload（不校验签名，仅用于前端读取 claim；鉴权仍以后端为准）。 */
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const part = token.split('.')[1];
-  if (!part) return null;
-  try {
-    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-/** 当前登录用户角色（从 access token 的 role claim 解析，无法解析时返回 null）。 */
+/** 当前登录用户角色。Sa-Token token 是不透明值，角色来自 /auth/me 或登录响应。 */
 export function getUserRole(): UserRole | null {
-  const token = getAccessToken();
-  if (!token) return null;
-  const role = decodeJwtPayload(token)?.role;
+  const role = getStoredUser()?.role;
   return role === 'ADMIN' || role === 'USER' ? role : null;
 }
 
@@ -84,11 +69,16 @@ export function getStoredUser(): StoredUser | null {
 export function setAuthSession(session: AuthSession) {
   if (!hasStorage()) return;
   window.localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken);
-  window.localStorage.setItem(REFRESH_TOKEN_KEY, session.refreshToken);
+  if (session.refreshToken) {
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, session.refreshToken);
+  } else {
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
   window.localStorage.setItem(USER_KEY, JSON.stringify({
     userId: session.userId,
     username: session.username,
     displayName: session.displayName,
+    role: session.role,
   }));
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }

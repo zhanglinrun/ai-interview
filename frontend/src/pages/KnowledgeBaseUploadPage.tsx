@@ -6,6 +6,7 @@ import {
   type DocumentAccessScope,
   type UploadKnowledgeBaseResponse,
 } from '../api/knowledgebase';
+import { documentApi } from '../api/document';
 import {getErrorMessage} from '../api/request';
 import FileUploadCard from '../components/FileUploadCard';
 import FormSection from '../components/ui/FormSection';
@@ -36,19 +37,20 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     setNotice('');
 
     try {
-      const data = await knowledgeBaseApi.uploadKnowledgeBase(
-        file,
-        name,
-        undefined,
-        { accessibleBy, expireDate: expireDate.trim() || undefined },
-      );
-      if (data.duplicate) {
-        setNotice(`该文件已存在，对应知识库「${data.knowledgeBase.name}」，无需重复上传。`);
-        setUploading(false);
-        return;
-      }
-      await knowledgeBaseApi.splitDocument(data.knowledgeBase.id);
-      onUploadComplete(data);
+      const data = await documentApi.upload(file, name, undefined, accessibleBy, expireDate);
+      setNotice(`已接收文档，生成 ${data.segmentCount} 个知识分段，正在异步向量化。`);
+      onUploadComplete({
+        knowledgeBase: {
+          id: data.documentId,
+          name: name || file.name,
+          category: '',
+          fileSize: file.size,
+          contentLength: 0,
+          docStatus: data.status as UploadKnowledgeBaseResponse['knowledgeBase']['docStatus'],
+        },
+        storage: { fileKey: '', fileUrl: '' },
+        duplicate: false,
+      });
     } catch (err: unknown) {
       setError(getErrorMessage(err, '上传失败，请重试'));
       setUploading(false);

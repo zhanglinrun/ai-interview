@@ -24,7 +24,7 @@ import {useTheme} from '../hooks/useTheme';
 import {useEffect, useState} from 'react';
 import MyModelOnboarding from './MyModelOnboarding';
 import {authApi} from '../api/auth';
-import {AUTH_CHANGED_EVENT, getStoredUser, StoredUser} from '../api/authStorage';
+import {useAuthStore} from '../stores/authStore';
 
 interface NavItem {
   id: string;
@@ -62,6 +62,7 @@ export function resolveDocumentTitle(pathname: string): string {
   if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
   if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
   if (pathname === '/agent-trace') return `Agent 编排 Trace · ${APP_NAME}`;
+  if (pathname === '/rag-traces') return `RAG 阶段 Trace · ${APP_NAME}`;
   if (pathname === '/eval') return `RAG 效果评测 · ${APP_NAME}`;
   if (pathname === '/settings') return `设置 · ${APP_NAME}`;
   return APP_NAME;
@@ -72,7 +73,7 @@ export default function Layout() {
   const currentPath = location.pathname;
   const {theme, toggleTheme} = useTheme();
   const navigate = useNavigate();
-  const [user, setUser] = useState<StoredUser | null>(() => getStoredUser());
+  const user = useAuthStore();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -91,16 +92,6 @@ export default function Layout() {
     };
   }, [mobileNavOpen]);
 
-  useEffect(() => {
-    const syncUser = () => setUser(getStoredUser());
-    window.addEventListener(AUTH_CHANGED_EVENT, syncUser);
-    window.addEventListener('storage', syncUser);
-    return () => {
-      window.removeEventListener(AUTH_CHANGED_EVENT, syncUser);
-      window.removeEventListener('storage', syncUser);
-    };
-  }, []);
-
   const handleLogout = () => {
     authApi.logout();
     navigate('/login');
@@ -118,6 +109,7 @@ export default function Layout() {
       items: [
         { id: 'kb-chat', path: '/knowledgebase/chat', label: '知识库问答', icon: MessageSquareText, description: '意图 + RAG' },
         { id: 'agent-trace', path: '/agent-trace', label: 'Agent 编排 Trace', icon: GitBranch, description: '状态机 + Reflexion' },
+        { id: 'rag-traces', path: '/rag-traces', label: 'RAG 阶段 Trace', icon: GitBranch, description: '检索可观测性' },
         { id: 'eval', path: '/eval', label: 'RAG 评测', icon: BrainCircuit, description: '一键固定集' },
         { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database },
       ],
@@ -161,6 +153,9 @@ export default function Layout() {
     }
     if (path === '/agent-trace') {
       return currentPath === '/agent-trace' || currentPath.startsWith('/agent-trace/');
+    }
+    if (path === '/rag-traces') {
+      return currentPath === '/rag-traces' || currentPath.startsWith('/rag-traces/');
     }
     if (path === '/job-practice') {
       return currentPath.startsWith('/job-practice')

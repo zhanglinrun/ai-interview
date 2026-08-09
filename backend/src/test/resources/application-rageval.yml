@@ -48,6 +48,9 @@ elasticsearch:
 app:
   ai:
     rag:
+      multi-source:
+        neo4j:
+          enabled: false
       hybrid:
         enabled: true
         keyword-top-k: 30

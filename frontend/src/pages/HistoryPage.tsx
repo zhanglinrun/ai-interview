@@ -18,7 +18,7 @@ import {
   hasCompletedAnalyzeResult,
   shouldPollAnalyzeResult,
 } from '../utils/analyzeStatus';
-import { ROUTES } from '../constants/routes';
+import { ROUTES } from '../app/routes';
 import {FAST_POLLING_INTERVAL_MS, useConditionalPolling} from '../hooks/useConditionalPolling';
 
 interface HistoryPageProps {

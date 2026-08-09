@@ -58,7 +58,7 @@ export default function (data) {
     payload.knowledgeBaseIds = KB_IDS;
   }
 
-  const res = http.post(`${BASE_URL}/api/interview/sessions`, JSON.stringify(payload),
+  const res = http.post(`${BASE_URL}/api/v1/interviews/sessions`, JSON.stringify(payload),
     { headers: authHeaders(data.token) });
   bizLatency.add(res.timings.duration);
 

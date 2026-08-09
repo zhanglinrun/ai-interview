@@ -1,0 +1,174 @@
+{
+  "entities": [
+    {
+      "entityId": "platform:ai-interview",
+      "name": "AI 面试平台",
+      "normalizedName": "ai_interview_platform",
+      "entityType": "PRODUCT",
+      "aliases": ["面试平台", "AI Interview"],
+      "description": "面向技术面试练习、知识库问答和面试过程编排的应用平台。"
+    },
+    {
+      "entityId": "platform:agent",
+      "name": "Agent",
+      "normalizedName": "agent",
+      "entityType": "CONCEPT",
+      "aliases": ["智能体", "AI Agent"],
+      "description": "能够规划任务、调用工具、维护状态并根据结果继续执行的智能应用组件。"
+    },
+    {
+      "entityId": "platform:langchain",
+      "name": "LangChain",
+      "normalizedName": "langchain",
+      "entityType": "FRAMEWORK",
+      "aliases": ["LangChain Framework"],
+      "description": "用于组织大模型调用、工具、记忆和检索链路的应用开发框架。"
+    },
+    {
+      "entityId": "platform:langgraph",
+      "name": "LangGraph",
+      "normalizedName": "langgraph",
+      "entityType": "FRAMEWORK",
+      "aliases": ["LangGraph Framework"],
+      "description": "以有向图和状态节点编排多步骤 Agent 工作流的框架。"
+    },
+    {
+      "entityId": "platform:langchain4j",
+      "name": "LangChain4j",
+      "normalizedName": "langchain4j",
+      "entityType": "FRAMEWORK",
+      "aliases": ["LangChain for Java"],
+      "description": "Java 生态中的大模型应用开发框架，本项目使用其 RAG 抽象。"
+    },
+    {
+      "entityId": "platform:rag",
+      "name": "RAG",
+      "normalizedName": "rag",
+      "entityType": "CAPABILITY",
+      "aliases": ["检索增强生成", "Retrieval Augmented Generation"],
+      "description": "先检索可信上下文，再把上下文注入大模型生成回答的应用模式。"
+    },
+    {
+      "entityId": "platform:elasticsearch",
+      "name": "Elasticsearch",
+      "normalizedName": "elasticsearch",
+      "entityType": "INFRASTRUCTURE",
+      "aliases": ["ES"],
+      "description": "承担知识库向量检索、全文检索和混合检索的搜索引擎。"
+    },
+    {
+      "entityId": "platform:neo4j",
+      "name": "Neo4j",
+      "normalizedName": "neo4j",
+      "entityType": "DATABASE",
+      "aliases": ["图数据库"],
+      "description": "保存技术实体及其依赖、集成、上下游和路径关系的图数据库。"
+    },
+    {
+      "entityId": "platform:mysql",
+      "name": "MySQL",
+      "normalizedName": "mysql",
+      "entityType": "DATABASE",
+      "aliases": ["关系数据库"],
+      "description": "保存用户、知识库元数据、会话、面试记录等强结构化业务数据。"
+    },
+    {
+      "entityId": "platform:redis",
+      "name": "Redis",
+      "normalizedName": "redis",
+      "entityType": "INFRASTRUCTURE",
+      "aliases": ["缓存", "分布式锁"],
+      "description": "承担会话记忆、热点缓存、分布式锁和短期任务状态。"
+    },
+    {
+      "entityId": "platform:rabbitmq",
+      "name": "RabbitMQ",
+      "normalizedName": "rabbitmq",
+      "entityType": "INFRASTRUCTURE",
+      "aliases": ["消息队列", "MQ"],
+      "description": "承载异步文档处理、向量化和可靠事件通知。"
+    },
+    {
+      "entityId": "platform:spring-boot",
+      "name": "Spring Boot",
+      "normalizedName": "spring_boot",
+      "entityType": "FRAMEWORK",
+      "aliases": ["Spring"],
+      "description": "本项目后端服务的 Java 应用基础框架。"
+    },
+    {
+      "entityId": "platform:llm",
+      "name": "大语言模型",
+      "normalizedName": "llm",
+      "entityType": "MODEL",
+      "aliases": ["LLM", "ChatModel"],
+      "description": "负责意图识别、问题改写、路由、Text2SQL/Text2Cypher 和最终回答生成。"
+    },
+    {
+      "entityId": "platform:bge-reranker",
+      "name": "BGE Reranker",
+      "normalizedName": "bge_reranker",
+      "entityType": "MODEL",
+      "aliases": ["BGE 重排", "Reranker"],
+      "description": "对向量和全文召回候选进行本地语义重排。"
+    },
+    {
+      "entityId": "platform:vector-search",
+      "name": "向量检索",
+      "normalizedName": "vector_search",
+      "entityType": "CAPABILITY",
+      "aliases": ["Embedding 检索", "语义检索"],
+      "description": "用 Embedding 相似度从非结构化知识中召回候选分段。"
+    },
+    {
+      "entityId": "platform:text2sql",
+      "name": "Text2SQL",
+      "normalizedName": "text2sql",
+      "entityType": "CAPABILITY",
+      "aliases": ["自然语言转 SQL"],
+      "description": "把用户关于简历、面试记录和统计的问题转换为只读 SQL。"
+    },
+    {
+      "entityId": "platform:text2cypher",
+      "name": "Text2Cypher",
+      "normalizedName": "text2cypher",
+      "entityType": "CAPABILITY",
+      "aliases": ["自然语言转 Cypher"],
+      "description": "把实体关系、依赖和路径问题转换为只读 Cypher。"
+    },
+    {
+      "entityId": "platform:knowledge-base",
+      "name": "知识库",
+      "normalizedName": "knowledge_base",
+      "entityType": "DOMAIN",
+      "aliases": ["文档知识库"],
+      "description": "由用户上传的 PDF、Word、Markdown 等资料组成的非结构化知识来源。"
+    }
+  ],
+  "relations": [
+    {"relationId": "platform:agent-uses-langchain", "sourceEntityId": "platform:agent", "targetEntityId": "platform:langchain", "relationType": "USES", "description": "Agent 可以使用 LangChain 组织模型、工具和检索链路。", "confidence": 1.0},
+    {"relationId": "platform:agent-uses-langgraph", "sourceEntityId": "platform:agent", "targetEntityId": "platform:langgraph", "relationType": "USES", "description": "Agent 可以使用 LangGraph 编排有状态的多步骤工作流。", "confidence": 1.0},
+    {"relationId": "platform:langgraph-builds-on-langchain", "sourceEntityId": "platform:langgraph", "targetEntityId": "platform:langchain", "relationType": "BUILDS_ON", "description": "LangGraph 的节点通常复用 LangChain 的模型、工具和消息抽象。", "confidence": 1.0},
+    {"relationId": "platform:langchain4j-implements-langchain", "sourceEntityId": "platform:langchain4j", "targetEntityId": "platform:langchain", "relationType": "IMPLEMENTS", "description": "LangChain4j 是 Java 生态中对应的大模型应用框架。", "confidence": 0.9},
+    {"relationId": "platform:ai-interview-uses-agent", "sourceEntityId": "platform:ai-interview", "targetEntityId": "platform:agent", "relationType": "USES", "description": "平台使用 Agent 编排面试规划、追问和评价流程。", "confidence": 1.0},
+    {"relationId": "platform:ai-interview-uses-rag", "sourceEntityId": "platform:ai-interview", "targetEntityId": "platform:rag", "relationType": "USES", "description": "平台使用 RAG 回答知识库和技术面试问题。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-elasticsearch", "sourceEntityId": "platform:rag", "targetEntityId": "platform:elasticsearch", "relationType": "RETRIEVES_FROM", "description": "RAG 从 Elasticsearch 进行向量、全文和混合检索。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-vector-search", "sourceEntityId": "platform:rag", "targetEntityId": "platform:vector-search", "relationType": "USES", "description": "RAG 使用向量检索召回语义相关分段。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-bge-reranker", "sourceEntityId": "platform:rag", "targetEntityId": "platform:bge-reranker", "relationType": "RERANKS", "description": "RAG 使用 BGE Reranker 对召回候选进行本地重排。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-neo4j", "sourceEntityId": "platform:rag", "targetEntityId": "platform:neo4j", "relationType": "ROUTES_TO", "description": "RAG 在实体关系、依赖和路径问题上路由到 Neo4j。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-mysql", "sourceEntityId": "platform:rag", "targetEntityId": "platform:mysql", "relationType": "ROUTES_TO", "description": "RAG 在简历、面试记录和统计问题上路由到 MySQL。", "confidence": 1.0},
+    {"relationId": "platform:rag-uses-llm", "sourceEntityId": "platform:rag", "targetEntityId": "platform:llm", "relationType": "USES", "description": "RAG 使用大语言模型做改写、路由、结构化查询和回答生成。", "confidence": 1.0},
+    {"relationId": "platform:knowledge-base-indexed-by-elasticsearch", "sourceEntityId": "platform:knowledge-base", "targetEntityId": "platform:elasticsearch", "relationType": "INDEXED_BY", "description": "知识库分段向量和全文索引写入 Elasticsearch。", "confidence": 1.0},
+    {"relationId": "platform:text2cypher-uses-neo4j", "sourceEntityId": "platform:text2cypher", "targetEntityId": "platform:neo4j", "relationType": "EXECUTES_ON", "description": "Text2Cypher 只读查询在 Neo4j 上执行。", "confidence": 1.0},
+    {"relationId": "platform:text2sql-uses-mysql", "sourceEntityId": "platform:text2sql", "targetEntityId": "platform:mysql", "relationType": "EXECUTES_ON", "description": "Text2SQL 只读查询在 MySQL 上执行。", "confidence": 1.0},
+    {"relationId": "platform:ai-interview-uses-langchain4j", "sourceEntityId": "platform:ai-interview", "targetEntityId": "platform:langchain4j", "relationType": "BUILT_WITH", "description": "平台后端使用 LangChain4j 连接 RAG 和模型能力。", "confidence": 1.0},
+    {"relationId": "platform:ai-interview-built-with-spring-boot", "sourceEntityId": "platform:ai-interview", "targetEntityId": "platform:spring-boot", "relationType": "BUILT_WITH", "description": "平台后端基于 Spring Boot 构建。", "confidence": 1.0},
+    {"relationId": "platform:spring-boot-integrates-mysql", "sourceEntityId": "platform:spring-boot", "targetEntityId": "platform:mysql", "relationType": "INTEGRATES_WITH", "description": "Spring Boot 通过数据访问层连接 MySQL。", "confidence": 1.0},
+    {"relationId": "platform:spring-boot-integrates-redis", "sourceEntityId": "platform:spring-boot", "targetEntityId": "platform:redis", "relationType": "INTEGRATES_WITH", "description": "Spring Boot 通过缓存和锁组件连接 Redis。", "confidence": 1.0},
+    {"relationId": "platform:spring-boot-integrates-rabbitmq", "sourceEntityId": "platform:spring-boot", "targetEntityId": "platform:rabbitmq", "relationType": "INTEGRATES_WITH", "description": "Spring Boot 通过事件监听和消息组件连接 RabbitMQ。", "confidence": 1.0},
+    {"relationId": "platform:redis-supports-rag", "sourceEntityId": "platform:redis", "targetEntityId": "platform:rag", "relationType": "SUPPORTS", "description": "Redis 支持 RAG 的会话记忆、分段缓存和分布式锁。", "confidence": 1.0},
+    {"relationId": "platform:rabbitmq-supports-knowledge-base", "sourceEntityId": "platform:rabbitmq", "targetEntityId": "platform:knowledge-base", "relationType": "PROCESSES", "description": "RabbitMQ 承载知识库文档处理和向量化事件。", "confidence": 1.0},
+    {"relationId": "platform:agent-uses-rag", "sourceEntityId": "platform:agent", "targetEntityId": "platform:rag", "relationType": "USES", "description": "面试 Agent 可调用 RAG 获取岗位、项目和技术知识上下文。", "confidence": 1.0},
+    {"relationId": "platform:agent-uses-llm", "sourceEntityId": "platform:agent", "targetEntityId": "platform:llm", "relationType": "USES", "description": "Agent 使用大语言模型完成规划、提问、评价和反思。", "confidence": 1.0}
+  ]
+}

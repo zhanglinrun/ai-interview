@@ -1,7 +1,7 @@
 // k6 压测公共辅助：统一 BASE_URL、自动登录换 token、鉴权头。
 //
 // 鉴权两种方式（二选一）：
-//   1) 直接给 access token：  -e TOKEN=eyJ...
+//   1) 直接给 access token：  -e TOKEN=satoken...
 //   2) 给账号密码自动登录：   -e AUTH_USER=admin -e AUTH_PASSWORD=xxx
 // 在脚本的 setup() 里调用一次 resolveToken()，k6 会把返回值传给各 VU 的 default(data)。
 
@@ -18,7 +18,7 @@ export function parseIds(raw, fallback = '') {
 }
 
 /**
- * 获取 access token：优先 -e TOKEN；否则用 -e AUTH_USER/-e AUTH_PASSWORD 登录 /api/auth/login 换取。
+ * 获取 access token：优先 -e TOKEN；否则用 -e AUTH_USER/-e AUTH_PASSWORD 登录 /api/v1/auth/login 换取。
  * 只应在 setup() 中调用一次，避免每个 VU 都登录。返回空串表示匿名（受保护接口会 401）。
  */
 export function resolveToken() {
@@ -32,7 +32,7 @@ export function resolveToken() {
     return '';
   }
   const res = http.post(
-    `${BASE_URL}/api/auth/login`,
+    `${BASE_URL}/api/v1/auth/login`,
     JSON.stringify({ username, password }),
     { headers: { 'Content-Type': 'application/json' } }
   );
@@ -55,7 +55,7 @@ export function resolveToken() {
 export function authHeaders(token, extra = {}) {
   const headers = { 'Content-Type': 'application/json', ...extra };
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    headers.satoken = token;
   }
   return headers;
 }

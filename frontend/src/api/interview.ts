@@ -12,6 +12,10 @@ import type {
 } from '../types/interview';
 import type {EvaluateStatus} from './history';
 
+function newCommandId(): string {
+  return `cmd-${crypto.randomUUID()}`;
+}
+
 export interface TextSessionMeta {
   sessionId: string;
   skillId: string;
@@ -35,14 +39,14 @@ export const interviewApi = {
    * 列出所有文字面试会话
    */
   async listSessions(): Promise<TextSessionMeta[]> {
-    return request.get<TextSessionMeta[]>('/api/interview/sessions');
+    return request.get<TextSessionMeta[]>('/api/v1/interviews/sessions');
   },
 
   /**
    * 创建面试会话
    */
   async createSession(req: CreateInterviewRequest): Promise<InterviewSession> {
-    return request.post<InterviewSession>('/api/interview/sessions', req, {
+    return request.post<InterviewSession>('/api/v1/interviews/sessions', req, {
       timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时，AI生成问题需要时间
     });
   },
@@ -51,14 +55,14 @@ export const interviewApi = {
    * 获取会话信息
    */
   async getSession(sessionId: string): Promise<InterviewSession> {
-    return request.get<InterviewSession>(`/api/interview/sessions/${sessionId}`);
+    return request.get<InterviewSession>(`/api/v1/interviews/sessions/${sessionId}`);
   },
 
   /**
    * 获取当前问题
    */
   async getCurrentQuestion(sessionId: string): Promise<CurrentQuestionResponse> {
-    return request.get<CurrentQuestionResponse>(`/api/interview/sessions/${sessionId}/question`);
+    return request.get<CurrentQuestionResponse>(`/api/v1/interviews/sessions/${sessionId}/question`);
   },
 
   /**
@@ -66,8 +70,13 @@ export const interviewApi = {
    */
   async submitAnswer(req: SubmitAnswerRequest): Promise<SubmitAnswerResponse> {
     return request.post<SubmitAnswerResponse>(
-      `/api/interview/sessions/${req.sessionId}/answers`,
-      { questionIndex: req.questionIndex, answer: req.answer },
+      `/api/v1/interviews/sessions/${req.sessionId}/answers`,
+      {
+        commandId: req.commandId ?? newCommandId(),
+        expectedSessionVersion: req.expectedSessionVersion ?? 0,
+        questionIndex: req.questionIndex,
+        answer: req.answer,
+      },
       {
         timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时
       }
@@ -78,7 +87,7 @@ export const interviewApi = {
    * 获取面试报告
    */
   async getReport(sessionId: string): Promise<InterviewReport> {
-    return request.get<InterviewReport>(`/api/interview/sessions/${sessionId}/report`, {
+    return request.get<InterviewReport>(`/api/v1/interviews/sessions/${sessionId}/report`, {
       timeout: AI_REQUEST_TIMEOUT_MS, // 3分钟超时，AI评估需要时间
     });
   },
@@ -88,7 +97,7 @@ export const interviewApi = {
    */
   async findUnfinishedSession(resumeId: number): Promise<InterviewSession | null> {
     try {
-      return await request.get<InterviewSession>(`/api/interview/sessions/unfinished/${resumeId}`);
+      return await request.get<InterviewSession>(`/api/v1/interviews/sessions/unfinished/${resumeId}`);
     } catch {
       // 如果没有未完成的会话，返回null
       return null;
@@ -100,7 +109,7 @@ export const interviewApi = {
    */
   async saveAnswer(req: SubmitAnswerRequest): Promise<void> {
     return request.put<void>(
-      `/api/interview/sessions/${req.sessionId}/answers`,
+      `/api/v1/interviews/sessions/${req.sessionId}/answers`,
       { questionIndex: req.questionIndex, answer: req.answer }
     );
   },
@@ -109,21 +118,21 @@ export const interviewApi = {
    * 提前交卷
    */
   async completeInterview(sessionId: string): Promise<void> {
-    return request.post<void>(`/api/interview/sessions/${sessionId}/complete`);
+    return request.post<void>(`/api/v1/interviews/sessions/${sessionId}/complete`);
   },
 
   /**
    * 获取会话的面试大纲与进度（Multi-Agent 侧栏进度条）
    */
   async getAgentPlan(sessionId: string): Promise<AgentPlanProgress> {
-    return request.get<AgentPlanProgress>(`/api/interview/sessions/${sessionId}/agent-plan`);
+    return request.get<AgentPlanProgress>(`/api/v1/interviews/sessions/${sessionId}/agent-plan`);
   },
 
   /**
    * 获取会话的 Multi-Agent 决策轨迹（Planner→Interviewer→Critic→Reflexion，按题号分组）
    */
   async getAgentTrace(sessionId: string): Promise<AgentTraceGroup[]> {
-    return request.get<AgentTraceGroup[]>(`/api/interview/sessions/${sessionId}/agent-trace`);
+    return request.get<AgentTraceGroup[]>(`/api/v1/interviews/sessions/${sessionId}/agent-trace`);
   },
 
   /**
@@ -131,6 +140,6 @@ export const interviewApi = {
    */
   async getCandidateProfile(skillId?: string): Promise<CandidateMemoryProfile[]> {
     const qs = skillId ? `?skillId=${encodeURIComponent(skillId)}` : '';
-    return request.get<CandidateMemoryProfile[]>(`/api/interview/candidate-memory/profile${qs}`);
+    return request.get<CandidateMemoryProfile[]>(`/api/v1/interviews/candidate-memory/profile${qs}`);
   },
 };

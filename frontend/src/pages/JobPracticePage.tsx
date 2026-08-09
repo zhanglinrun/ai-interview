@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -66,6 +66,36 @@ function repoDisplayName(repository: GithubRepository): string {
   return `${repository.owner}/${repository.repository}`;
 }
 
+const PREPARATION_RUN_STORAGE_PREFIX = 'ai-interview:job-preparation:';
+
+function preparationRunStorageKey(jobDescriptionId: number): string {
+  return `${PREPARATION_RUN_STORAGE_PREFIX}${jobDescriptionId}`;
+}
+
+function readPreparationRunId(jobDescriptionId: number): string | null {
+  try {
+    return window.sessionStorage.getItem(preparationRunStorageKey(jobDescriptionId));
+  } catch {
+    return null;
+  }
+}
+
+function writePreparationRunId(jobDescriptionId: number, runId: string): void {
+  try {
+    window.sessionStorage.setItem(preparationRunStorageKey(jobDescriptionId), runId);
+  } catch {
+    // 隐私模式或禁用存储时仍允许当前页面继续等待任务。
+  }
+}
+
+function clearPreparationRunId(jobDescriptionId: number): void {
+  try {
+    window.sessionStorage.removeItem(preparationRunStorageKey(jobDescriptionId));
+  } catch {
+    // 忽略浏览器存储不可用，任务本身已在后端持久化。
+  }
+}
+
 export function formatCapabilityWeight(weight: number): string {
   const percentage = Math.round(weight * 1000) / 10;
   return Number.isInteger(percentage) ? `${percentage}%` : `${percentage.toFixed(1)}%`;
@@ -98,6 +128,8 @@ export default function JobPracticePage() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const preparationResumeAttempted = useRef<number | null>(null);
+  const pageActive = useRef(true);
 
   const selectedTarget = useMemo(
     () => targets.find((target) => target.id === selectedTargetId) ?? null,
@@ -157,6 +189,13 @@ export default function JobPracticePage() {
   }, []);
 
   useEffect(() => {
+    pageActive.current = true;
+    return () => {
+      pageActive.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedTarget) {
       setCapabilityDrafts({});
       return;
@@ -170,6 +209,48 @@ export default function JobPracticePage() {
     ]));
     setCapabilityDrafts(nextDrafts);
   }, [selectedTarget]);
+
+  useEffect(() => {
+    if (loading || !selectedTarget || preparationResumeAttempted.current === selectedTarget.id) {
+      return;
+    }
+    const runId = readPreparationRunId(selectedTarget.id);
+    preparationResumeAttempted.current = selectedTarget.id;
+    if (!runId) return;
+
+    let active = true;
+    setBusy('prepare');
+    setError('');
+    setNotice('检测到未完成的面试准备，正在继续处理...');
+    void (async () => {
+      try {
+        const current = await jobInterviewApi.getPreparation(runId);
+        if (current.jobDescriptionId !== selectedTarget.id) {
+          clearPreparationRunId(selectedTarget.id);
+          return;
+        }
+        const ready = current.status === 'READY'
+          ? current
+          : await jobInterviewApi.waitForPreparation(runId);
+        if (!ready.sessionId) {
+          throw new Error('准备任务已结束，但没有生成面试会话');
+        }
+        clearPreparationRunId(selectedTarget.id);
+        if (active) navigate(`/job-practice/session/${encodeURIComponent(ready.sessionId)}`);
+      } catch (reason) {
+        clearPreparationRunId(selectedTarget.id);
+        if (active) {
+          setError(getErrorMessage(reason, '恢复面试准备失败'));
+          setNotice('');
+        }
+      } finally {
+        if (active) setBusy('');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loading, navigate, selectedTarget?.id]);
 
   const chooseTarget = async (id: number) => {
     setSelectedTargetId(id);
@@ -367,16 +448,23 @@ export default function JobPracticePage() {
         codingLanguage,
         regenerate: false,
       });
+      writePreparationRunId(selectedTarget.id, preparation.runId);
       const ready = await jobInterviewApi.waitForPreparation(preparation.runId);
       if (!ready.sessionId) {
         throw new Error('准备任务已结束，但没有生成面试会话');
       }
-      navigate(`/job-practice/session/${encodeURIComponent(ready.sessionId)}`);
+      clearPreparationRunId(selectedTarget.id);
+      if (pageActive.current) {
+        navigate(`/job-practice/session/${encodeURIComponent(ready.sessionId)}`);
+      }
     } catch (reason) {
-      setError(getErrorMessage(reason, '面试准备失败'));
-      setNotice('');
+      clearPreparationRunId(selectedTarget.id);
+      if (pageActive.current) {
+        setError(getErrorMessage(reason, '面试准备失败'));
+        setNotice('');
+      }
     } finally {
-      setBusy('');
+      if (pageActive.current) setBusy('');
     }
   };
 

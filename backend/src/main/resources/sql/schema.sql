@@ -1,4 +1,4 @@
--- AI Interview Platform MySQL Schema (converted from Flyway V1-V10, aligned with industry practice)
+-- AI Interview Platform V2 fresh MySQL schema (initialized as one atomic contract)
 -- Charset: utf8mb4
 
 SET NAMES utf8mb4;
@@ -21,11 +21,38 @@ CREATE TABLE IF NOT EXISTS `users` (
     KEY `idx_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `roles` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+    `code`        VARCHAR(50)  NOT NULL,
+    `name`        VARCHAR(100) NOT NULL,
+    `description` VARCHAR(255) NULL,
+    `created_at`  DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_roles_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `user_roles` (
+    `user_id`     BIGINT      NOT NULL,
+    `role_id`     BIGINT      NOT NULL,
+    `created_at`  DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (`user_id`, `role_id`),
+    CONSTRAINT `fk_user_roles_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_roles_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `roles` (`code`, `name`, `description`) VALUES
+    ('ADMIN', '管理员', '系统管理员'),
+    ('USER', '用户', '普通用户')
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
 INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `display_name`, `role`, `enabled`, `created_at`)
 VALUES (1, 'admin', 'admin@ai-interview.local',
         '$2a$10$ITjz94ki.PdJE90jdYJMrOkwaopW3yLJy73ZbFUkJvGg4.kLjosC.',
         'Default Admin', 'ADMIN', 1, CURRENT_TIMESTAMP(6))
 ON DUPLICATE KEY UPDATE `id` = `id`;
+
+INSERT IGNORE INTO `user_roles` (`user_id`, `role_id`)
+SELECT 1, `id` FROM `roles` WHERE `code` = 'ADMIN';
 
 -- ==================== 简历 ====================
 CREATE TABLE IF NOT EXISTS `resumes` (
@@ -71,7 +98,7 @@ CREATE TABLE IF NOT EXISTS `resume_analyses` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==================== 知识库 ====================
-CREATE TABLE IF NOT EXISTS `knowledge_bases` (
+CREATE TABLE IF NOT EXISTS `documents` (
     `id`                   BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`              BIGINT       NOT NULL DEFAULT 1,
     `file_hash`            VARCHAR(64)  NOT NULL,
@@ -96,11 +123,27 @@ CREATE TABLE IF NOT EXISTS `knowledge_bases` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_kb_user_hash` (`user_id`, `file_hash`),
     KEY `idx_kb_category` (`category`),
-    KEY `idx_knowledge_bases_user_id` (`user_id`),
-    CONSTRAINT `fk_knowledge_bases_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    KEY `idx_documents_user_id` (`user_id`),
+    CONSTRAINT `fk_documents_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
+CREATE TABLE IF NOT EXISTS `document_permissions` (
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT,
+    `document_id`     BIGINT       NOT NULL,
+    `version_id`      BIGINT       NULL,
+    `principal_type`  VARCHAR(32)  NOT NULL,
+    `principal_id`    VARCHAR(128) NOT NULL,
+    `permission`      VARCHAR(32)  NOT NULL DEFAULT 'READ',
+    `expires_at`      DATETIME(6)  NULL,
+    `created_at`      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    `updated_at`      DATETIME(6)  NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_document_permission` (`document_id`, `version_id`, `principal_type`, `principal_id`, `permission`),
+    KEY `idx_document_permission_principal` (`principal_type`, `principal_id`, `permission`),
+    CONSTRAINT `fk_document_permission_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `document_versions` (
     `version_id`         BIGINT       NOT NULL AUTO_INCREMENT,
     `doc_id`             BIGINT       NOT NULL,
     `version`            VARCHAR(32)  NOT NULL,
@@ -127,10 +170,10 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_version` (
     KEY `idx_kbv_upload_user_hash` (`upload_user`, `content_hash`),
     KEY `idx_kbv_embedding_recovery`
         (`status`, `embedding_terminal_failure`, `embedding_next_retry_at`, `embedding_claimed_at`),
-    CONSTRAINT `fk_kbv_doc` FOREIGN KEY (`doc_id`) REFERENCES `knowledge_bases` (`id`)
+    CONSTRAINT `fk_kbv_doc` FOREIGN KEY (`doc_id`) REFERENCES `documents` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `knowledge_base_segment` (
+CREATE TABLE IF NOT EXISTS `document_segments` (
     `id`                  BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`             BIGINT       NOT NULL,
     `text`                TEXT         NOT NULL,
@@ -166,8 +209,8 @@ CREATE TABLE IF NOT EXISTS `knowledge_base_segment` (
     CONSTRAINT `fk_kbs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==================== RAG 聊天 ====================
-CREATE TABLE IF NOT EXISTS `rag_chat_sessions` (
+-- ==================== 统一聊天与长期记忆 ====================
+CREATE TABLE IF NOT EXISTS `chat_sessions` (
     `id`             BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`        BIGINT       NOT NULL DEFAULT 1,
     `title`          VARCHAR(255) NOT NULL,
@@ -178,11 +221,11 @@ CREATE TABLE IF NOT EXISTS `rag_chat_sessions` (
     `is_pinned`      TINYINT(1)   NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     KEY `idx_rag_session_updated` (`updated_at`),
-    KEY `idx_rag_chat_sessions_user_id` (`user_id`),
-    CONSTRAINT `fk_rag_chat_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    KEY `idx_chat_sessions_user_id` (`user_id`),
+    CONSTRAINT `fk_chat_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `rag_chat_messages` (
+CREATE TABLE IF NOT EXISTS `chat_messages` (
     `id`                 BIGINT      NOT NULL AUTO_INCREMENT,
     `session_id`         BIGINT      NOT NULL,
     `type`               VARCHAR(20) NOT NULL,
@@ -193,9 +236,9 @@ CREATE TABLE IF NOT EXISTS `rag_chat_messages` (
     `updated_at`         DATETIME(6) NULL,
     `completed`          TINYINT(1)  NULL DEFAULT 1,
     PRIMARY KEY (`id`),
-    KEY `idx_rag_message_session` (`session_id`),
-    KEY `idx_rag_message_order` (`session_id`, `message_order`),
-    CONSTRAINT `fk_rag_chat_messages_session` FOREIGN KEY (`session_id`) REFERENCES `rag_chat_sessions` (`id`)
+    KEY `idx_chat_message_session` (`session_id`),
+    KEY `idx_chat_message_order` (`session_id`, `message_order`),
+    CONSTRAINT `fk_chat_messages_session` FOREIGN KEY (`session_id`) REFERENCES `chat_sessions` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `rag_session_knowledge_bases` (
@@ -203,8 +246,8 @@ CREATE TABLE IF NOT EXISTS `rag_session_knowledge_bases` (
     `knowledge_base_id`  BIGINT NOT NULL,
     PRIMARY KEY (`session_id`, `knowledge_base_id`),
     KEY `idx_rskb_kb_id` (`knowledge_base_id`),
-    CONSTRAINT `fk_rskb_session` FOREIGN KEY (`session_id`) REFERENCES `rag_chat_sessions` (`id`),
-    CONSTRAINT `fk_rskb_kb` FOREIGN KEY (`knowledge_base_id`) REFERENCES `knowledge_bases` (`id`)
+    CONSTRAINT `fk_rskb_session` FOREIGN KEY (`session_id`) REFERENCES `chat_sessions` (`id`),
+    CONSTRAINT `fk_rskb_kb` FOREIGN KEY (`knowledge_base_id`) REFERENCES `documents` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `rag_evaluation_runs` (
@@ -269,15 +312,98 @@ CREATE TABLE IF NOT EXISTS `eval_runs` (
     KEY `idx_eval_runs_regression` (`regression`, `created_at` DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 评测数据集与逐案例结果；eval_runs 仅保留运行摘要和模型原始快照。
+CREATE TABLE IF NOT EXISTS `eval_datasets` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `dataset_key`    VARCHAR(100) NOT NULL,
+    `name`           VARCHAR(160) NOT NULL,
+    `domain`         VARCHAR(64)  NULL,
+    `version`        VARCHAR(32)  NOT NULL DEFAULT '1.0.0',
+    `description`    VARCHAR(500) NULL,
+    `owner_user_id`  BIGINT       NULL,
+    `status`         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+    `created_at`     DATETIME(6)  NOT NULL,
+    `updated_at`     DATETIME(6)  NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_eval_datasets_key_version` (`dataset_key`, `version`),
+    KEY `idx_eval_datasets_owner` (`owner_user_id`),
+    CONSTRAINT `fk_eval_datasets_owner` FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `eval_cases` (
+    `id`                     BIGINT        NOT NULL AUTO_INCREMENT,
+    `dataset_id`             BIGINT        NOT NULL,
+    `case_key`               VARCHAR(100)  NOT NULL,
+    `case_type`              VARCHAR(32)   NOT NULL,
+    `question`               TEXT          NOT NULL,
+    `expected_intent`        VARCHAR(80)   NULL,
+    `expected_route`         VARCHAR(40)   NULL,
+    `expected_evidence_json` TEXT          NULL,
+    `expected_answer`        TEXT          NULL,
+    `conversation_json`      TEXT          NULL,
+    `metadata_json`          TEXT          NULL,
+    `created_at`             DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_eval_cases_dataset_key` (`dataset_id`, `case_key`),
+    KEY `idx_eval_cases_type` (`dataset_id`, `case_type`),
+    CONSTRAINT `fk_eval_cases_dataset` FOREIGN KEY (`dataset_id`) REFERENCES `eval_datasets` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `eval_results` (
+    `id`                 BIGINT        NOT NULL AUTO_INCREMENT,
+    `eval_run_id`        BIGINT        NOT NULL,
+    `case_id`            BIGINT        NULL,
+    `actual_intent`      VARCHAR(80)   NULL,
+    `actual_route`       VARCHAR(40)   NULL,
+    `recall_at_k`        DOUBLE        NULL,
+    `precision_at_k`     DOUBLE        NULL,
+    `mrr`                DOUBLE        NULL,
+    `ndcg`               DOUBLE        NULL,
+    `citation_coverage`  DOUBLE        NULL,
+    `groundedness`       DOUBLE        NULL,
+    `relevance`          DOUBLE        NULL,
+    `accuracy`           DOUBLE        NULL,
+    `completeness`       DOUBLE        NULL,
+    `helpfulness`        DOUBLE        NULL,
+    `latency_ms`         BIGINT        NULL,
+    `status`             VARCHAR(20)   NOT NULL DEFAULT 'COMPLETED',
+    `failure_reason`     VARCHAR(500)  NULL,
+    `details_json`       TEXT          NULL,
+    `created_at`         DATETIME(6)  NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_eval_results_run_case` (`eval_run_id`, `case_id`),
+    KEY `idx_eval_results_run_status` (`eval_run_id`, `status`),
+    CONSTRAINT `fk_eval_results_run` FOREIGN KEY (`eval_run_id`) REFERENCES `eval_runs` (`id`),
+    CONSTRAINT `fk_eval_results_case` FOREIGN KEY (`case_id`) REFERENCES `eval_cases` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `eval_baselines` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `baseline_key`   VARCHAR(80)  NOT NULL,
+    `eval_run_id`    BIGINT       NOT NULL,
+    `metric_json`    TEXT         NOT NULL,
+    `threshold`      DOUBLE       NOT NULL DEFAULT 0.05,
+    `created_at`     DATETIME(6)  NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_eval_baselines_key_run` (`baseline_key`, `eval_run_id`),
+    KEY `idx_eval_baselines_key_created` (`baseline_key`, `created_at` DESC),
+    CONSTRAINT `fk_eval_baselines_run` FOREIGN KEY (`eval_run_id`) REFERENCES `eval_runs` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     `id`                      BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`                 BIGINT       NOT NULL,
     `trace_id`                VARCHAR(80)  NOT NULL,
+    `rag_run_id`              VARCHAR(80)  NULL,
     `question`                TEXT         NOT NULL,
     `rewritten_question`      TEXT         NULL,
     `decomposed_queries_json` TEXT         NULL,
     `crag_grade`              VARCHAR(20)  NULL,
     `crag_action`             VARCHAR(200) NULL,
+    `route_source`            VARCHAR(32)  NULL,
+    `route_intent`            VARCHAR(120) NULL,
+    `route_confidence`        DOUBLE       NULL,
+    `route_reasoning`         VARCHAR(500) NULL,
     `knowledge_base_ids_json` TEXT         NULL,
     `evidence_scope_json`     TEXT         NULL,
     `evidence_status`         VARCHAR(20)  NULL,
@@ -292,8 +418,25 @@ CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     `latency_ms`              BIGINT       NULL,
     `created_at`              DATETIME(6)  NOT NULL,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_rag_trace_id` (`trace_id`),
+    KEY `idx_rag_query_traces_trace_created` (`trace_id`, `created_at` DESC),
+    KEY `idx_rag_query_traces_rag_run` (`rag_run_id`),
     KEY `idx_rag_query_traces_user_created` (`user_id`, `created_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Text2SQL Schema 目录：只暴露启用且在白名单内的业务表结构给模型。
+CREATE TABLE IF NOT EXISTS `rag_table_meta` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+    `table_name`   VARCHAR(64)  NOT NULL,
+    `schema_ddl`   TEXT         NOT NULL,
+    `description`  VARCHAR(500) NULL,
+    `enabled`      TINYINT(1)   NOT NULL DEFAULT 1,
+    `version`      VARCHAR(32)  NOT NULL DEFAULT '1.0.0',
+    `created_at`   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    `updated_at`   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+                                  ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_rag_table_meta_name` (`table_name`),
+    KEY `idx_rag_table_meta_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==================== 文字面试 ====================
@@ -438,6 +581,8 @@ CREATE TABLE IF NOT EXISTS `interview_commands` (
     `user_id`                  BIGINT        NOT NULL,
     `session_id`               VARCHAR(36)   NOT NULL,
     `command_id`               VARCHAR(64)   NOT NULL,
+    `trace_id`                 VARCHAR(64)   NULL,
+    `agent_run_id`             VARCHAR(64)   NULL,
     `command_type`             VARCHAR(32)   NOT NULL,
     `expected_session_version` BIGINT        NOT NULL,
     `status`                   VARCHAR(20)   NOT NULL,
@@ -450,6 +595,7 @@ CREATE TABLE IF NOT EXISTS `interview_commands` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_interview_command` (`session_id`, `command_id`),
     KEY `idx_interview_command_user_session` (`user_id`, `session_id`, `created_at` DESC),
+    KEY `idx_interview_command_trace` (`trace_id`, `created_at` DESC),
     CONSTRAINT `fk_interview_command_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -459,11 +605,13 @@ CREATE TABLE IF NOT EXISTS `interview_session_events` (
     `user_id`         BIGINT        NOT NULL,
     `session_id`      VARCHAR(36)   NOT NULL,
     `event_type`      VARCHAR(40)   NOT NULL,
+    `source_trace_id` VARCHAR(64)   NULL,
     `session_version` BIGINT        NOT NULL,
     `payload_json`    TEXT          NULL,
     `created_at`      DATETIME(6)   NOT NULL,
     PRIMARY KEY (`id`),
     KEY `idx_interview_event_reconnect` (`user_id`, `session_id`, `id`),
+    KEY `idx_interview_event_trace` (`source_trace_id`, `created_at` DESC),
     CONSTRAINT `fk_interview_event_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -490,9 +638,40 @@ CREATE TABLE IF NOT EXISTS `interview_code_drafts` (
     CONSTRAINT `fk_interview_code_question` FOREIGN KEY (`question_id`) REFERENCES `interview_questions` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Multi-Agent 编排轨迹（Planner/Interviewer/Critic/Evaluator 决策步骤，按会话回放）
-CREATE TABLE IF NOT EXISTS `agent_run_steps` (
+-- Multi-Agent 编排轨迹（Planner/Interviewer/Critic/Evaluator 运行摘要）
+CREATE TABLE IF NOT EXISTS `agent_runs` (
     `id`              BIGINT        NOT NULL AUTO_INCREMENT,
+    `run_id`          VARCHAR(64)   NOT NULL,
+    `trace_id`        VARCHAR(64)   NULL,
+    `command_id`      VARCHAR(64)   NULL,
+    `operation`       VARCHAR(64)   NOT NULL DEFAULT 'interview',
+    `root_span_id`    VARCHAR(64)   NULL,
+    `user_id`         BIGINT        NOT NULL DEFAULT 1,
+    `session_id`      VARCHAR(36)   NOT NULL,
+    `question_index`  INT           NULL,
+    `status`          VARCHAR(32)   NOT NULL,
+    `input_summary`   TEXT          NULL,
+    `output_summary`  TEXT          NULL,
+    `latency_ms`      BIGINT        NULL,
+    `degraded_reason` VARCHAR(255)  NULL,
+    `created_at`      DATETIME(6)   NOT NULL,
+    `completed_at`    DATETIME(6)   NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_agent_runs_run_id` (`run_id`),
+    UNIQUE KEY `uk_agent_runs_command_operation` (`session_id`, `command_id`, `operation`),
+    KEY `idx_agent_runs_trace` (`trace_id`, `created_at`),
+    KEY `idx_agent_runs_session` (`session_id`, `created_at`),
+    KEY `idx_agent_runs_user` (`user_id`),
+    CONSTRAINT `fk_agent_runs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Multi-Agent 编排轨迹步骤（按运行回放）
+CREATE TABLE IF NOT EXISTS `agent_steps` (
+    `id`              BIGINT        NOT NULL AUTO_INCREMENT,
+    `run_id`          VARCHAR(64)   NULL,
+    `trace_id`        VARCHAR(64)   NULL,
+    `span_id`         VARCHAR(64)   NULL,
+    `parent_span_id`  VARCHAR(64)   NULL,
     `user_id`         BIGINT        NOT NULL DEFAULT 1,
     `session_id`      VARCHAR(36)   NOT NULL,
     `question_index`  INT           NULL,
@@ -501,14 +680,51 @@ CREATE TABLE IF NOT EXISTS `agent_run_steps` (
     `action`          VARCHAR(64)   NOT NULL,
     `action_input`    TEXT          NULL,
     `observation`     TEXT          NULL,
+    `status`          VARCHAR(20)   NOT NULL DEFAULT 'COMPLETED',
+    `latency_ms`      BIGINT        NULL,
+    `metadata_json`   TEXT          NULL,
     `created_at`      DATETIME(6)   NOT NULL,
     PRIMARY KEY (`id`),
-    KEY `idx_agent_run_steps_session` (`session_id`, `id`),
-    KEY `idx_agent_run_steps_user` (`user_id`)
+    KEY `idx_agent_steps_run` (`run_id`, `id`),
+    KEY `idx_agent_steps_trace` (`trace_id`, `created_at`),
+    KEY `idx_agent_steps_session` (`session_id`, `id`),
+    KEY `idx_agent_steps_user` (`user_id`),
+    CONSTRAINT `fk_agent_steps_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Agent 工具执行审计；只保存脱敏摘要和执行状态，不保存完整输入输出。
+CREATE TABLE IF NOT EXISTS `agent_tool_runs` (
+    `id`                BIGINT        NOT NULL AUTO_INCREMENT,
+    `tool_run_id`       VARCHAR(80)   NOT NULL,
+    `agent_run_id`      VARCHAR(64)   NULL,
+    `rag_run_id`        VARCHAR(80)   NULL,
+    `trace_id`          VARCHAR(64)   NOT NULL,
+    `session_id`        VARCHAR(36)   NULL,
+    `user_id`           BIGINT        NOT NULL,
+    `span_id`           VARCHAR(64)   NULL,
+    `parent_span_id`    VARCHAR(64)   NULL,
+    `tool_name`         VARCHAR(64)   NOT NULL,
+    `status`            VARCHAR(20)   NOT NULL,
+    `cache_hit`         TINYINT(1)    NOT NULL DEFAULT 0,
+    `retry_count`       INT           NOT NULL DEFAULT 0,
+    `input_summary`     VARCHAR(1000) NULL,
+    `output_summary`    VARCHAR(1000) NULL,
+    `fallback_reason`   VARCHAR(255)  NULL,
+    `error_code`        VARCHAR(64)   NULL,
+    `latency_ms`        BIGINT        NULL,
+    `started_at`        DATETIME(6)   NOT NULL,
+    `completed_at`      DATETIME(6)   NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_agent_tool_run_id` (`tool_run_id`),
+    KEY `idx_agent_tool_trace_time` (`trace_id`, `started_at` DESC),
+    KEY `idx_agent_tool_agent_time` (`agent_run_id`, `started_at` DESC),
+    KEY `idx_agent_tool_rag_time` (`rag_run_id`, `started_at` DESC),
+    KEY `idx_agent_tool_user_time` (`user_id`, `started_at` DESC),
+    CONSTRAINT `fk_agent_tool_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 跨会话能力观测（逐题评估沉淀，按能力原子聚合为画像）
-CREATE TABLE IF NOT EXISTS `candidate_memory` (
+CREATE TABLE IF NOT EXISTS `chat_memories` (
     `id`                 BIGINT        NOT NULL AUTO_INCREMENT,
     `user_id`            BIGINT        NOT NULL,
     `skill_id`           VARCHAR(64)   NULL,
@@ -522,10 +738,10 @@ CREATE TABLE IF NOT EXISTS `candidate_memory` (
     `session_id`         VARCHAR(36)   NULL,
     `created_at`         DATETIME(6)   NOT NULL,
     PRIMARY KEY (`id`),
-    KEY `idx_candidate_memory_user_skill` (`user_id`, `skill_id`, `created_at` DESC),
-    KEY `idx_candidate_memory_user_topic` (`user_id`, `topic`),
-    KEY `idx_candidate_memory_user_atom` (`user_id`, `capability_atom_id`, `created_at` DESC),
-    UNIQUE KEY `uk_candidate_memory_session_question` (`session_id`, `question_index`)
+    KEY `idx_chat_memories_user_skill` (`user_id`, `skill_id`, `created_at` DESC),
+    KEY `idx_chat_memories_user_topic` (`user_id`, `topic`),
+    KEY `idx_chat_memories_user_atom` (`user_id`, `capability_atom_id`, `created_at` DESC),
+    UNIQUE KEY `uk_chat_memories_session_question` (`session_id`, `question_index`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `interview_schedule` (
@@ -796,7 +1012,7 @@ CREATE TABLE IF NOT EXISTS `job_capability_mappings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==================== 文档精准解析与证据快照 ====================
-CREATE TABLE IF NOT EXISTS `document_parse_tasks` (
+CREATE TABLE IF NOT EXISTS `document_tasks` (
     `id`                BIGINT        NOT NULL AUTO_INCREMENT,
     `user_id`           BIGINT        NOT NULL,
     `document_id`       BIGINT        NOT NULL,
@@ -1226,11 +1442,118 @@ CREATE TABLE IF NOT EXISTS `llm_usage_records` (
     `retry_count`      INT            NOT NULL DEFAULT 0,
     `degraded_reason`  VARCHAR(255)   NULL,
     `trace_id`         VARCHAR(64)    NULL,
+    `agent_run_id`     VARCHAR(64)    NULL,
+    `rag_run_id`       VARCHAR(80)    NULL,
+    `span_id`          VARCHAR(64)    NULL,
     `created_at`       DATETIME(6)    NOT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_llm_usage_id` (`usage_id`),
     KEY `idx_llm_usage_user_time` (`user_id`, `created_at` DESC),
     KEY `idx_llm_usage_session` (`user_id`, `session_id`, `created_at` DESC),
+    KEY `idx_llm_usage_trace` (`trace_id`, `created_at` DESC),
     CONSTRAINT `fk_llm_usage_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ==================== RAG 阶段化 Trace V2 ====================
+-- 宽表 rag_query_traces 仅作为历史摘要保留；新链路写入以下可查询的阶段表。
+CREATE TABLE IF NOT EXISTS `rag_runs` (
+    `id`             BIGINT        NOT NULL AUTO_INCREMENT,
+    `rag_run_id`     VARCHAR(80)   NOT NULL,
+    `trace_id`       VARCHAR(80)   NOT NULL,
+    `agent_run_id`   VARCHAR(64)   NULL,
+    `root_span_id`   VARCHAR(64)   NULL,
+    `user_id`        BIGINT        NOT NULL,
+    `session_id`     VARCHAR(80)   NULL,
+    `question`       VARCHAR(4000) NOT NULL,
+    `status`         VARCHAR(20)   NOT NULL,
+    `route_source`   VARCHAR(64)   NULL,
+    `route_intent`   VARCHAR(120)  NULL,
+    `latency_ms`     BIGINT        NULL,
+    `degraded_reason` VARCHAR(255)  NULL,
+    `answer_summary` VARCHAR(4000) NULL,
+    `created_at`     DATETIME(6)   NOT NULL,
+    `completed_at`   DATETIME(6)   NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_rag_run_id` (`rag_run_id`),
+    KEY `idx_rag_run_trace` (`trace_id`, `created_at` DESC),
+    KEY `idx_rag_run_agent` (`agent_run_id`, `created_at` DESC),
+    KEY `idx_rag_run_user_time` (`user_id`, `created_at` DESC),
+    KEY `idx_rag_run_status` (`status`),
+    CONSTRAINT `fk_rag_run_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rag_stage_runs` (
+    `id`             BIGINT        NOT NULL AUTO_INCREMENT,
+    `rag_run_id`     VARCHAR(80)   NOT NULL,
+    `stage`          VARCHAR(32)   NOT NULL,
+    `status`         VARCHAR(20)   NOT NULL,
+    `data_source`    VARCHAR(64)   NULL,
+    `input_summary`  VARCHAR(4000) NULL,
+    `output_summary` VARCHAR(4000) NULL,
+    `metadata_json`  TEXT          NULL,
+    `provider`       VARCHAR(64)   NULL,
+    `model_name`     VARCHAR(128)  NULL,
+    `input_tokens`   INT           NULL,
+    `output_tokens`  INT           NULL,
+    `filter_json`    TEXT          NULL,
+    `fallback_reason` VARCHAR(1000) NULL,
+    `started_at`     DATETIME(6)   NOT NULL,
+    `completed_at`   DATETIME(6)   NULL,
+    `latency_ms`     BIGINT        NULL,
+    `error_message`  VARCHAR(1000) NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_rag_stage_run_time` (`rag_run_id`, `started_at`),
+    CONSTRAINT `fk_rag_stage_run` FOREIGN KEY (`rag_run_id`) REFERENCES `rag_runs` (`rag_run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rag_retrieval_candidates` (
+    `id`             BIGINT        NOT NULL AUTO_INCREMENT,
+    `rag_run_id`     VARCHAR(80)   NOT NULL,
+    `stage`          VARCHAR(32)   NOT NULL,
+    `rank_no`        INT           NULL,
+    `source_type`    VARCHAR(64)   NULL,
+    `document_id`    VARCHAR(191)  NULL,
+    `segment_id`     VARCHAR(191)  NULL,
+    `evidence_id`    VARCHAR(191)  NULL,
+    `score`          DOUBLE        NULL,
+    `rerank_score`   DOUBLE        NULL,
+    `snippet`        VARCHAR(1000) NULL,
+    `metadata_json`  TEXT          NULL,
+    `permission_allowed` TINYINT(1) NULL,
+    `version_matched`    TINYINT(1) NULL,
+    `filter_reason`      VARCHAR(1000) NULL,
+    `created_at`     DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_rag_candidate_run_stage` (`rag_run_id`, `stage`, `rank_no`),
+    CONSTRAINT `fk_rag_candidate_run` FOREIGN KEY (`rag_run_id`) REFERENCES `rag_runs` (`rag_run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rag_citations` (
+    `id`              BIGINT        NOT NULL AUTO_INCREMENT,
+    `rag_run_id`      VARCHAR(80)   NOT NULL,
+    `citation_index`  INT           NOT NULL,
+    `evidence_id`     VARCHAR(191)  NULL,
+    `source_locator`  VARCHAR(1000) NULL,
+    `cited`           TINYINT(1)    NOT NULL DEFAULT 0,
+    `valid`           TINYINT(1)    NOT NULL DEFAULT 1,
+    `confidence`      DOUBLE        NULL,
+    `created_at`      DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_rag_citation_run` (`rag_run_id`, `citation_index`),
+    CONSTRAINT `fk_rag_citation_run` FOREIGN KEY (`rag_run_id`) REFERENCES `rag_runs` (`rag_run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rag_answer_snapshots` (
+    `id`                    BIGINT        NOT NULL AUTO_INCREMENT,
+    `rag_run_id`            VARCHAR(80)   NOT NULL,
+    `answer`                VARCHAR(4000) NULL,
+    `grounded_status`       VARCHAR(32)   NULL,
+    `confidence`            DOUBLE        NULL,
+    `invalid_citations_json` TEXT         NULL,
+    `token_count`           INT           NULL,
+    `created_at`            DATETIME(6)   NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_rag_answer_run_time` (`rag_run_id`, `created_at` DESC),
+    CONSTRAINT `fk_rag_answer_run` FOREIGN KEY (`rag_run_id`) REFERENCES `rag_runs` (`rag_run_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

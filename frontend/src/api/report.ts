@@ -123,22 +123,22 @@ async function waitForReport(sessionId: string, initial: ReportView): Promise<Re
 
 export const reportApi = {
   get: (sessionId: string) => request.get<ReportView>(
-    `/api/reports/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/v1/reports/sessions/${encodeURIComponent(sessionId)}`,
   ),
   generate: (sessionId: string) => request.post<ReportView>(
-    `/api/reports/sessions/${encodeURIComponent(sessionId)}/generate`,
+    `/api/v1/reports/sessions/${encodeURIComponent(sessionId)}/generate`,
     undefined,
     { timeout: AI_REQUEST_TIMEOUT_MS },
   ),
   retry: (sessionId: string) => request.post<ReportView>(
-    `/api/reports/sessions/${encodeURIComponent(sessionId)}/retry`,
+    `/api/v1/reports/sessions/${encodeURIComponent(sessionId)}/retry`,
     undefined,
     { timeout: AI_REQUEST_TIMEOUT_MS },
   ),
   waitForReport,
-  listCapabilityProfile: () => request.get<CapabilityProfileItem[]>('/api/capability-profile'),
+  listCapabilityProfile: () => request.get<CapabilityProfileItem[]>('/api/v1/capability-profile'),
   listTrainingTasks: (status?: TrainingStatus) => request.get<TrainingTask[]>(
-    '/api/training/tasks',
+    '/api/v1/training/tasks',
     { params: status ? { status } : undefined },
   ),
   createTrainingTask: (body: {
@@ -146,12 +146,12 @@ export const reportApi = {
     trainingType: TrainingType;
     question?: string;
     evidenceScopes?: string[];
-  }) => request.post<TrainingTask>('/api/training/tasks', body),
+  }) => request.post<TrainingTask>('/api/v1/training/tasks', body),
   recordTrainingInteraction: (
     taskId: string,
     body: { hintUsed?: boolean; answerViewed?: boolean; redo?: boolean },
   ) => request.post<TrainingTask>(
-    `/api/training/tasks/${encodeURIComponent(taskId)}/interactions`,
+    `/api/v1/training/tasks/${encodeURIComponent(taskId)}/interactions`,
     body,
   ),
   completeTrainingTask: (
@@ -165,9 +165,9 @@ export const reportApi = {
       observation?: string;
     },
   ) => request.post<TrainingTask>(
-    `/api/training/tasks/${encodeURIComponent(taskId)}/complete`,
+    `/api/v1/training/tasks/${encodeURIComponent(taskId)}/complete`,
     body,
   ),
   listLlmUsage: (params?: { sessionId?: string; reportId?: string; limit?: number }) =>
-    request.get<LlmUsageItem[]>('/api/llm-usage', { params }),
+    request.get<LlmUsageItem[]>('/api/v1/llm-usage', { params }),
 };

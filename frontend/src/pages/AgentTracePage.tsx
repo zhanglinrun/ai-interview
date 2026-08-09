@@ -12,6 +12,7 @@ import type {
 import { EmptyState, LoadingState } from '../components/PageState';
 import PageHeader from '../components/ui/PageHeader';
 import { formatDate } from '../utils/date';
+import { unifiedTraceApi, type UnifiedTrace } from '../api/unifiedTrace';
 
 /** Map raw trace actions to demo-friendly orchestration states. */
 export function resolveOrchestrationState(step: AgentTraceStep): string {
@@ -61,6 +62,7 @@ export default function AgentTracePage() {
   const [groups, setGroups] = useState<AgentTraceGroup[]>([]);
   const [plan, setPlan] = useState<AgentPlanProgress | null>(null);
   const [profile, setProfile] = useState<CandidateMemoryProfile[]>([]);
+  const [unified, setUnified] = useState<UnifiedTrace | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingTrace, setLoadingTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +98,7 @@ export default function AgentTracePage() {
     if (!selectedId) {
       setGroups([]);
       setPlan(null);
+      setUnified(null);
       return;
     }
     setLoadingTrace(true);
@@ -103,14 +106,17 @@ export default function AgentTracePage() {
     Promise.all([
       interviewApi.getAgentTrace(selectedId),
       interviewApi.getAgentPlan(selectedId).catch(() => null),
+      unifiedTraceApi.timeline(selectedId).catch(() => null),
     ])
-      .then(([trace, planProgress]) => {
+      .then(([trace, planProgress, timeline]) => {
         setGroups(trace);
         setPlan(planProgress);
+        setUnified(timeline);
       })
       .catch(err => {
         setGroups([]);
         setPlan(null);
+        setUnified(null);
         setError(getErrorMessage(err, '加载 Agent Trace 失败（可能非 Agent 模式会话）'));
       })
       .finally(() => setLoadingTrace(false));
@@ -177,6 +183,30 @@ export default function AgentTracePage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {unified && (
+        <section className="surface-card space-y-2 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-stone-900 dark:text-white">统一 Trace 时间线</h2>
+            <span className="text-xs text-stone-500">
+              Agent {unified.agentRuns.length} · RAG {unified.ragRuns.length} · Tool {unified.toolRuns.length} · LLM {unified.llmUsage.length}
+            </span>
+          </div>
+          <p className="text-xs text-stone-500">
+            一场面试包含多个 HTTP trace；此处按 sessionId 聚合，避免把整场面试误认为一次请求。
+          </p>
+          <ol className="space-y-1 text-xs text-stone-600 dark:text-stone-300">
+            {unified.timeline.slice(0, 12).map((event, index) => (
+              <li key={`${event.kind}-${event.id}-${index}`} className="flex flex-wrap items-center gap-2 rounded border border-stone-100 px-2 py-1 dark:border-stone-800">
+                <span className="font-medium">{event.kind}</span>
+                <span>{event.status}</span>
+                <span className="text-stone-400">{event.latencyMs ?? 0} ms</span>
+                <span className="ml-auto text-stone-400">{event.id}</span>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
 

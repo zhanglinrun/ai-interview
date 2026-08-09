@@ -46,7 +46,7 @@ springdoc:
     operations-sorter: alpha
   api-docs:
     path: /v3/api-docs
-  packages-to-scan: com.linrun.interview.modules
+  packages-to-scan: com.linrun.interview
 
 spring:
   config:
@@ -64,7 +64,7 @@ spring:
   # MySQL + Druid（对齐业界实践）
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:ai_interview}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:ai_interview_v2}?rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:ai_interview}
     password: ${MYSQL_PASSWORD:ai_interview}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -84,7 +84,7 @@ spring:
       filters: stat,wall
       connection-properties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
       stat-view-servlet:
-        # 默认关闭 Druid 监控台（/druid/* 不在 JWT 拦截范围内，公网暴露 + 弱口令有泄漏 SQL 风险）。
+        # 默认关闭 Druid 监控台，避免公网暴露内部 SQL 监控接口。
         # 需要时用环境变量显式开启，并务必设置强口令，不再使用 admin/admin。
         enabled: ${DRUID_STAT_VIEW_ENABLED:false}
         url-pattern: /druid/*
@@ -127,6 +127,20 @@ spring:
           subscriptionConnectionPoolSize: 50
   
   # LangChain4j 配置（chat + embedding 由 app.ai.providers 驱动 LlmProviderRegistry 手动构造）
+
+# Sa-Token：统一会话和 Redis 持久化。开发环境可使用本地 Redis，生产环境必须配置独立实例。
+sa-token:
+  token-name: ${SA_TOKEN_NAME:satoken}
+  timeout: ${SA_TOKEN_TIMEOUT:2592000}
+  active-timeout: ${SA_TOKEN_ACTIVE_TIMEOUT:86400}
+  is-concurrent: true
+  is-share: false
+  is-log: ${SA_TOKEN_LOG:false}
+  token-style: uuid
+  is-read-header: true
+  is-read-cookie: ${SA_TOKEN_READ_COOKIE:false}
+  is-read-body: false
+  alone-auth: false
 
 # MyBatis-Plus 配置（对齐业界实践）
 mybatis-plus:
@@ -185,6 +199,39 @@ file:
 
 # Application custom configuration
 app:
+  dingtalk:
+    enabled: ${APP_DINGTALK_ENABLED:false}
+    app-key: ${DINGTALK_APP_KEY:}
+    app-secret: ${DINGTALK_APP_SECRET:}
+    verification-token: ${DINGTALK_VERIFICATION_TOKEN:${APP_AI_RAG_DINGTALK_TOKEN:}}
+    aes-key: ${DINGTALK_AES_KEY:}
+    robot-webhook: ${DINGTALK_ROBOT_WEBHOOK:}
+    robot-secret: ${DINGTALK_ROBOT_SECRET:}
+    replay-window-seconds: ${DINGTALK_REPLAY_WINDOW_SECONDS:300}
+    max-question-chars: ${DINGTALK_MAX_QUESTION_CHARS:2000}
+    fallback-user-id: ${DINGTALK_FALLBACK_USER_ID:1}
+    default-knowledge-base-ids: ${DINGTALK_DEFAULT_KNOWLEDGE_BASE_IDS:}
+  rag-evaluation:
+    intent-accuracy: ${RAG_EVAL_INTENT_ACCURACY:0.90}
+    intent-macro-f1: ${RAG_EVAL_INTENT_MACRO_F1:0.85}
+    retrieval-recall: ${RAG_EVAL_RETRIEVAL_RECALL:0.85}
+    retrieval-mrr: ${RAG_EVAL_RETRIEVAL_MRR:0.75}
+    retrieval-ndcg: ${RAG_EVAL_RETRIEVAL_NDCG:0.75}
+    citation-coverage: ${RAG_EVAL_CITATION_COVERAGE:0.90}
+    groundedness: ${RAG_EVAL_GROUNDEDNESS:0.80}
+    answer-quality: ${RAG_EVAL_ANSWER_QUALITY:0.75}
+    regression-threshold: ${RAG_EVAL_REGRESSION_THRESHOLD:0.05}
+  job:
+    xxl:
+      enabled: ${APP_JOB_XXL_ENABLED:false}
+      admin-addresses: ${XXL_JOB_ADMIN_ADDRESSES:}
+      app-name: ${XXL_JOB_APP_NAME:ai-interview-backend}
+      address: ${XXL_JOB_EXECUTOR_ADDRESS:}
+      ip: ${XXL_JOB_EXECUTOR_IP:}
+      port: ${XXL_JOB_EXECUTOR_PORT:0}
+      access-token: ${XXL_JOB_ACCESS_TOKEN:}
+      log-path: ${XXL_JOB_LOG_PATH:}
+      log-retention-days: ${XXL_JOB_LOG_RETENTION_DAYS:30}
   knowledgebase:
     vectorization:
       max-attempts: ${APP_KB_VECTOR_MAX_ATTEMPTS:5}
@@ -192,6 +239,9 @@ app:
       base-backoff: ${APP_KB_VECTOR_BASE_BACKOFF:1m}
       max-backoff: ${APP_KB_VECTOR_MAX_BACKOFF:1h}
       recovery-batch-size: ${APP_KB_VECTOR_RECOVERY_BATCH_SIZE:50}
+    compensation:
+      neo4j-delay-ms: ${APP_KB_NEO4J_COMPENSATION_DELAY_MS:900000}
+      neo4j-initial-delay-ms: ${APP_KB_NEO4J_COMPENSATION_INITIAL_DELAY_MS:20000}
   job-interview:
     prompt-version: ${JOB_INTERVIEW_PROMPT_VERSION:job-interview-v2}
     follow-up-limit-per-main-question: ${JOB_INTERVIEW_FOLLOW_UP_LIMIT:1}
@@ -225,13 +275,6 @@ app:
       timeout-seconds: ${JUDGE0_TIMEOUT_SECONDS:30}
       cpu-time-limit-seconds: ${JUDGE0_CPU_TIME_LIMIT_SECONDS:3}
       memory-limit-kb: ${JUDGE0_MEMORY_LIMIT_KB:262144}
-  security:
-    jwt:
-      # JWT 密钥（至少 32 字节，生产环境必须改为强随机密钥）
-      secret: ${APP_JWT_SECRET:change-this-to-a-strong-random-secret-at-least-32-bytes-long}
-      access-token-validity-ms: 3600000      # 1 小时
-      refresh-token-validity-ms: 2592000000  # 30 天
-
   # GitHub 公共仓库固定 SHA 代码证据。Token 可空，仅提高公共只读 API 限额。
   github:
     enabled: ${GITHUB_ENABLED:true}
@@ -276,6 +319,8 @@ app:
       enabled: ${APP_AI_AGENT_ENABLED:true}
       # Critic 审题开关：关闭=Interviewer 直出（A/B 对比「直出 vs Reflexion」用）
       critic-enabled: ${APP_AI_AGENT_CRITIC_ENABLED:true}
+      tools:
+        enabled: ${APP_AI_AGENT_TOOLS_ENABLED:true}
       # Reflexion 反思重生成上限（Critic 连续打回的最大重出次数）
       max-reflexion: ${APP_AI_AGENT_MAX_REFLEXION:2}
       # 会话内 ChatMemory 窗口大小（消息条数，Redis 持久化）
@@ -286,6 +331,8 @@ app:
       candidate-memory:
         enabled: ${APP_AI_AGENT_CANDIDATE_MEMORY_ENABLED:true}
         max-entries: ${APP_AI_AGENT_CANDIDATE_MEMORY_MAX_ENTRIES:8}
+    trace:
+      enabled: ${APP_AI_TRACE_ENABLED:true}
     providers:
       dashscope:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -406,6 +453,38 @@ app:
       # 自适应检索路由（P2）：意图识别 needRetrieval=false 时跳过检索直接生成
       adaptive:
         enabled: ${APP_AI_RAG_ADAPTIVE_ENABLED:true}
+      # 三源智能路由：ES 非结构化知识 + MySQL Text2SQL + Neo4j Text2Cypher。
+      # SQL/Neo4j 均有安全白名单与 ES 降级；本地 Compose 默认提供 Neo4j。
+      multi-source:
+        enabled: ${APP_AI_RAG_MULTI_SOURCE_ENABLED:true}
+        llm-route-enabled: ${APP_AI_RAG_LLM_ROUTE_ENABLED:true}
+        route-model: ${APP_AI_RAG_ROUTE_MODEL:}
+        sql:
+          enabled: ${APP_AI_RAG_SQL_ENABLED:true}
+          allowed-tables: ${APP_AI_RAG_SQL_ALLOWED_TABLES:documents,resumes,interview_sessions,chat_sessions,chat_messages,chat_memories}
+          schema-cache-seconds: ${APP_AI_RAG_SQL_SCHEMA_CACHE_SECONDS:300}
+          max-rows: ${APP_AI_RAG_SQL_MAX_ROWS:100}
+          prompt-path: ${APP_AI_RAG_SQL_PROMPT_PATH:classpath:prompts/rag/text-to-sql.txt}
+        neo4j:
+          enabled: ${APP_AI_RAG_NEO4J_ENABLED:true}
+          uri: ${NEO4J_URI:bolt://localhost:27687}
+          username: ${NEO4J_USERNAME:neo4j}
+          password: ${NEO4J_PASSWORD:change-me-neo4j-password}
+          database: ${NEO4J_DATABASE:neo4j}
+          schema: ${NEO4J_SCHEMA:节点：KnowledgeEntity(entityId,name,normalizedName,entityType,aliases,description,scope,ownerUserId,projectionSource)；关系：(source:KnowledgeEntity)-[:RELATES_TO](target:KnowledgeEntity)，关系属性：relationId、relationType、description、confidence。关系类型放在 relationType 属性中，例如 USES、BUILDS_ON、DEPENDS_ON、INTEGRATES_WITH、PART_OF、RETRIEVES_FROM、RERANKS、PERSISTS、ROUTES_TO；图谱用于 Agent、LangChain、LangGraph、RAG 和基础设施等业务实体关系，不存放文档分段父子关系。查询必须只读。}
+          seed-enabled: ${APP_AI_RAG_NEO4J_SEED_ENABLED:true}
+          seed-path: ${APP_AI_RAG_NEO4J_SEED_PATH:classpath:neo4j/ai-interview-domain.json}
+          platform-owner-id: ${APP_AI_RAG_NEO4J_PLATFORM_OWNER_ID:0}
+          knowledge-base-scope-required: ${APP_AI_RAG_NEO4J_KB_SCOPE_REQUIRED:false}
+          user-scope-required: ${APP_AI_RAG_NEO4J_USER_SCOPE_REQUIRED:true}
+          user-scope-property: ${APP_AI_RAG_NEO4J_USER_SCOPE_PROPERTY:ownerUserId}
+          max-rows: ${APP_AI_RAG_NEO4J_MAX_ROWS:100}
+          max-retries: ${APP_AI_RAG_NEO4J_MAX_RETRIES:1}
+          prompt-path: ${APP_AI_RAG_NEO4J_PROMPT_PATH:classpath:prompts/rag/text-to-cypher.txt}
+        dingtalk:
+          enabled: ${APP_AI_RAG_DINGTALK_ENABLED:false}
+          token: ${APP_AI_RAG_DINGTALK_TOKEN:}
+          max-question-chars: ${APP_AI_RAG_DINGTALK_MAX_QUESTION_CHARS:2000}
       # RAG 流式生成专用模型（对齐业界实践 qwen3.6-plus）
       generation:
         streaming-model: ${APP_AI_RAG_GENERATION_MODEL:qwen3.6-plus}

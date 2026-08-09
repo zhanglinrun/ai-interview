@@ -5,7 +5,7 @@
   1. 读评测集 ``eval/rag-retrieval/eval-dataset.yaml``；
   2. 每题 ground_truth 由 ``key_points`` 关键点组装（每组取首个同义词，作为参考要点代理）；
   3. 按 ``source`` 映射到知识库 id（环境变量 ``RAGEVAL_KB_*``），跳过未配置的 source；
-  4. 调后端 ``POST /api/knowledgebase/eval/export-qa`` 批量走完整 RAG 生成，拿回
+  4. 调后端 ``POST /api/v1/knowledge-bases/eval/export-qa`` 批量走完整 RAG 生成，拿回
      ``{question, answer, contexts[], ground_truth}``，落 JSONL；
   5. 用 RAGAS 计算 faithfulness / answer_relevancy / context_precision / context_recall；
   6. 输出带时间戳的 markdown 报告到 ``eval/ragas/.work/``。
@@ -13,7 +13,7 @@
 评测模型走 DashScope OpenAI 兼容端点（``DASHSCOPE_API_KEY``）。
 
 一条命令复现（先 ``uv sync``）：
-    export RAGEVAL_JWT=... DASHSCOPE_API_KEY=...
+    export RAGEVAL_SATOKEN=... DASHSCOPE_API_KEY=...
     export RAGEVAL_KB_REDIS=.. RAGEVAL_KB_MYSQL=.. RAGEVAL_KB_DISTRIBUTED=..
     uv run run_ragas.py --limit 20
 
@@ -102,10 +102,10 @@ def resolve_kb_map() -> dict[str, int]:
 
 def export_qa(api_base: str, token: str, kb_ids: list[int],
               items: list[dict[str, str]]) -> list[dict[str, Any]]:
-    url = f"{api_base.rstrip('/')}/api/knowledgebase/eval/export-qa"
+    url = f"{api_base.rstrip('/')}/api/v1/knowledge-bases/eval/export-qa"
     headers = {"Content-Type": "application/json"}
     if token:
-        headers["Authorization"] = token if token.lower().startswith("bearer") else f"Bearer {token}"
+        headers["satoken"] = token
     payload = {"knowledgeBaseIds": kb_ids,
                "items": [{"question": it["question"], "groundTruth": it["ground_truth"]}
                          for it in items]}
@@ -133,9 +133,9 @@ def run_export(args: argparse.Namespace) -> list[dict[str, Any]]:
     if not kb_map:
         die("未配置任何知识库 id（RAGEVAL_KB_REDIS/MYSQL/DISTRIBUTED/JVM/SPRING）")
 
-    token = os.getenv("RAGEVAL_JWT", "").strip()
+    token = os.getenv("RAGEVAL_SATOKEN", "").strip()
     if not token:
-        die("缺少 RAGEVAL_JWT（后端接口需 JWT 鉴权）")
+        die("缺少 RAGEVAL_SATOKEN（后端接口需要 Sa-Token 会话）")
 
     grouped: dict[int, list[dict[str, str]]] = defaultdict(list)
     skipped = 0

@@ -59,21 +59,21 @@ export interface CapabilityAdjustment {
 }
 
 export const jobTargetApi = {
-  list: () => request.get<JobTarget[]>('/api/job-targets'),
-  get: (id: number) => request.get<JobTarget>(`/api/job-targets/${id}`),
-  create: (body: CreateJobTargetRequest) => request.post<JobTarget>('/api/job-targets', body),
+  list: () => request.get<JobTarget[]>('/api/v1/job-targets'),
+  get: (id: number) => request.get<JobTarget>(`/api/v1/job-targets/${id}`),
+  create: (body: CreateJobTargetRequest) => request.post<JobTarget>('/api/v1/job-targets', body),
   createVersion: (id: number, jdText: string, sourceUrl?: string) =>
-    request.post<JobTarget>(`/api/job-targets/${id}/versions`, { jdText, sourceUrl }),
+    request.post<JobTarget>(`/api/v1/job-targets/${id}/versions`, { jdText, sourceUrl }),
   analyze: (id: number) => request.post<JdAnalysisResult>(
-    `/api/job-targets/${id}/analyze`,
+    `/api/v1/job-targets/${id}/analyze`,
     undefined,
     { timeout: AI_REQUEST_TIMEOUT_MS },
   ),
   confirmCapabilities: (id: number, adjustments: CapabilityAdjustment[]) =>
-    request.put<JobCapabilityMapping[]>(`/api/job-targets/${id}/capabilities`, {
+    request.put<JobCapabilityMapping[]>(`/api/v1/job-targets/${id}/capabilities`, {
       adjustments,
       temporaryCapability: null,
     }),
-  freeze: (id: number) => request.post<JobTarget>(`/api/job-targets/${id}/freeze`),
-  delete: (id: number) => request.delete<void>(`/api/job-targets/${id}`),
+  freeze: (id: number) => request.post<JobTarget>(`/api/v1/job-targets/${id}/freeze`),
+  delete: (id: number) => request.delete<void>(`/api/v1/job-targets/${id}`),
 };

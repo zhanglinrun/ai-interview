@@ -1,6 +1,6 @@
 package com.linrun.interview.common.annotation;
 
-import com.linrun.interview.common.aspect.DistributeLockAspect;
+import com.linrun.interview.infra.aspect.DistributeLockAspect;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

@@ -1,5 +1,10 @@
 import { getAuthHeaders, request } from './request';
 import { API_BASE_URL, fetchTextStream } from './stream';
+import {
+  isStructuredSseEvent,
+  parseStructuredSseEvent,
+  type StructuredSseEvent,
+} from '../lib/sse';
 
 // ========== 类型定义 ==========
 
@@ -52,6 +57,7 @@ const REFERENCE_PREFIX = 'reference:';
 const CITATION_PREFIX = 'citation:';
 const REWRITTEN_PREFIX = 'rewritten:';
 const INTENT_PREFIX = 'intent:';
+const ROUTE_PREFIX = 'route:';
 const CARD_PREFIX = 'card:';
 const CARD_CHOICE_PREFIX = 'card_choice:';
 
@@ -79,8 +85,11 @@ export interface IntentStreamResult {
   cached?: boolean | null;
 }
 
+/** v1 SSE 统一 envelope，payload 保留后端原始结构。 */
+export type RagStructuredSseEvent = StructuredSseEvent;
+
 /**
- * progress:/reference:/citation:/rewritten:/intent:/card: 前缀事件是 RAG 元数据（不进回答正文），
+ * progress:/reference:/citation:/rewritten:/intent:/route:/card: 前缀事件是 RAG 元数据（不进回答正文），
  * 其内容需原样保留（reference 内是 JSON，不能做 \\n→\n 转义，否则破坏 JSON）。
  */
 function isPrefixedEvent(content: string): boolean {
@@ -89,6 +98,7 @@ function isPrefixedEvent(content: string): boolean {
     || content.startsWith(CITATION_PREFIX)
     || content.startsWith(REWRITTEN_PREFIX)
     || content.startsWith(INTENT_PREFIX)
+    || content.startsWith(ROUTE_PREFIX)
     || content.startsWith(CARD_PREFIX)
     || content.startsWith(CARD_CHOICE_PREFIX);
 }
@@ -112,6 +122,10 @@ function extractEventContent(event: string): string | null {
   }
 
   const joined = contentParts.join('');
+  // 结构化 SSE 的 data 是 JSON，payload 中的转义字符不能在此处还原。
+  if (isStructuredSseEvent(joined)) {
+    return joined;
+  }
   // 前缀事件原样返回，不做 \\n→\n 转义（reference 内是 JSON）
   if (isPrefixedEvent(joined)) {
     return joined;
@@ -169,12 +183,21 @@ function processEventStreamBuffer(
  * - progress：阶段进度（progress: 前缀）
  * - reference：引用来源 JSON（reference: 前缀）
  * - citation：生成完成后的引用校验结果（citation: 前缀）
+ * - route：数据源路由决策（route: 前缀）
  */
 export type RagStreamEvent =
   | { type: 'token'; chunk: string }
   | { type: 'progress'; text: string }
   | { type: 'reference'; sources: RagSourceDTO[] }
-  | { type: 'citation'; metadata: RagCitationMetadata };
+  | { type: 'citation'; metadata: RagCitationMetadata }
+  | { type: 'route'; route: RagRouteResult };
+
+export interface RagRouteResult {
+  source: 'knowledge_base' | 'relational_db' | 'graph_db' | string;
+  intent: string;
+  confidence: number;
+  reasoning: string;
+}
 
 export interface RagSourceDTO {
   knowledgeBaseId: number | null;
@@ -202,7 +225,7 @@ export const ragChatApi = {
    * 创建新会话
    */
   async createSession(knowledgeBaseIds: number[], title?: string): Promise<RagChatSession> {
-    return request.post<RagChatSession>('/api/rag-chat/sessions', {
+    return request.post<RagChatSession>('/api/v1/chat/sessions', {
       knowledgeBaseIds,
       title,
     });
@@ -212,28 +235,28 @@ export const ragChatApi = {
    * 获取会话列表
    */
   async listSessions(): Promise<RagChatSessionListItem[]> {
-    return request.get<RagChatSessionListItem[]>('/api/rag-chat/sessions');
+    return request.get<RagChatSessionListItem[]>('/api/v1/chat/sessions');
   },
 
   /**
    * 获取会话详情
    */
   async getSessionDetail(sessionId: number): Promise<RagChatSessionDetail> {
-    return request.get<RagChatSessionDetail>(`/api/rag-chat/sessions/${sessionId}`);
+    return request.get<RagChatSessionDetail>(`/api/v1/chat/sessions/${sessionId}`);
   },
 
   /**
    * 更新会话标题
    */
   async updateSessionTitle(sessionId: number, title: string): Promise<void> {
-    return request.put(`/api/rag-chat/sessions/${sessionId}/title`, { title });
+    return request.put(`/api/v1/chat/sessions/${sessionId}/title`, { title });
   },
 
   /**
    * 更新会话知识库
    */
   async updateKnowledgeBases(sessionId: number, knowledgeBaseIds: number[]): Promise<void> {
-    return request.put(`/api/rag-chat/sessions/${sessionId}/knowledge-bases`, {
+    return request.put(`/api/v1/chat/sessions/${sessionId}/knowledge-bases`, {
       knowledgeBaseIds,
     });
   },
@@ -242,18 +265,18 @@ export const ragChatApi = {
    * 切换会话置顶状态
    */
   async togglePin(sessionId: number): Promise<void> {
-    return request.put(`/api/rag-chat/sessions/${sessionId}/pin`);
+    return request.put(`/api/v1/chat/sessions/${sessionId}/pin`);
   },
 
   /**
    * 删除会话
    */
   async deleteSession(sessionId: number): Promise<void> {
-    return request.delete(`/api/rag-chat/sessions/${sessionId}`);
+    return request.delete(`/api/v1/chat/sessions/${sessionId}`);
   },
 
   /**
-   * 发送消息（流式SSE），解析 progress:/reference:/citation:/intent: 前缀事件并分流回调。
+   * 发送消息（流式SSE），解析 progress:/reference:/citation:/intent:/route: 前缀事件并分流回调。
    *
    * @param onToken 回答 token 片段（无前缀）
    * @param onProgress 阶段进度文案（progress: 前缀）
@@ -261,6 +284,7 @@ export const ragChatApi = {
    * @param onCitation 生成完成后的引用校验结果（citation: 前缀，已 JSON.parse）
    * @param onRewritten 改写后问题（rewritten: 前缀）
    * @param onIntent 意图识别结果（intent: 前缀，三路分数）
+   * @param onRoute 数据源路由结果（route: 前缀）
    */
   async sendMessageStream(
     sessionId: number,
@@ -275,18 +299,81 @@ export const ragChatApi = {
     onCardChoice?: (choices: RagCardChoice[]) => void,
     onRewritten?: (text: string) => void,
     onIntent?: (intent: IntentStreamResult) => void,
+    onRoute?: (route: RagRouteResult) => void,
   ): Promise<void> {
+    let completed = false;
+    const completeOnce = (): void => {
+      if (!completed) {
+        completed = true;
+        onComplete();
+      }
+    };
     return fetchTextStream({
-      url: `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
+      url: `${API_BASE_URL}/api/v1/chat/sessions/${sessionId}/messages/stream`,
       init: {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-SSE-Protocol': 'v1',
           ...getAuthHeaders(),
         },
         body: JSON.stringify({ question }),
       },
       onMessage: (raw: string) => {
+        const structured = parseStructuredSseEvent(raw);
+        if (structured) {
+          const payload = structured.payload;
+          switch (structured.event) {
+            case 'token':
+              onToken(typeof payload === 'string' ? payload : JSON.stringify(payload));
+              return;
+            case 'intent':
+              if (payload && typeof payload === 'object') {
+                onIntent?.(payload as IntentStreamResult);
+              } else {
+                onProgress?.(String(payload ?? ''));
+              }
+              return;
+            case 'rewrite':
+              onRewritten?.(String(payload ?? ''));
+              return;
+            case 'route':
+              if (payload && typeof payload === 'object') {
+                onRoute?.(payload as RagRouteResult);
+              } else {
+                onProgress?.(String(payload ?? ''));
+              }
+              return;
+            case 'citation':
+              if (payload && typeof payload === 'object') {
+                onCitation?.(payload as RagCitationMetadata);
+              }
+              return;
+            case 'retrieval':
+              if (Array.isArray(payload)) {
+                onReference?.(payload as RagSourceDTO[]);
+              } else {
+                onProgress?.(typeof payload === 'string' ? payload : JSON.stringify(payload));
+              }
+              return;
+            case 'agent_step':
+              if (Array.isArray(payload)) {
+                onCardChoice?.(payload as RagCardChoice[]);
+              } else {
+                onCard?.(typeof payload === 'string' ? payload : JSON.stringify(payload));
+              }
+              return;
+            case 'error':
+              onError(new Error(typeof payload === 'string' ? payload : JSON.stringify(payload)));
+              return;
+            case 'done':
+              completeOnce();
+              return;
+            default:
+              onProgress?.(typeof payload === 'string' ? payload : JSON.stringify(payload));
+              return;
+          }
+        }
         // 前缀事件是元数据，不进回答正文
         if (raw.startsWith('progress:')) {
           onProgress?.(raw.substring('progress:'.length));
@@ -320,6 +407,15 @@ export const ragChatApi = {
           }
           return;
         }
+        if (raw.startsWith(ROUTE_PREFIX)) {
+          const payload = raw.substring(ROUTE_PREFIX.length);
+          try {
+            onRoute?.(JSON.parse(payload) as RagRouteResult);
+          } catch {
+            // ignore
+          }
+          return;
+        }
         if (raw.startsWith(REWRITTEN_PREFIX)) {
           onRewritten?.(raw.substring(REWRITTEN_PREFIX.length));
           return;
@@ -340,7 +436,7 @@ export const ragChatApi = {
         }
         onToken(raw);
       },
-      onComplete,
+      onComplete: completeOnce,
       onError,
       processBuffer: processEventStreamBuffer,
     });

@@ -16,14 +16,15 @@ export type JudgeStatus =
 
 export interface CodingProblemSummary {
   problemId: number;
-  problemVersionId: number;
+  /** 只有已接入平台题面的题目才有内部作答版本。 */
+  problemVersionId: number | null;
   hotRank: number;
   platformProblemId: string;
   title: string;
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   tags: string[];
   sourceUrl?: string | null;
-  version: string;
+  version: string | null;
   enabledLanguages: CodingLanguage[];
 }
 
@@ -82,45 +83,45 @@ export interface JudgeSubmission {
 
 export const algorithmApi = {
   listProblems: (params?: { language?: CodingLanguage; tag?: string }) =>
-    request.get<CodingProblemSummary[]>('/api/algorithms/problems', { params }),
+    request.get<CodingProblemSummary[]>('/api/v1/algorithms/problems', { params }),
   getProblem: (problemVersionId: number) => request.get<CodingProblemDetail>(
-    `/api/algorithms/problem-versions/${problemVersionId}`,
+    `/api/v1/algorithms/problem-versions/${problemVersionId}`,
   ),
   createAttempt: (problemVersionId: number, language: CodingLanguage) =>
-    request.post<CodingAttempt>('/api/algorithms/attempts', {
+    request.post<CodingAttempt>('/api/v1/algorithms/attempts', {
       problemVersionId,
       language,
       mode: 'TRAINING' satisfies CodingAttemptMode,
       contextId: null,
     }),
   getAttempt: (attemptId: string) => request.get<CodingAttempt>(
-    `/api/algorithms/attempts/${encodeURIComponent(attemptId)}`,
+    `/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}`,
   ),
   getDraft: (attemptId: string) => request.get<CodingDraft>(
-    `/api/algorithms/attempts/${encodeURIComponent(attemptId)}/draft`,
+    `/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}/draft`,
   ),
   saveDraft: (attemptId: string, sourceCode: string, expectedRevision: number) =>
-    request.put<CodingDraft>(`/api/algorithms/attempts/${encodeURIComponent(attemptId)}/draft`, {
+    request.put<CodingDraft>(`/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}/draft`, {
       expectedRevision,
       sourceCode,
     }),
   run: (attemptId: string, sourceCode: string, idempotencyKey: string) =>
     request.post<JudgeSubmission>(
-      `/api/algorithms/attempts/${encodeURIComponent(attemptId)}/run`,
+      `/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}/run`,
       { sourceCode, idempotencyKey },
       { timeout: AI_REQUEST_TIMEOUT_MS },
     ),
   submit: (attemptId: string, sourceCode: string, idempotencyKey: string) =>
     request.post<JudgeSubmission>(
-      `/api/algorithms/attempts/${encodeURIComponent(attemptId)}/submissions`,
+      `/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}/submissions`,
       { sourceCode, idempotencyKey },
       { timeout: AI_REQUEST_TIMEOUT_MS },
     ),
   listSubmissions: (attemptId: string) => request.get<JudgeSubmission[]>(
-    `/api/algorithms/attempts/${encodeURIComponent(attemptId)}/submissions`,
+    `/api/v1/algorithms/attempts/${encodeURIComponent(attemptId)}/submissions`,
   ),
   rejudge: (submissionId: string) => request.post<JudgeSubmission>(
-    `/api/algorithms/submissions/${encodeURIComponent(submissionId)}/rejudge`,
+    `/api/v1/algorithms/submissions/${encodeURIComponent(submissionId)}/rejudge`,
     undefined,
     { timeout: AI_REQUEST_TIMEOUT_MS },
   ),

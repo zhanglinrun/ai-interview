@@ -1,6 +1,6 @@
 package com.linrun.interview.common.annotation;
 
-import com.linrun.interview.common.aspect.RateLimitAspect;
+import com.linrun.interview.infra.aspect.RateLimitAspect;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Repeatable;

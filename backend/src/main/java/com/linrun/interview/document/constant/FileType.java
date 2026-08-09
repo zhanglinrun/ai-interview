@@ -1,0 +1,24 @@
+package com.linrun.interview.document.constant;
+
+/**
+ * 知识库文件类型（对齐业界实践 FileType），用于选择文件解析器。
+ */
+public enum FileType {
+    PDF("pdf"),
+    DOC("doc"),
+    TXT("txt"),
+    HTML("html"),
+    MARKDOWN("markdown"),
+    CSV("csv"),
+    EXCEL("excel");
+
+    private final String type;
+
+    FileType(String type) {
+        this.type = type;
+    }
+
+    public String getType() {
+        return type;
+    }
+}

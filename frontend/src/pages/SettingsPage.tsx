@@ -58,7 +58,7 @@ const PROVIDER_PRESETS: Record<string, {
     supportsEmbedding: false,
   },
   glm: {
-    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    baseUrl: 'https://open.bigmodel.cn/api/v1/coding/paas/v4',
     models: [
       { value: 'glm-5.1', label: 'GLM-5.1' },
       { value: 'glm-5', label: 'GLM-5' },

@@ -1,0 +1,91 @@
+# ELK 日志组件。
+# Elasticsearch 是本项目 RAG 的核心依赖，由 docker-compose-app.yml /
+# docker-compose-environment.yml 启动；本文件补充 Logstash + Kibana。
+#
+# 用法（先启动 app 或 environment）：
+#   docker compose --env-file .env -f docker-compose-elk.yml up -d
+
+name: ai-interview
+
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  log-index-init:
+    image: curlimages/curl:8.11.1
+    container_name: interview-log-index-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >-
+      for i in $$(seq 1 60); do
+        curl --fail --silent http://elasticsearch:9200 >/dev/null && break;
+        sleep 2;
+      done;
+      curl --fail --silent --show-error -X PUT
+      http://elasticsearch:9200/_ilm/policy/ai-interview-logs-short
+      -H 'Content-Type: application/json'
+      --data-binary '{"policy":{"phases":{"hot":{"actions":{}},"delete":{"min_age":"${LOG_RETENTION_DAYS:-7}d","actions":{"delete":{}}}}}}';
+      curl --fail --silent --show-error -X PUT
+      http://elasticsearch:9200/_index_template/ai-interview-logs
+      -H 'Content-Type: application/json'
+      --data-binary '{"index_patterns":["ai-interview-logs-*"],"priority":200,"template":{"settings":{"index.lifecycle.name":"ai-interview-logs-short","number_of_shards":1,"number_of_replicas":0,"index.refresh_interval":"30s"}}}'
+    mem_limit: 64m
+    cpus: 0.10
+    logging: *container-logging
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.17.0
+    container_name: interview-logstash
+    restart: unless-stopped
+    depends_on:
+      log-index-init:
+        condition: service_completed_successfully
+    environment:
+      LS_JAVA_OPTS: "-Xms128m -Xmx256m"
+      XPACK_MONITORING_ENABLED: "false"
+      PIPELINE_WORKERS: "1"
+      PIPELINE_BATCH_SIZE: "50"
+    volumes:
+      - app_logs:/var/log/ai-interview:ro
+      - ./docker/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - logstash_state:/usr/share/logstash/data
+    mem_limit: 512m
+    cpus: 0.45
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/pipelines >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: interview-kibana
+    restart: unless-stopped
+    depends_on:
+      logstash:
+        condition: service_healthy
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      SERVER_NAME: interview-kibana
+      TELEMETRY_ENABLED: "false"
+      NODE_OPTIONS: "--max-old-space-size=320"
+    ports:
+      - "127.0.0.1:${KIBANA_HOST_PORT:-5601}:5601"
+    mem_limit: 512m
+    cpus: 0.45
+    logging: *container-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/api/status >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 90s
+
+volumes:
+  app_logs:
+  logstash_state:

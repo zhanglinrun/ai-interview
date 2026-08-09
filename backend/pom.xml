@@ -58,23 +58,16 @@
       <artifactId>micrometer-registry-prometheus</artifactId>
     </dependency>
 
-    <!-- JWT 认证 -->
+    <!-- Sa-Token + Redis：统一会话、角色和权限入口 -->
     <dependency>
-      <groupId>io.jsonwebtoken</groupId>
-      <artifactId>jjwt-api</artifactId>
-      <version>0.12.6</version>
+      <groupId>cn.dev33</groupId>
+      <artifactId>sa-token-spring-boot3-starter</artifactId>
+      <version>${sa-token.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.jsonwebtoken</groupId>
-      <artifactId>jjwt-impl</artifactId>
-      <version>0.12.6</version>
-      <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>io.jsonwebtoken</groupId>
-      <artifactId>jjwt-jackson</artifactId>
-      <version>0.12.6</version>
-      <scope>runtime</scope>
+      <groupId>cn.dev33</groupId>
+      <artifactId>sa-token-redis-jackson</artifactId>
+      <version>${sa-token.version}</version>
     </dependency>
     <!-- Spring Security Crypto（仅用于密码加密，不引入完整 Security 框架） -->
     <dependency>
@@ -115,6 +108,22 @@
       <artifactId>langchain4j-reactor</artifactId>
       <version>${langchain4j-beta.version}</version>
     </dependency>
+    <!-- 多数据源 RAG：Text2SQL / Text2Cypher（均为可选运行时能力，默认按配置启用） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-experimental-sql</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-community-neo4j</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-community-neo4j-retriever</artifactId>
+      <version>${langchain4j-beta.version}</version>
+    </dependency>
     <!-- Elasticsearch 向量存储（KNN/全文/混合检索） -->
     <dependency>
       <groupId>dev.langchain4j</groupId>
@@ -148,6 +157,12 @@
     <dependency>
       <groupId>org.springframework.retry</groupId>
       <artifactId>spring-retry</artifactId>
+    </dependency>
+    <!-- XXL-Job：生产可接入统一调度中心；本地默认关闭，不影响单机启动 -->
+    <dependency>
+      <groupId>com.xuxueli</groupId>
+      <artifactId>xxl-job-core</artifactId>
+      <version>2.4.0</version>
     </dependency>
 
     <dependency>
@@ -228,6 +243,12 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>1.3.0</version>
       <scope>test</scope>
     </dependency>
     <dependency>

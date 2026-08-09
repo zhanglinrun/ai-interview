@@ -29,7 +29,7 @@ const BASE_URL_PRESETS: { label: string; baseUrl: string; model: string }[] = [
   { label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
   { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
   { label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-latest' },
-  { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/v1/paas/v4', model: 'glm-4-flash' },
 ];
 
 const INPUT_CLASS = 'dark-input w-full px-3 py-2.5 text-sm';

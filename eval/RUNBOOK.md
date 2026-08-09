@@ -28,33 +28,33 @@ Agent Critic 质量门与统一评测，并把结果回填到根 `README.md` 的
 $ErrorActionPreference = 'Stop'
 Copy-Item .env.example .env
 docker compose -f dev-ops/docker-compose-environment.yml up -d
-./dev-ops/Apply-DatabaseUpgrades.ps1
+docker compose -f dev-ops/docker-compose-environment.yml down -v
+docker compose -f dev-ops/docker-compose-environment.yml up -d
 mvn -pl backend spring-boot:run
 ```
 
 - 后端 `http://localhost:8082`，Swagger `http://localhost:8082/swagger-ui.html`。
 - RabbitMQ 开发端口以 `.env` 和 Compose 为准；本仓库当前本地映射为 25672 / 25673。
-- 复用旧 MySQL 卷时必须运行 `dev-ops/Apply-DatabaseUpgrades.ps1`。只修改 `schema.sql` 不会升级
-  已存在的数据卷。
+- V2 不迁移旧数据；评测环境必须使用由完整 `schema.sql` 初始化的新 MySQL/ES/Redis 数据卷。
 
 ---
 
-## 2. 拿一个 JWT（压测/RAGAS 都要）
+## 2. 拿一个 Sa-Token 会话（压测/RAGAS 都要）
 
 注册 + 登录，取 `data.accessToken`：
 
 ```bash
-curl -s -X POST http://localhost:8082/api/auth/register \
+curl -s -X POST http://localhost:8082/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"loadtest","password":"loadtest123","email":"lt@example.com"}'
 
-curl -s -X POST http://localhost:8082/api/auth/login \
+curl -s -X POST http://localhost:8082/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"loadtest","password":"loadtest123"}'
-# → { "data": { "accessToken": "eyJ...", ... } }
+# → { "data": { "accessToken": "satoken...", ... } }
 ```
 
-k6 脚本支持两种鉴权：直接 `-e TOKEN=eyJ...`，或 `-e AUTH_USER=loadtest -e AUTH_PASSWORD=loadtest123`（脚本 `setup()` 自动登录，见 `eval/loadtest/helpers.js`）。
+k6 脚本支持两种鉴权：直接 `-e TOKEN=satoken...`，或 `-e AUTH_USER=loadtest -e AUTH_PASSWORD=loadtest123`（脚本 `setup()` 自动登录，见 `eval/loadtest/helpers.js`）。
 
 ---
 
@@ -64,17 +64,17 @@ k6 脚本支持两种鉴权：直接 `-e TOKEN=eyJ...`，或 `-e AUTH_USER=loadt
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$env:TOKEN = 'eyJ...'
+$env:TOKEN = 'satoken...'
 # 上传（DOCUMENT_SEARCH 类型）
-curl.exe -s -X POST "http://localhost:8082/api/knowledgebase/upload" `
-  -H "Authorization: Bearer $env:TOKEN" `
+curl.exe -s -X POST "http://localhost:8082/api/v1/knowledge-bases/upload" `
+  -H "satoken: $env:TOKEN" `
   -F "file=@E:/path/to/redis.pdf" -F "category=Java面试"
 # → data 为 docId；随后切块
-curl.exe -s -X POST "http://localhost:8082/api/knowledgebase/$env:DOC_ID/split" `
-  -H "Authorization: Bearer $env:TOKEN"
+curl.exe -s -X POST "http://localhost:8082/api/v1/knowledge-bases/$env:DOC_ID/split" `
+  -H "satoken: $env:TOKEN"
 # 轮询直到 docStatus=VECTOR_STORED
-curl.exe -s "http://localhost:8082/api/knowledgebase/$env:DOC_ID" `
-  -H "Authorization: Bearer $env:TOKEN"
+curl.exe -s "http://localhost:8082/api/v1/knowledge-bases/$env:DOC_ID" `
+  -H "satoken: $env:TOKEN"
 ```
 
 RAG 检索/RAGAS 评测集 `eval/rag-retrieval/eval-dataset.yaml` 按 `source`（redis/mysql/distributed/jvm/spring）分组，需分别建 5 个知识库并把 id 写进 `RAGEVAL_KB_*` 环境变量（见第 5、6 步）。语料 PDF 放 `eval/corpus/`（本地，不进 git）。
@@ -121,7 +121,7 @@ mvn -pl backend test -Dtest=RagRetrievalEvalTest '-Dtest.excludedGroups=' -Dgrou
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$env:RAGEVAL_JWT = 'eyJ...'
+$env:RAGEVAL_SATOKEN = 'satoken...'
 $env:DASHSCOPE_API_KEY = 'sk-...'
 $env:RAGEVAL_KB_REDIS = '9'
 $env:RAGEVAL_KB_MYSQL = '10'

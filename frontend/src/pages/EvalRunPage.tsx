@@ -10,6 +10,7 @@ import {
   type IntentCase,
   type JudgeCase,
   type RagEvalItem,
+  type EvalRunSummary,
 } from '../api/eval';
 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -114,6 +115,7 @@ export default function EvalRunPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalRunResponse | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [recentRuns, setRecentRuns] = useState<EvalRunSummary[]>([]);
 
   const loadExample = () => {
     setTitle('Agent Demo');
@@ -156,6 +158,10 @@ export default function EvalRunPage() {
       .catch(err => console.error('Failed to load knowledge bases:', err));
   }, []);
 
+  useEffect(() => {
+    evalApi.list(20).then(setRecentRuns).catch(() => setRecentRuns([]));
+  }, []);
+
   const run = async () => {
     setError(null);
     setResult(null);
@@ -185,7 +191,9 @@ export default function EvalRunPage() {
     }
     setRunning(true);
     try {
-      setResult(await evalApi.run(body));
+      const next = await evalApi.run(body);
+      setResult(next);
+      setRecentRuns(await evalApi.list(20).catch(() => recentRuns));
     } catch (err) {
       setError(getErrorMessage(err, '评测运行失败'));
     } finally {
@@ -278,6 +286,24 @@ export default function EvalRunPage() {
           </label>
         </div>
       </section>
+
+      {recentRuns.length > 0 && (
+        <section className="surface-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-sm text-slate-900 dark:text-white">最近评测与质量门</h2>
+            <span className="text-xs text-slate-400">门槛来自后端配置</span>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {recentRuns.slice(0, 6).map(run => (
+              <button key={run.runId} type="button" onClick={() => void evalApi.get(run.runId).then(setResult).catch(() => undefined)} className="rounded-lg border border-slate-100 p-3 text-left transition hover:border-primary-200 dark:border-slate-800 dark:hover:border-primary-800">
+                <div className="flex items-center justify-between gap-2"><span className="truncate text-sm text-slate-700 dark:text-slate-200">{run.title}</span><span className={`rounded-full px-2 py-0.5 text-xs ${run.qualityGate?.passed ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>{run.qualityGate?.passed ? 'PASS' : '需关注'}</span></div>
+                <p className="mt-1 text-xs text-slate-400">{run.runId.slice(0, 16)} · 总分 {pct(run.overallScore)} · {run.createdAt}</p>
+                {(run.qualityGate?.failures?.length ?? 0) > 0 && <p className="mt-1 line-clamp-1 text-xs text-amber-600">{run.qualityGate.failures.join('；')}</p>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="surface-card p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -450,6 +476,14 @@ function EvalResult({ result, reportText }: { result: EvalRunResponse; reportTex
         )}
         <span className="text-xs text-slate-400">运行编号：{result.runId}</span>
       </div>
+
+      {result.qualityGate && (
+        <div className={`rounded-lg border px-3 py-3 ${result.qualityGate.passed ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/20' : 'border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20'}`}>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">质量门：{result.qualityGate.passed ? '通过' : '未通过'}</h3><span className="text-xs text-slate-500">意图、检索、引用、groundedness 与回答质量阈值</span></div>
+          <div className="mt-2 flex flex-wrap gap-2">{Object.entries(result.qualityGate.metrics).map(([key, value]) => <span key={key} className={`rounded-full px-2 py-1 text-xs ${value >= (result.qualityGate.thresholds[key] ?? 0) ? 'bg-white/80 text-emerald-700 dark:bg-slate-900/70 dark:text-emerald-300' : 'bg-white/80 text-amber-700 dark:bg-slate-900/70 dark:text-amber-300'}`}>{key}: {pct(value)} / {pct(result.qualityGate.thresholds[key] ?? 0)}</span>)}</div>
+          {result.qualityGate.failures.length > 0 && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">失败项：{result.qualityGate.failures.join('；')}</p>}
+        </div>
+      )}
 
       {result.intent && (
         <div className="space-y-2">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, BrainCircuit, Code2, Database, Search } from 'lucide-react';
+import { ArrowRight, BrainCircuit, Code2, Database, ExternalLink, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { algorithmApi, type CodingLanguage, type CodingProblemSummary } from '../api/algorithm';
 import { getErrorMessage } from '../api/request';
@@ -53,6 +53,11 @@ export default function TrainingPage() {
     );
   }, [problems, query]);
 
+  const onlineProblemCount = useMemo(
+    () => problems.filter((problem) => problem.problemVersionId !== null).length,
+    [problems],
+  );
+
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
@@ -64,7 +69,7 @@ export default function TrainingPage() {
         <div className="surface-card flex gap-3 border-primary-200 p-4 dark:border-primary-900/50">
           <Code2 className="mt-0.5 h-5 w-5 shrink-0 text-primary-600" />
           <div><h2 className="text-sm font-semibold text-stone-900 dark:text-white">Hot 100 算法</h2>
-          <p className="mt-1 text-sm leading-5 text-stone-500 dark:text-stone-400">支持 Java 和 Python 3，可保存草稿并提交判题。</p></div>
+          <p className="mt-1 text-sm leading-5 text-stone-500 dark:text-stone-400">完整收录 100 道题；已接入题目支持 Java/Python 3 在线作答，其余跳转力扣题面。</p></div>
         </div>
         <Link to="/knowledgebase/chat" className="surface-card hover-card flex gap-3 p-4">
           <Database className="mt-0.5 h-5 w-5 shrink-0 text-primary-600" />
@@ -84,7 +89,9 @@ export default function TrainingPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/80 p-5 dark:border-stone-800">
           <div>
             <h2 className="text-lg font-semibold text-stone-900 dark:text-white">平台精选 Hot 100</h2>
-            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">当前收录的 Hot 100 练习题。</p>
+            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+              当前收录 {problems.length} 道题，其中 {onlineProblemCount} 道支持平台内在线作答，其余可打开 LeetCode 官方题面。
+            </p>
           </div>
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <label className="relative flex-1 sm:w-56">
@@ -120,38 +127,61 @@ export default function TrainingPage() {
           <EmptyState icon={Search} title="没有匹配题目" description="调整关键词或语言筛选后重试。" />
         ) : (
           <div className="divide-y divide-stone-100 dark:divide-stone-800">
-            {filteredProblems.map((problem) => (
-              <Link
-                key={problem.problemVersionId}
-                to={`/training/algorithm/${problem.problemVersionId}`}
-                className="group flex flex-wrap items-center gap-4 px-5 py-4 transition-colors hover:bg-primary-50/50 dark:hover:bg-primary-950/20"
-              >
-                <span className="w-8 text-sm font-medium text-stone-400">#{problem.hotRank}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-medium text-stone-900 dark:text-white">{problem.title}</h3>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      problem.difficulty === 'EASY'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                        : problem.difficulty === 'MEDIUM'
-                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                          : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                    }`}>{difficultyLabel[problem.difficulty]}</span>
+            {filteredProblems.map((problem) => {
+              const row = (
+                <>
+                  <span className="w-8 text-sm font-medium text-stone-400">#{problem.hotRank}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-medium text-stone-900 dark:text-white">{problem.title}</h3>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        problem.difficulty === 'EASY'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                          : problem.difficulty === 'MEDIUM'
+                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                            : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                      }`}>{difficultyLabel[problem.difficulty]}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {problem.tags.slice(0, 4).map((tag) => (
+                        <span key={tag} className="text-xs text-stone-400">
+                          {getAlgorithmTagLabel(tag)}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {problem.tags.slice(0, 4).map((tag) => (
-                      <span key={tag} className="text-xs text-stone-400">
-                        {getAlgorithmTagLabel(tag)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <span className="text-xs text-stone-400">
-                  {problem.enabledLanguages.map((item) => item === 'JAVA21' ? 'Java' : 'Python 3').join(' / ')}
-                </span>
-                <ArrowRight className="h-4 w-4 text-stone-300 transition-transform group-hover:translate-x-1 group-hover:text-primary-600" />
-              </Link>
-            ))}
+                  <span className="text-xs text-stone-400">
+                    {problem.problemVersionId !== null
+                      ? problem.enabledLanguages.map((item) => item === 'JAVA21' ? 'Java' : 'Python 3').join(' / ')
+                      : '打开力扣题面'}
+                  </span>
+                  {problem.problemVersionId !== null
+                    ? <ArrowRight className="h-4 w-4 text-stone-300 transition-transform group-hover:translate-x-1 group-hover:text-primary-600" />
+                    : <ExternalLink className="h-4 w-4 text-stone-300 transition-colors group-hover:text-primary-600" />}
+                </>
+              );
+              const rowClassName = "group flex flex-wrap items-center gap-4 px-5 py-4 transition-colors hover:bg-primary-50/50 dark:hover:bg-primary-950/20";
+              return problem.problemVersionId !== null ? (
+                <Link
+                  key={problem.problemId}
+                  to={`/training/algorithm/${problem.problemVersionId}`}
+                  className={rowClassName}
+                >
+                  {row}
+                </Link>
+              ) : (
+                <a
+                  key={problem.problemId}
+                  href={problem.sourceUrl ?? undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={rowClassName}
+                  aria-label={`${problem.title}（打开力扣题面）`}
+                >
+                  {row}
+                </a>
+              );
+            })}
           </div>
         )}
       </section>

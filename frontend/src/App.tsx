@@ -5,7 +5,7 @@ import { historyApi, type InterviewDetail } from './api/history';
 import type { UploadKnowledgeBaseResponse } from './api/knowledgebase';
 import type { CategoryDTO, Difficulty } from './types/interview';
 import { ErrorState, LoadingState } from './components/PageState';
-import { ROUTES } from './constants/routes';
+import { ROUTES } from './app/routes';
 import { ArrowLeft } from 'lucide-react';
 import RequireAuth from './components/RequireAuth';
 import {getInterviewViewPath} from './utils/interviewNavigation';
@@ -22,6 +22,7 @@ const KnowledgeBaseManagePage = lazy(() => import('./pages/KnowledgeBaseManagePa
 const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage'));
 const EvalRunPage = lazy(() => import('./pages/EvalRunPage'));
 const AgentTracePage = lazy(() => import('./pages/AgentTracePage'));
+const RagTracePage = lazy(() => import('./pages/RagTracePage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -254,6 +255,9 @@ function App() {
 
               {/* Multi-Agent 编排 Trace */}
               <Route path="agent-trace" element={<AgentTracePage />} />
+
+              {/* 阶段化 RAG Trace */}
+              <Route path="rag-traces" element={<RagTracePage />} />
 
               {/* 已下线入口：旧链接安全回到 RAG 问答 */}
               <Route path="knowledge-graph" element={<Navigate to="/knowledgebase/chat" replace />} />
