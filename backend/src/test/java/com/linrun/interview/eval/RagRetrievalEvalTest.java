@@ -47,9 +47,10 @@ import java.util.TreeSet;
 /**
  * RAG 检索评测 runner（P4 评测闭环落地）。
  *
- * <p>在固定语料下量化对比 <b>vector / hybrid / hybrid+rerank</b> 三档检索策略的召回与排序质量，
+ * <p>在固定语料下量化对比 <b>vector / hybrid / hybrid+rerank / hybrid+rerank+expand</b>
+ * 四档检索策略的召回与排序质量，
  * 为简历指标提供可复现证据。数据集见 {@code eval/rag-retrieval/eval-dataset.yaml}
- * （pom 复制到测试 classpath {@code rag-eval/eval-dataset.yaml}），三档策略经
+ * （pom 复制到测试 classpath {@code rag-eval/eval-dataset.yaml}），四档策略经
  * {@link InterviewElasticsearchContentRetriever} 的 {@code forcedSearchMode} 分档构造，
  * hybrid+rerank 档再用 {@link RerankService} 精排。
  *
@@ -71,7 +72,7 @@ import java.util.TreeSet;
 @Tag("rag-eval")
 @ActiveProfiles("rageval")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@DisplayName("RAG 检索评测（vector / hybrid / hybrid+rerank 三档对比）")
+@DisplayName("RAG 检索评测（vector / hybrid / hybrid+rerank / expand 四档对比）")
 class RagRetrievalEvalTest {
 
   private static final Logger log = LoggerFactory.getLogger(RagRetrievalEvalTest.class);
@@ -120,7 +121,7 @@ class RagRetrievalEvalTest {
   }
 
   @Test
-  @DisplayName("三档检索策略在固定语料上的召回/排序对比并产出报告")
+  @DisplayName("四档检索策略在固定语料上的召回/排序对比并产出报告")
   void evaluateRetrievalTiers() throws Exception {
     Map<String, Long> sourceToKb = sourceToKb();
     List<Long> scope = sourceToKb.values().stream().filter(id -> id > 0).distinct().sorted().toList();
@@ -334,6 +335,21 @@ class RagRetrievalEvalTest {
             .append(" |\n");
       }
       sb.append("\n");
+
+      sb.append("按知识库来源分组（关键点覆盖率）：\n\n");
+      sb.append("| 策略 | redis | mysql | distributed | jvm | spring |\n")
+          .append("|------|------|------|------|------|------|\n");
+      for (Tier tier : Tier.values()) {
+        List<QuestionScore> scores = perTier.get(tier);
+        sb.append("| ").append(tier.label)
+            .append(" | ").append(pct(avgWhereSource(scores, "redis")))
+            .append(" | ").append(pct(avgWhereSource(scores, "mysql")))
+            .append(" | ").append(pct(avgWhereSource(scores, "distributed")))
+            .append(" | ").append(pct(avgWhereSource(scores, "jvm")))
+            .append(" | ").append(pct(avgWhereSource(scores, "spring")))
+            .append(" |\n");
+      }
+      sb.append("\n");
     }
 
     sb.append("> 说明：绝对数值依赖入库语料与 embedding/rerank 模型；结论看「各档相对增益」。\n");
@@ -421,6 +437,12 @@ class RagRetrievalEvalTest {
   private double avgWhere(List<QuestionScore> scores, String difficulty) {
     List<QuestionScore> filtered = scores.stream()
         .filter(s -> Objects.equals(s.difficulty(), difficulty)).toList();
+    return avg(filtered, QuestionScore::coverage);
+  }
+
+  private double avgWhereSource(List<QuestionScore> scores, String source) {
+    List<QuestionScore> filtered = scores.stream()
+        .filter(s -> Objects.equals(s.source(), source)).toList();
     return avg(filtered, QuestionScore::coverage);
   }
 

@@ -1,0 +1,340 @@
+# RAGAS 生成质量 smoke 集（参考答案草案，尚未完成领域人工审核）。
+#
+# 这不是可以直接写入简历的 gold 集：当前 reference_answer 是 assistant_draft，
+# gold_evidence、review_status 和 holdout 尚未补齐。它只用于检查导出链路和 RAGAS
+# 调用格式；逐题人工审核后才可改成 human_reviewed 并进入 strict 正式评测。
+# 题目来源/审核流程见 DATASET_REVIEW.md；扩充时保留字段，并另建不参与调参的 holdout 集。
+
+metadata:
+  purpose: generation_smoke
+  status: draft
+  reference_policy: assistant_draft_pending_human_review
+  corpus_policy: local_java_interview_pdfs
+
+questions:
+  - id: redis-01
+    source: redis
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: fact
+    review_status: draft
+    question: Redis 支持哪些基本数据类型
+    query_hard: 我想在内存数据库里存各种形式的值，它本身原生能放哪几种结构的东西
+    answerable: true
+    reference_answer: Redis 的常用基本数据类型包括 String、List、Hash、Set 和 Sorted Set（zset）。实际版本还提供 Stream、Bitmap、HyperLogLog、Geo 等扩展结构，但面试中通常先回答前五种。
+    key_points:
+      - [字符串, String]
+      - [列表, List]
+      - [哈希, Hash]
+      - [集合, Set]
+      - [有序集合, Sorted Set, zset]
+
+  - id: redis-02
+    source: redis
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: Redis 为什么快
+    query_hard: 同样是数据库，为什么这个东西读写能到微秒级，比传统数据库快那么多
+    answerable: true
+    reference_answer: Redis 主要把数据放在内存中，避免了磁盘随机 I/O；核心命令执行通常由单线程事件循环完成，减少了线程切换和锁竞争；同时使用 epoll 等 I/O 多路复用高效处理连接，并通过高效的数据结构降低操作复杂度。它并非所有场景都达到微秒级，网络、命令复杂度和数据量也会影响延迟。
+    key_points:
+      - [内存, 基于内存]
+      - [IO 多路复用, 多路复用, epoll]
+      - [单线程, 事件驱动]
+
+  - id: redis-06
+    source: redis
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: fact
+    review_status: draft
+    question: Redis 有哪些持久化方式
+    query_hard: 内存里的数据怕断电丢失，这个数据库自己有哪几种把数据落到硬盘的办法
+    answerable: true
+    reference_answer: Redis 主要有 RDB 和 AOF 两种持久化方式。RDB 按时间点生成快照，文件紧凑、恢复较快，但可能丢失最近一次快照后的数据；AOF 按写命令追加日志，通常数据丢失窗口更小，但文件更大、恢复可能更慢。Redis 还支持 RDB+AOF 的混合持久化。
+    key_points:
+      - [RDB, 快照]
+      - [AOF, 追加]
+      - [混合持久化]
+
+  - id: redis-10
+    source: redis
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: procedure
+    review_status: draft
+    question: Redis 如何用 SETNX 实现分布式锁，有什么问题
+    query_hard: 想让多台服务器抢同一把锁保证只有一个能执行，用这个内存数据库怎么做，会踩什么坑
+    answerable: true
+    reference_answer: 加锁应使用带唯一 value 和过期时间的原子命令，例如 SET lock-key unique-token NX EX 30；NX 保证只有第一个请求成功，EX 防止持锁进程崩溃后永久占锁。释放时必须用 Lua 原子校验 value 后再删除，不能直接 DEL，否则可能误删别人的锁。还要考虑业务执行超过 TTL、续期、Redis 故障和主从切换等问题。
+    key_points:
+      - [SETNX, setnx, SET]
+      - [过期时间, TTL, 超时]
+      - [原子, Lua, 锁误删, 续期]
+
+  - id: mysql-01
+    source: mysql
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: MySQL 的 MVCC 是怎么实现的
+    query_hard: 一个事务在读数据的时候，别的事务正在改同一行，它怎么做到读到的是一个不变的旧版本
+    answerable: true
+    reference_answer: InnoDB 更新记录时会把旧版本写入 undo log，并通过回滚指针形成版本链；记录和版本带有事务 ID。普通一致性读创建 ReadView，根据事务可见性规则沿版本链找到对当前事务可见的版本，因此读写通常不互相阻塞。加锁的当前读则读取最新版本并按锁规则执行。
+    key_points:
+      - [版本链, undo log, 回滚指针]
+      - [ReadView, read view, 一致性视图]
+      - [可见性, 事务 id, trx_id]
+
+  - id: mysql-02
+    source: mysql
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: fact
+    review_status: draft
+    question: MySQL 事务有哪些隔离级别
+    query_hard: 多个事务同时跑会互相干扰，数据库提供了哪几档由松到严的隔离设置
+    answerable: true
+    reference_answer: SQL 标准的四种隔离级别从弱到强是：读未提交（Read Uncommitted）、读已提交（Read Committed）、可重复读（Repeatable Read）和串行化（Serializable）。隔离越强并发能力通常越低；InnoDB 默认是可重复读，并通过 MVCC 和锁减少脏读、不可重复读及幻读问题。
+    key_points:
+      - [读未提交, Read Uncommitted]
+      - [读已提交, Read Committed]
+      - [可重复读, Repeatable Read]
+      - [串行化, Serializable]
+
+  - id: mysql-03
+    source: mysql
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: comparison
+    review_status: draft
+    question: 为什么 InnoDB 索引用 B+ 树而不用 B 树
+    query_hard: 存索引的时候为什么选那种只有叶子放数据、叶子还串成链表的树，而不是每层都放数据的树
+    answerable: true
+    reference_answer: B+ 树的非叶子节点只存键和指针，能在相同页大小下容纳更多键，使树高更低、磁盘 I/O 更少；所有记录都在叶子节点，叶子按顺序连接，范围查询和排序扫描更高效。B 树的非叶子节点也存数据，范围遍历和缓存利用通常不如 B+ 树稳定。
+    key_points:
+      - [B+ 树, B+树]
+      - [叶子节点, 数据都在叶子]
+      - [范围查询, 链表, 树高, IO]
+
+  - id: mysql-15
+    source: mysql
+    difficulty: synthesis
+    split: smoke
+    origin: assistant_draft
+    question_type: diagnosis
+    review_status: draft
+    question: 如何优化一条慢 SQL
+    query_hard: 有条查询跑得特别慢，从哪些方面入手把它调快，常用哪些手段和工具去分析
+    answerable: true
+    reference_answer: 先用慢查询日志、EXPLAIN 或 EXPLAIN ANALYZE 定位是扫描量、连接、排序还是回表耗时；再根据过滤、连接和排序条件设计合适索引，检查联合索引的最左前缀和选择性。避免对索引列做函数或隐式类型转换，避免无必要的 SELECT *，大分页可改为基于索引游标的 seek 分页。最后用真实数据量验证执行计划和延迟，不能只看小表上的结果。
+    key_points:
+      - [索引, 覆盖索引]
+      - [EXPLAIN, 执行计划]
+      - [慢查询, 全表扫描, 分页]
+
+  - id: dist-01
+    source: distributed
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: 说说 CAP 原则
+    query_hard: 分布式系统里数据一致、服务可用、能扛住网络断开这三点为什么没法同时全要
+    answerable: true
+    reference_answer: CAP 指 Consistency、一致性；Availability、可用性；Partition tolerance、分区容错。网络分区发生时，系统必须在一致性和可用性之间取舍，因此不能在发生分区时同时保证三者。实际分布式系统通常先保证分区容错，再根据业务选择 CP 或 AP，并通过重试、补偿或最终一致性处理取舍。
+    key_points:
+      - [一致性, Consistency]
+      - [可用性, Availability]
+      - [分区容错, Partition]
+      - [不可兼得, 三者]
+
+  - id: dist-03
+    source: distributed
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: comparison
+    review_status: draft
+    question: 分布式事务有哪些实现方案
+    query_hard: 跨好几个服务和库的操作要么一起成功要么一起回滚，业界都有哪些落地方案
+    answerable: true
+    reference_answer: 常见方案有 2PC/XA、TCC、本地消息表加异步重试、可靠消息最终一致性以及 Saga。2PC 强一致但同步阻塞和协调者故障代价较大；TCC 需要业务实现 Try、Confirm、Cancel；本地消息表把业务变更和消息落库放在一个本地事务中，再靠重试和幂等最终投递。应按一致性、可用性、性能和改造成本选择，而不是默认使用一种方案。
+    key_points:
+      - [2PC, 两阶段提交]
+      - [TCC]
+      - [本地消息表, MQ, Saga, Seata]
+
+  - id: dist-06
+    source: distributed
+    difficulty: synthesis
+    split: smoke
+    origin: assistant_draft
+    question_type: procedure
+    review_status: draft
+    question: 本地消息表是怎么保证最终一致性的
+    query_hard: 把要发的消息和业务数据放一个本地事务里先落库，再靠后台定时捞出来投递重试，这套怎么做到不丢
+    answerable: true
+    reference_answer: 业务数据更新和待发送消息写入同一个本地事务，事务提交成功就保证消息记录不会和业务状态分离；后台任务扫描未发送消息投递到 MQ 或下游，失败则重试并记录状态。消费者必须幂等，生产者和消费者还要处理重复投递、超时和死信，必要时通过对账补偿。因此它通常提供最终一致性，不等于实时强一致。
+    key_points:
+      - [本地事务, 同一个事务]
+      - [消息表, 消息]
+      - [轮询, 定时, 重试, 幂等]
+
+  - id: dist-09
+    source: distributed
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: diagnosis
+    review_status: draft
+    question: 什么是服务雪崩，如何做熔断和降级
+    query_hard: 一个服务挂了把依赖它的上游一个接一个全拖垮，这种连锁故障怎么防，靠什么机制及时断开
+    answerable: true
+    reference_answer: 服务雪崩是一个依赖故障通过同步调用、线程池和连接池耗尽等方式级联扩散。可以用超时和限流控制资源，用舱壁隔离拆分线程池，用熔断器在错误率或超时达到阈值后暂时停止调用，并返回缓存、默认值或降级结果；恢复阶段还要半开探测。重试必须有上限和退避，避免放大流量。
+    key_points:
+      - [雪崩, 连锁, 级联]
+      - [熔断, 断路器]
+      - [降级, 限流, 隔离]
+
+  - id: jvm-01
+    source: jvm
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: fact
+    review_status: draft
+    question: JVM 的运行时内存区域是怎么划分的
+    query_hard: 一个 Java 程序跑起来后，虚拟机把内存切成了哪几块，各自装什么东西
+    answerable: true
+    reference_answer: JVM 运行时数据区通常包括程序计数器、Java 虚拟机栈、本地方法栈、堆和方法区。程序计数器记录当前线程执行位置；虚拟机栈保存栈帧和局部变量，线程私有；堆存放对象，线程共享；方法区存放类元数据、常量等，HotSpot 中通常由元空间实现。不同 JVM 版本的具体实现可能有差异。
+    key_points:
+      - [程序计数器, 计数器]
+      - [虚拟机栈, 本地方法栈]
+      - [堆, heap]
+      - [方法区, 元空间, metaspace]
+
+  - id: jvm-04
+    source: jvm
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: 什么是双亲委派模型，有什么好处
+    query_hard: 加载一个类的时候为什么要先交给上一级加载器去试，这么设计是为了防止什么
+    answerable: true
+    reference_answer: 类加载器收到加载请求后，通常先把请求委托给父加载器，父加载器无法加载时子加载器才尝试加载。这样可以让核心类优先由启动类加载器加载，避免应用自定义同名类替换核心类，也减少类的重复加载。它是常见实现的协作模型，不是所有自定义类加载场景都必须严格遵循。
+    key_points:
+      - [双亲委派, parent delegation]
+      - [父加载器, 先给父]
+      - [安全, 避免重复, 核心类]
+
+  - id: jvm-05
+    source: jvm
+    difficulty: fact
+    split: smoke
+    origin: assistant_draft
+    question_type: fact
+    review_status: draft
+    question: JVM 有哪些垃圾回收算法
+    query_hard: 虚拟机清理没用的对象，底层用的是哪几类基本的回收思路
+    answerable: true
+    reference_answer: 基本算法包括标记-清除、复制、标记-整理和分代收集。标记-清除会产生碎片；复制适合存活对象少的区域但需要额外空间；标记-整理会把存活对象压到一端以减少碎片；分代收集按对象年龄和存活特征分别使用策略。实际收集器如 G1、ZGC 是更复杂的工程实现，不等同于单一基础算法。
+    key_points:
+      - [标记清除, mark-sweep]
+      - [复制, copying]
+      - [标记整理, mark-compact]
+      - [分代, generational]
+
+  - id: jvm-11
+    source: jvm
+    difficulty: synthesis
+    split: smoke
+    origin: assistant_draft
+    question_type: diagnosis
+    review_status: draft
+    question: 线上 CPU 飙高或频繁 Full GC 怎么排查
+    query_hard: 生产环境某个 Java 进程 CPU 打满或者一直在回收，用哪些命令一步步定位到是哪段代码
+    answerable: true
+    reference_answer: 先确认进程、时间范围和 GC 日志，使用 top 或 pidstat 找到高 CPU 进程，再用 top -H 或线程 dump 定位高 CPU 线程并把线程 ID 转成十六进制，在 jstack 中找到对应栈。频繁 Full GC 要结合 jstat、GC 日志和堆转储分析老年代增长、晋升失败、大对象或泄漏，必要时用 jmap/jcmd 导出 dump。排查时要先止损并控制 dump 影响，不能只凭一次快照下结论。
+    key_points:
+      - [top, 线程, CPU]
+      - [jstack, 线程栈]
+      - [jmap, jstat, dump]
+
+  - id: spring-01
+    source: spring
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: 什么是 IOC 和 DI
+    query_hard: 对象不再自己 new 依赖，而是交给容器创建再塞给它，这套控制反转和依赖注入到底指什么
+    answerable: true
+    reference_answer: IoC 是把对象创建、组装和生命周期管理的控制权从业务代码交给 Spring 容器；DI 是容器根据配置或注解把依赖注入对象，常见方式有构造器、setter 和字段注入。这样业务类面向抽象并降低耦合，也便于替换实现和测试。
+    key_points:
+      - [控制反转, IOC, 容器]
+      - [依赖注入, DI, 注入]
+      - [解耦, Bean]
+
+  - id: spring-02
+    source: spring
+    difficulty: synthesis
+    split: smoke
+    origin: assistant_draft
+    question_type: procedure
+    review_status: draft
+    question: Spring Bean 的生命周期是怎样的
+    query_hard: 一个 Bean 从被容器创建到销毁，中间会依次经过实例化、属性填充、初始化等哪些回调
+    answerable: true
+    reference_answer: Bean 通常经历实例化、属性填充和依赖注入、Aware 回调、BeanPostProcessor 的 before 阶段、初始化方法（如 @PostConstruct、InitializingBean 或 init-method）、BeanPostProcessor 的 after 阶段，之后投入使用；容器关闭时执行销毁回调（@PreDestroy、DisposableBean 或 destroy-method）。AOP 代理可能在后置处理器阶段生成。
+    key_points:
+      - [实例化, 属性赋值, populate]
+      - [初始化, afterPropertiesSet, init]
+      - [Aware, BeanPostProcessor, 销毁]
+
+  - id: spring-05
+    source: spring
+    difficulty: concept
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: Spring AOP 的实现原理是什么
+    query_hard: 不改原方法却能在前后插一段逻辑，底层是靠动态生成代理对象实现的，用了哪两种代理
+    answerable: true
+    reference_answer: Spring AOP 通常通过代理对象织入切面逻辑：目标类实现接口时可使用 JDK 动态代理，代理对象实现同样的接口；没有合适接口时通常使用 CGLIB 生成目标类的子类。调用代理方法时会先执行拦截器链，再调用目标方法。final 类或 final 方法等限制会影响 CGLIB 代理。
+    key_points:
+      - [动态代理, 代理]
+      - [JDK 动态代理, 接口]
+      - [CGLIB, 子类]
+
+  - id: spring-10
+    source: spring
+    difficulty: synthesis
+    split: smoke
+    origin: assistant_draft
+    question_type: concept
+    review_status: draft
+    question: Spring Boot 自动配置的原理是什么
+    query_hard: 引入一个 starter 几乎不用配就能用，它是靠什么注解和机制按条件帮你把 Bean 装好的
+    answerable: true
+    reference_answer: >-
+      @SpringBootApplication 包含 @EnableAutoConfiguration，启动时按约定加载候选自动配置类（新版本主要来自 AutoConfiguration.imports，旧版本常见 spring.factories）。每个配置类通过 @ConditionalOnClass、@ConditionalOnMissingBean、@ConditionalOnProperty 等条件判断是否生效，满足条件才注册 Bean。starter 主要负责提供依赖和默认配置，不代表所有 Bean 都无条件创建。
+    key_points:
+      - [EnableAutoConfiguration, 自动配置]
+      - [AutoConfiguration.imports, spring.factories, SPI]
+      - [Conditional, 条件装配]

@@ -146,6 +146,9 @@ MySQL 与 Elasticsearch。
 统一评测页与离线脚本覆盖意图、检索与 Judge；Critic bad-case 作为 Agent 质量门备注，
 基线可对比回归。
 
+RAGAS 100 题、优化前后对比、GraphRAG/Text2SQL/Excel 专项结果及 STAR 项目介绍见
+[docs/RAG_EVAL_COMPARISON_AND_STAR.md](docs/RAG_EVAL_COMPARISON_AND_STAR.md)。
+
 ### 6. 外部取证边界清晰
 
 GitHub 只读公开仓与固定 SHA；Judge0 执行不可信源码；平台不向外暴露通用 MCP Server。

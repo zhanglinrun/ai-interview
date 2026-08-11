@@ -291,7 +291,8 @@ public class KnowledgeBaseController {
 
     /**
      * RAGAS 生成质量评测导出（P4.3）：批量跑评测集问题走完整 RAG 生成，
-     * 返回 {@code {question, answer, contexts, ground_truth}} 供 eval/ragas 计算生成质量指标。
+     * 返回 {@code {id, source, difficulty, question, answer, contexts, referenceAnswer,
+     * groundTruth, latencyMs, noEvidence}} 供 eval/ragas 计算生成质量指标。
      */
     @PostMapping("/api/v1/knowledge-bases/eval/export-qa")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)

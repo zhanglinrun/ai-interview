@@ -175,7 +175,7 @@ public class KnowledgeBaseQueryProperties {
         /**
          * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块，对齐业界实践）。
          */
-        private String strategy = "replace";
+        private String strategy = "append";
         /** 单个命中 chunk 扩展后的最大字符数 */
         private int maxChars = 1200;
         /** 最多聚合的兄弟 chunk 数 */

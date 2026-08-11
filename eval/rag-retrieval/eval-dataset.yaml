@@ -2,6 +2,8 @@
 #
 # 用途：在固定语料下，量化对比「纯向量 / 向量+BM25 混合 / 混合+rerank」三档检索策略
 #       的召回与排序质量，为简历指标提供可复现的实验证据。
+# 状态：当前是 retrieval-dev 词法代理集，不是经过人工审核的最终 RAGAS gold 集。
+#       正式生成质量请使用 eval/ragas/generation-dataset.yaml，并补齐 reference/evidence/review。
 #
 # 语料（fixture，本地准备，不进 git）：5 类 Java 后端面试 PDF
 #   - 面渣逆袭Redis篇V2.0.pdf
@@ -18,12 +20,19 @@
 #   question      简单查询（贴近原文的面试问法，含关键词）
 #   query_hard    困难查询（口语化/场景化问法，刻意避开原文术语，
 #                 用于逼出纯向量的漏召回，给混合检索与 rerank 留出发挥空间）
-#   key_points    必含关键点组（每组是同义词候选数组，命中其一即算该点命中）。
+#   key_points    开发期关键点组（当前评分按候选词 substring 命中；必须人工确认每组真的是同义表达，
+#                 不能把多个可选方案或不同层次概念混在一起）。
 #                 既用于判定单个 chunk 的「分级相关性」（一个 chunk 覆盖几组 key_point
 #                 就是它的相关性等级），也用于整体召回判定。
+#   reference_answer（可选，生成评测正式模式必填）人工审核的完整参考答案，不能由被测 RAG 生成。
+#   answerable（可选，默认 true）是否应该由知识库回答；false 用于拒答/幻觉评测。
 #
 # 审核提示：query_hard 是第二轮新增。判断标准是「真人会不会这么问、且没直接报答案术语」。
 #           不合适的直接改。
+
+metadata:
+  purpose: retrieval_dev
+  status: lexical_proxy_pending_review
 
 questions:
   # ==================== Redis（共 21 题：本区 18 + 补充区 3）====================

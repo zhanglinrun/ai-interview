@@ -70,10 +70,13 @@ GEMINI.md
 !/README.md
 !/SETUP_API_KEYS.md
 !/dev-ops/**/*.md
+!/eval/ragas/DATASET_REVIEW.md
 !backend/src/test/resources/test-files/sample-resume.md
 
 # Local design and implementation notes
 docs/
+!docs/
+!docs/RAG_EVAL_COMPARISON_AND_STAR.md
 
 # OS files
 .DS_Store
@@ -83,6 +86,7 @@ study/**
 
 # RAG evaluation corpus (third-party PDFs) and eval run artifacts — local only
 eval/corpus/
+eval/fixtures/*.inspect.ndjson
 eval/.work/
 
 .trellis/

@@ -135,7 +135,9 @@ public class EvalRunService {
           qualityProperties.getRetrievalMrr());
       addGateMetric(metrics, thresholds, failures, "retrievalNdcg", rag.ndcg(),
           qualityProperties.getRetrievalNdcg());
-      addGateMetric(metrics, thresholds, failures, "citationCoverage", rag.citationCoverage(),
+      // 这里运行的是“只检索”评测，没有生成答案，citationCoverage 只是旧兼容字段；
+      // 门禁必须明确标为 retrievalPrecision，不能把它解释成回答引用覆盖率。
+      addGateMetric(metrics, thresholds, failures, "retrievalPrecision", rag.retrievalPrecision(),
           qualityProperties.getCitationCoverage());
     }
     if (judge != null && judge.total() > 0) {

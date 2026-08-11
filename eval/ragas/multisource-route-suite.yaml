@@ -1,0 +1,194 @@
+# 多源 RAG 路由回归集（独立于 100 题文档生成集）
+#
+# source=structured 映射到上传的 Excel 关系表（RAGEVAL_KB_STRUCTURED）。
+# 同一个知识库请求会按问题意图进入 graph_db、relational_db 或 knowledge_base，
+# 用于验证完整链路，而不是把图/SQL 仅当作单元测试绕过 RAG。
+# SQL 题的答案是本次评测账号 user_id=4 的快照（导出前数据库中 6 份文档）。
+
+metadata:
+  name: multisource-route-suite
+  status: assistant_curated_pending_human_review
+  purpose: graph_sql_excel_end_to_end_smoke
+  corpus_version: rag-platform-relations-xlsx-2026-08-11
+  snapshot: user_id=4, documents=6, all_doc_status=VECTOR_STORED
+
+questions:
+  - id: "route-graph-001"
+    source: "structured"
+    split: "dev"
+    origin: "graph_seed_manual"
+    difficulty: "fact"
+    question_type: "graph_path"
+    question: "请查询图数据库中 RAG 节点通过 ROUTES_TO 关系连接到哪些目标实体？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "RAG 通过 ROUTES_TO 关系连接到 MySQL 和 Neo4j：结构化记录类问题路由到 MySQL，实体关系、依赖和路径问题路由到 Neo4j。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["RAG", "ROUTES_TO"]
+      - ["MySQL"]
+      - ["Neo4j"]
+    gold_evidence:
+      - doc_id: "rag-domain-seed"
+        section: "RAG ROUTES_TO"
+        quote: "RAG 在结构化记录类问题路由到 MySQL，在实体关系、依赖和路径问题路由到 Neo4j。"
+
+  - id: "route-graph-002"
+    source: "structured"
+    split: "dev"
+    origin: "graph_seed_manual"
+    difficulty: "fact"
+    question_type: "graph_relation"
+    question: "请查询 Neo4j 图数据库中的实体关系：Text2Cypher 节点通过 EXECUTES_ON 关系连接到哪个目标数据库？只依据图数据库结果回答。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Text2Cypher 只读查询在 Neo4j 图数据库上执行。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Text2Cypher"]
+      - ["Neo4j"]
+      - ["只读", "执行在 Neo4j"]
+    gold_evidence:
+      - doc_id: "rag-domain-seed"
+        section: "Text2Cypher EXECUTES_ON"
+        quote: "Text2Cypher 只读查询在 Neo4j 上执行。"
+
+  - id: "route-graph-003"
+    source: "structured"
+    split: "dev"
+    origin: "graph_seed_manual"
+    difficulty: "fact"
+    question_type: "graph_relation"
+    question: "请查询 Neo4j 图数据库中的实体关系：Spring Boot 节点通过 INTEGRATES_WITH 关系连接到哪些异步和缓存组件？只返回 RabbitMQ 和 Redis，不要列出其他关系。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "图数据库返回 Spring Boot 通过 INTEGRATES_WITH 关系连接 RabbitMQ 和 Redis；关系描述分别是通过事件监听/消息组件连接 RabbitMQ，以及通过缓存和锁组件连接 Redis。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Spring Boot", "RabbitMQ"]
+      - ["Spring Boot", "Redis"]
+      - ["异步", "缓存"]
+    gold_evidence:
+      - doc_id: "rag-domain-seed"
+        section: "Spring Boot INTEGRATES_WITH"
+        quote: "长任务和文档向量化事件使用 RabbitMQ；Redis 用于会话、缓存和分布式能力。"
+
+  - id: "route-sql-001"
+    source: "structured"
+    split: "dev"
+    origin: "sql_snapshot"
+    difficulty: "fact"
+    question_type: "structured_count"
+    question: "只统计当前用户 user_id=4 的知识库文档，我上传了多少份？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "当前用户 user_id=4 有 6 份已上传知识库文档。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["documents"]
+      - ["user_id=4"]
+      - ["6"]
+    gold_evidence:
+      - doc_id: "mysql-documents-snapshot"
+        section: "documents WHERE user_id=4"
+        quote: "导出前 documents 表中 user_id=4 的记录数为 6。"
+
+  - id: "route-sql-002"
+    source: "structured"
+    split: "dev"
+    origin: "sql_snapshot"
+    difficulty: "fact"
+    question_type: "structured_count"
+    question: "查询我上传的知识库文档中，状态为 VECTOR_STORED 的有多少份？只返回我的记录。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "当前用户 user_id=4 的 6 份文档状态均为 VECTOR_STORED，因此数量为 6。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["doc_status", "VECTOR_STORED"]
+      - ["user_id=4"]
+      - ["6"]
+    gold_evidence:
+      - doc_id: "mysql-documents-snapshot"
+        section: "documents WHERE user_id=4 AND doc_status=VECTOR_STORED"
+        quote: "导出前 user_id=4 的 6 份文档均已向量化并处于 VECTOR_STORED。"
+
+  - id: "route-sql-003"
+    source: "structured"
+    split: "dev"
+    origin: "sql_snapshot"
+    difficulty: "fact"
+    question_type: "structured_list"
+    question: "查询我当前 user_id=4 上传的知识库文档名称和状态，只返回我的记录。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "应返回当前用户的 6 条文档记录，并包含每条文档的名称和 VECTOR_STORED 状态；不应返回其他用户记录。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["name"]
+      - ["doc_status"]
+      - ["user_id=4"]
+    gold_evidence:
+      - doc_id: "mysql-documents-snapshot"
+        section: "documents SELECT name, doc_status"
+        quote: "Text2SQL 结果只包含 user_id=4 的文档名称和状态。"
+
+  - id: "route-excel-001"
+    source: "structured"
+    split: "dev"
+    origin: "excel_fixture"
+    difficulty: "fact"
+    question_type: "table_lookup"
+    question: "Excel 关系表中，RAG 从哪个组件检索非结构化文档分段？只回答组件名称。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "RAG 从 Elasticsearch 检索非结构化文档分段。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["RAG"]
+      - ["RETRIEVES_FROM"]
+      - ["Elasticsearch"]
+    gold_evidence:
+      - doc_id: "rag-platform-relations.xlsx"
+        section: "PlatformRelations!A4:F4"
+        quote: "RAG | 检索 | RETRIEVES_FROM | Elasticsearch"
+
+  - id: "route-excel-002"
+    source: "structured"
+    split: "dev"
+    origin: "excel_fixture"
+    difficulty: "fact"
+    question_type: "table_lookup"
+    question: "Excel 关系表中，RAG 混合召回后使用什么能力进行重新排序？只回答能力名称，不展开配置。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "混合召回后使用本地 BGE Reranker 对结果重新排序。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["RAG"]
+      - ["RERANKS"]
+      - ["BGE Reranker"]
+    gold_evidence:
+      - doc_id: "rag-platform-relations.xlsx"
+        section: "PlatformRelations!A7:F7"
+        quote: "RAG | 排序 | RERANKS | BGE Reranker"
+
+  - id: "route-excel-003"
+    source: "structured"
+    split: "dev"
+    origin: "excel_fixture"
+    difficulty: "fact"
+    question_type: "table_lookup"
+    question: "Excel 关系表中，LangGraph 建立在什么框架之上？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "LangGraph 复用并建立在 LangChain 的模型和工具抽象之上。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["LangGraph"]
+      - ["BUILDS_ON"]
+      - ["LangChain"]
+    gold_evidence:
+      - doc_id: "rag-platform-relations.xlsx"
+        section: "PlatformRelations!A12:F12"
+        quote: "LangGraph | 框架 | BUILDS_ON | LangChain"

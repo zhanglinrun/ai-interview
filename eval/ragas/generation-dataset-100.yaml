@@ -1,0 +1,2348 @@
+# RAGAS 生成质量 100 题候选集
+#
+# 这是基于 eval/corpus 五类 PDF 的 source-grounded candidate gold 集：每个知识域 20 题，
+# 其中 16 题 dev、4 题 holdout；每域含 2 道知识库无答案题。
+# reference_answer/gold_evidence 已按语料章节整理，但 review_status 明确标为
+# assistant_curated_pending_human_review。完成领域人工复核后，才可改为 human_reviewed 并运行 strict。
+# 运行审核规范：eval/ragas/DATASET_REVIEW.md
+
+metadata:
+  name: rag-generation-100-candidate
+  status: assistant_curated_pending_human_review
+  purpose: ragas_generation_and_refusal_eval
+  corpus_version: eval-corpus-local-2026-08-11
+  split_policy: each source has 16 dev and 4 holdout
+  reference_policy: paraphrased from corpus, pending human review
+  evidence_policy: doc_id + section + short quote anchor; actual retrieved_contexts come from the RAG run
+
+questions:
+  - id: "redis-001"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Redis 支持哪些基本数据类型"
+    query_hard: "我想在内存数据库里存不同结构的数据，它原生能放哪几类值？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 常用的五种基本类型是 String、List、Hash、Set 和 Sorted Set（ZSet）。Stream、Bitmap、HyperLogLog、Geo 属于额外数据结构，回答时应区分基本类型和扩展结构。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["String","字符串"]
+      - ["List","列表"]
+      - ["Hash","哈希"]
+      - ["Set","集合"]
+      - ["Sorted Set","ZSet","有序集合"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "1. Redis有哪些数据类型？"
+        quote: "Redis 支持五种基本数据类型，分别是字符串、列表、哈希、集合和有序集合。"
+
+  - id: "redis-002"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "Redis 为什么快"
+    query_hard: "同样是数据库，为什么这个内存服务通常比磁盘数据库响应更快？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 主要把数据放在内存中，减少磁盘随机 I/O；事件循环和 I/O 多路复用提高连接处理效率；高效数据结构降低了常用操作的复杂度。单线程主要负责命令执行，并不意味着所有网络处理都只能由一个线程完成，实际延迟还受网络、命令复杂度和数据规模影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["内存驻留","内存存储","memory-resident"]
+      - ["I/O 多路复用","epoll","kqueue"]
+      - ["事件循环","单线程命令执行"]
+      - ["高效数据结构","低复杂度"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "4. Redis 为什么快呢？"
+        quote: "Redis 会根据操作系统选择最优的 I/O 多路复用技术，并把数据主要放在内存中。"
+
+  - id: "redis-003"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Redis 有哪些持久化方式"
+    query_hard: "内存数据如果机器断电，Redis 用什么方式把数据保留下来？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 主要有 RDB 和 AOF 两种持久化方式。RDB 生成某个时间点的快照，文件紧凑、恢复较快，但可能丢失最近一次快照后的数据；AOF 追加写命令，通常数据丢失窗口更小，但文件和恢复成本可能更大；两者可以组合使用。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["RDB","快照"]
+      - ["AOF","追加日志"]
+      - ["混合持久化","RDB+AOF"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "10.Redis的持久化方式有哪些？"
+        quote: "Redis 的持久化方式主要包括 RDB 快照和 AOF 日志。"
+
+  - id: "redis-004"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "RDB 和 AOF 有什么区别，宕机后哪种恢复更快"
+    query_hard: "两种落盘方案在数据丢失窗口、文件大小和恢复速度上怎么取舍？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "RDB 是时间点快照，文件通常更紧凑、恢复较快，但两次快照之间的数据可能丢失；AOF 记录写命令，按同步策略可以把丢失窗口压小，但文件可能更大、重放命令恢复较慢。选择取决于恢复速度、数据安全窗口和磁盘开销，也可以使用混合持久化。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["RDB 快照"]
+      - ["AOF 写命令"]
+      - ["恢复速度差异"]
+      - ["数据丢失窗口"]
+      - ["同步策略"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "11.RDB 和 AOF 各自有什么优缺点？"
+        quote: "RDB 文件紧凑、恢复较快，但可能丢失最近一次快照后的数据；AOF 的数据丢失窗口通常更小，但文件更大。"
+
+  - id: "redis-005"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Redis 主从复制的原理是什么"
+    query_hard: "主节点写入后，从节点怎样跟上这份数据，断线后又如何继续同步？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 主从复制通常是异步的：从节点先完成握手并同步主节点信息，之后接收主节点传播的写命令。首次或无法增量恢复时进行全量同步；短暂断线且复制积压缓冲区仍覆盖缺口时可以增量同步。异步复制意味着主节点返回成功时从节点可能尚未完成同步。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["异步复制"]
+      - ["全量同步"]
+      - ["增量同步"]
+      - ["复制积压缓冲区"]
+      - ["复制延迟"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "17.Redis主从复制原理了解吗？"
+        quote: "主节点把数据变更异步传播给从节点，断线后会根据复制偏移量判断能否增量同步。"
+
+  - id: "redis-006"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "Redis 哨兵机制的作用和故障转移流程是什么"
+    query_hard: "主节点挂掉时，怎样自动发现故障并把从节点提升为新主节点？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis Sentinel 负责监控主从节点、判断主观下线和客观下线，并在主节点故障时组织故障转移。多个 Sentinel 通过投票选出负责执行故障转移的领导者，再从从节点中选择合适节点提升为主节点，并通知其他节点更新配置。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["监控"]
+      - ["主观下线"]
+      - ["客观下线"]
+      - ["领导者选举"]
+      - ["故障转移"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "20.Redis哨兵机制了解吗？"
+        quote: "Redis 中的哨兵用于监控主从集群，并在主节点故障时自动进行故障转移。"
+
+  - id: "redis-007"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "concept"
+    question: "Redis Cluster 如何分配数据"
+    query_hard: "集群扩容或缩容时，Redis 怎样把 key 分散到不同节点？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis Cluster 使用 16384 个哈希槽进行数据分片，key 经过 CRC16 等规则映射到槽，再由槽归属节点负责。扩缩容的核心是迁移哈希槽；使用 hash tag 可以让相关 key 落在同一个槽中，从而支持部分多 key 操作。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["16384 个哈希槽"]
+      - ["key 到槽映射"]
+      - ["槽归属节点"]
+      - ["槽迁移"]
+      - ["hash tag"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "26.集群中数据如何分区？"
+        quote: "Redis Cluster 通过哈希槽对数据进行分区，节点负责一部分槽位。"
+
+  - id: "redis-008"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是缓存穿透，如何防止"
+    query_hard: "有人反复查询数据库里根本不存在的 id，缓存为什么挡不住，应该怎么办？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "缓存穿透是请求查询不存在的数据，缓存和数据库都没有结果，导致请求持续打到数据库。常见措施包括布隆过滤器拦截明显不存在的 key、缓存空值并设置较短过期时间，以及在入口做参数校验和限流。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["查询不存在数据"]
+      - ["布隆过滤器"]
+      - ["缓存空值"]
+      - ["参数校验","限流"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "29.什么是缓存穿透？"
+        quote: "缓存穿透是查询一个根本不存在的数据，缓存中没有，最终每次都请求数据库。"
+
+  - id: "redis-009"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是缓存击穿，怎么解决"
+    query_hard: "某个访问量很高的 key 恰好过期，瞬间大量请求打到数据库，如何处理？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "缓存击穿通常指热点 key 在失效瞬间被大量并发请求访问。可以用互斥锁让一个请求重建缓存、逻辑过期先返回旧值并异步刷新，或者对极热点数据采用不过期并主动更新；同时要控制重建超时和失败重试。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["热点 key"]
+      - ["过期瞬间"]
+      - ["互斥锁"]
+      - ["逻辑过期"]
+      - ["主动更新"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "29.什么是缓存击穿？"
+        quote: "缓存击穿通常发生在热点数据过期时，大量请求同时访问数据库。"
+
+  - id: "redis-010"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是缓存雪崩，如何防止"
+    query_hard: "一批缓存差不多同时失效，或者缓存服务整体不可用，怎样避免数据库被冲垮？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "缓存雪崩是大量 key 同时过期或缓存服务整体故障，造成请求集中回源。可通过给 TTL 加随机抖动、分批预热、限流和熔断、部署高可用集群、使用多级缓存以及提供降级结果来降低影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["大量 key 同时过期"]
+      - ["缓存整体故障"]
+      - ["TTL 随机抖动"]
+      - ["限流熔断"]
+      - ["高可用","多级缓存"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "29.什么是缓存雪崩？"
+        quote: "缓存雪崩可以由大量缓存同时失效引起，需要从过期时间、服务高可用和流量保护几个方向处理。"
+
+  - id: "redis-011"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "布隆过滤器是什么，有什么误判特点"
+    query_hard: "它为什么能快速判断一个元素可能存在，但又不能直接说一定存在？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "布隆过滤器由位数组和多个哈希函数组成。查询结果为“不存在”时可以确定不存在；结果为“存在”只表示可能存在，因为哈希碰撞会产生误判。它通常不支持从标准位数组中安全删除单个元素，误判率受位数组大小、哈希函数数量和元素数量影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["位数组"]
+      - ["多个哈希函数"]
+      - ["不存在时无误判"]
+      - ["可能存在的误判"]
+      - ["误判率因素"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "30.能说说布隆过滤器吗？"
+        quote: "布隆过滤器通过多个哈希函数把元素映射到位数组，可能存在误判，但不会把存在判断成不存在。"
+
+  - id: "redis-012"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "如何保证 Redis 缓存和数据库的数据一致性"
+    query_hard: "更新数据库和删除缓存的顺序怎么设计，失败重试又怎么处理？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "缓存旁路模式下，常见做法是先更新数据库，再删除缓存；读请求在缓存未命中时从数据库读取并回填。删除缓存失败时可通过重试、延迟双删、消息队列或订阅变更日志补偿。要承认这通常是最终一致性，并配合过期时间和幂等处理。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["先更新数据库"]
+      - ["删除缓存"]
+      - ["失败重试","补偿"]
+      - ["最终一致性"]
+      - ["幂等"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "31.如何保证缓存和数据库的数据一致性？"
+        quote: "常见缓存旁路策略是在数据库更新成功后删除 Redis，并对删除失败做重试或补偿。"
+
+  - id: "redis-013"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Redis 有哪些内存淘汰策略"
+    query_hard: "达到 maxmemory 后，Redis 可以按什么规则淘汰 key？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 达到 maxmemory 后会按配置的淘汰策略处理，例如不淘汰直接返回错误、从所有 key 中按 LRU/LFU 或随机淘汰，或者只在设置了过期时间的 key 中按 TTL/LRU/LFU 或随机淘汰。具体策略取决于版本和配置，不能把“过期删除”和“内存淘汰”混为一谈。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["maxmemory"]
+      - ["noeviction"]
+      - ["LRU","LFU"]
+      - ["随机淘汰"]
+      - ["volatile 范围"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "38.Redis 报内存不足怎么处理？"
+        quote: "Redis 内存不足时需要检查 maxmemory、淘汰策略和实际 key 使用情况。"
+
+  - id: "redis-014"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Redis key 的过期删除策略有哪些"
+    query_hard: "设置了 TTL 的 key 到期后，是立刻删除还是访问时才处理？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 的过期删除主要结合惰性删除和定期删除：访问到已过期 key 时再删除，后台定期抽查并删除一批过期 key。这样在及时清理和避免后台任务占满 CPU 之间做折中，过期并不等于到点立刻删除。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["惰性删除"]
+      - ["定期删除"]
+      - ["访问触发"]
+      - ["后台抽查"]
+      - ["过期不等于立即删除"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "39.Redis key过期策略有哪些？"
+        quote: "Redis 主要采用惰性删除和定期删除两种过期删除策略。"
+
+  - id: "redis-015"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "Redis 如何实现一个安全的分布式锁"
+    query_hard: "只用 SETNX 加锁和 DEL 解锁为什么不够，正确流程应该怎样？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "加锁时应使用带唯一 token 和过期时间的原子命令，例如 SET lock-key unique-token NX EX 30。释放锁时必须用 Lua 原子校验 token 后再删除，不能直接 DEL，避免持锁线程过期后误删别人的锁；还要考虑业务超过 TTL、续期、主从切换和故障恢复。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["SET NX EX"]
+      - ["唯一 token"]
+      - ["Lua 校验再删除"]
+      - ["TTL 续期"]
+      - ["故障切换风险"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "5.3 Redis怎么实现分布式锁？"
+        quote: "Redis 分布式锁需要利用原子加锁，并在释放时校验锁的持有者。"
+
+  - id: "redis-016"
+    source: "redis"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "Redisson 的看门狗机制解决什么问题"
+    query_hard: "锁的业务执行时间不固定时，Redisson 怎样避免固定租约过期？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redisson 看门狗会在没有显式指定 leaseTime 时，为持有锁的客户端周期性续期，避免业务尚未完成时固定 TTL 到期。客户端崩溃或连接失效后续期停止，锁最终会因 TTL 到期释放；显式 leaseTime 时通常不依赖看门狗无限续期。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["周期性续期"]
+      - ["未显式 leaseTime"]
+      - ["客户端存活"]
+      - ["TTL 到期释放"]
+      - ["业务执行时间不确定"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "5.3 Redis怎么实现分布式锁？"
+        quote: "Redis 锁需要考虑锁过期和业务执行时间不一致的问题，客户端续期可以减少误释放。"
+
+  - id: "redis-017"
+    source: "redis"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "zset 的底层结构是什么，为什么适合排行榜"
+    query_hard: "有序集合既要按成员查找，又要按 score 排名，Redis 怎样兼顾这两种操作？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Redis 的 zset 通常同时使用哈希表和跳表：哈希表支持按 member 快速定位，跳表按 score 有序组织节点，支持范围查询和排名操作。跳表的平均查找、插入和删除复杂度通常为 O(log N)，具体实现和版本细节应以语料为准。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["哈希表按 member 定位"]
+      - ["跳表按 score 有序"]
+      - ["范围查询"]
+      - ["排名"]
+      - ["O(log N)"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "3. Redis有哪些数据类型？"
+        quote: "有序集合通过 score 排序，底层常用跳表等结构支持插入和范围查询。"
+
+  - id: "redis-018"
+    source: "redis"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "热 key 和大 key 分别有什么风险，怎么治理"
+    query_hard: "一个 key 访问特别集中，另一个 key 体积特别大，这两类问题处理方式一样吗？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "热 key 的主要风险是单个节点或单线程被集中访问，可通过本地缓存、读副本、key 拆分和请求限流分散流量。大 key 会占用大量内存、增加网络传输和删除阻塞风险，可通过拆分、分片、异步或渐进删除治理。两者都需要监控，但治理目标不同。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["热 key 集中访问"]
+      - ["大 key 占用内存"]
+      - ["流量分散"]
+      - ["拆分分片"]
+      - ["渐进删除"]
+    gold_evidence:
+      - doc_id: "redis-v2.0"
+        section: "33.什么是热Key？ / 35.怎么处理大Key呢？"
+        quote: "热 Key 关注访问集中造成的热点，大 Key 关注单个数据对象过大造成的内存、网络和阻塞问题。"
+
+  - id: "redis-019"
+    source: "redis"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "Redis 2026 年最新版本是什么，官方何时发布"
+    query_hard: "我想知道一个未来版本的准确发布日期，当前知识库能给出吗？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "redis-020"
+    source: "redis"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "某云厂商在上海区域的 Redis 当前价格和 SLA 是多少"
+    query_hard: "这需要实时的云产品报价和服务承诺，能不能直接从面试资料得出？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "mysql-001"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "MySQL 的 MVCC 是怎么实现的"
+    query_hard: "一个事务读数据时另一个事务正在修改，为什么还能读到一致的旧版本？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "InnoDB 更新记录时会把旧版本写入 undo log，并通过回滚指针形成版本链；记录和版本带有事务信息。普通一致性读创建 ReadView，按照可见性规则沿版本链找到当前事务可见的版本；加锁的当前读则读取最新版本并遵循锁规则。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["undo log"]
+      - ["版本链","回滚指针"]
+      - ["ReadView"]
+      - ["事务可见性"]
+      - ["当前读读最新版本"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "65.MVCC 了解吗？"
+        quote: "MVCC 通过 undo log、版本链和 ReadView 让一致性读读取可见的历史版本。"
+
+  - id: "mysql-002"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "MySQL 事务有哪些隔离级别"
+    query_hard: "多个事务并发执行时，数据库提供哪四档隔离强度？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "SQL 标准的四种隔离级别从弱到强是读未提交、读已提交、可重复读和串行化。InnoDB 默认通常为可重复读，并结合 MVCC 和锁降低脏读、不可重复读及幻读风险；隔离级别越强通常并发代价越高。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["读未提交"]
+      - ["读已提交"]
+      - ["可重复读"]
+      - ["串行化"]
+      - ["InnoDB 默认可重复读"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "62.事务的隔离级别有哪些？"
+        quote: "事务隔离级别从弱到强依次是读未提交、读已提交、可重复读和串行化。"
+
+  - id: "mysql-003"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "为什么 InnoDB 索引用 B+ 树而不用 B 树"
+    query_hard: "索引节点为什么把记录集中在叶子层，而且叶子还要按顺序连接？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "B+ 树的非叶子节点主要保存键和指针，在相同页大小下可以容纳更多键，树高更低，磁盘 I/O 更少；记录集中在叶子节点且叶子有序连接，范围查询和顺序扫描更方便。B 树非叶子节点也存数据，范围遍历和页利用通常不如 B+ 树稳定。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["非叶子节点存键和指针"]
+      - ["更低树高"]
+      - ["叶子存记录"]
+      - ["叶子有序连接"]
+      - ["范围查询"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "41.为什么 InnoDB 要使用 B+树作为索引？"
+        quote: "B+ 树通过更低的树高和叶子节点有序连接，减少 I/O 并提升范围查询效率。"
+
+  - id: "mysql-004"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "聚簇索引和非聚簇索引有什么区别"
+    query_hard: "主键索引和普通二级索引的叶子节点分别放什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "InnoDB 的聚簇索引叶子节点保存完整行数据，通常由主键组织；二级索引叶子节点保存索引列和主键值，查询非索引列时还要根据主键回到聚簇索引取行。二级索引因此可能产生回表。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["聚簇索引叶子存整行"]
+      - ["二级索引叶子存主键"]
+      - ["主键组织"]
+      - ["回表"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "46.聚族索引和非聚族索引有什么区别？"
+        quote: "聚簇索引的叶子节点保存完整记录，二级索引通常保存索引列和主键。"
+
+  - id: "mysql-005"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是回表，什么情况下会发生"
+    query_hard: "明明走了二级索引，为什么还要再查一次主键索引？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "回表是通过二级索引找到主键后，再到聚簇索引读取完整行。查询需要的列不都在二级索引中时会回表；如果使用覆盖索引，所需列已经全部在索引中，就可以直接返回而不回表。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["二级索引找到主键"]
+      - ["回聚簇索引"]
+      - ["非覆盖查询"]
+      - ["覆盖索引避免回表"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "47.回表了解吗？"
+        quote: "使用非聚簇索引找到记录后，如果还需要其他列，就要根据主键回到聚簇索引读取。"
+
+  - id: "mysql-006"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "联合索引的最左前缀原则是什么"
+    query_hard: "有一个 `(a,b,c)` 索引，查询条件只写 b 或跳过 b 时为什么效果可能不同？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "联合索引 `(a,b,c)` 通常要求从最左列开始连续使用，才能充分利用索引顺序。等值条件可以继续匹配后续列，遇到范围条件后后续列通常不能继续用于定位；只过滤 b 或跳过 a 不能充分利用 `(a,b,c)` 的有序前缀。实际执行计划仍需用 EXPLAIN 验证。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["联合索引顺序"]
+      - ["最左列连续使用"]
+      - ["范围条件截断"]
+      - ["EXPLAIN 验证"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "50.什么是最左前缀原则？"
+        quote: "联合索引需要从最左列开始匹配，范围条件会影响后续列的索引使用。"
+
+  - id: "mysql-007"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "索引在哪些情况下可能失效"
+    query_hard: "为什么给索引列套函数、做隐式类型转换或用 `%abc` 可能导致不走索引？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "索引是否使用由优化器和数据分布决定，常见不利情况包括对索引列做函数或表达式、发生隐式类型转换、对字符串使用前导通配符、联合索引跳过前缀，以及选择性过低导致全表扫描。不能只凭 SQL 形式断言，一般要用 EXPLAIN 检查执行计划。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["索引列函数"]
+      - ["隐式类型转换"]
+      - ["前导通配符"]
+      - ["跳过联合索引前缀"]
+      - ["EXPLAIN"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "38.索引哪些情况下会失效呢？"
+        quote: "函数、隐式转换、前导通配符和低选择性都可能使优化器放弃索引，最终应以执行计划为准。"
+
+  - id: "mysql-008"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "multi_hop"
+    question: "MySQL 有哪些日志，redo log、undo log 和 binlog 有什么区别"
+    query_hard: "崩溃恢复、事务回滚和主从复制分别依赖哪类日志？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "redo log 是 InnoDB 的物理重做日志，用于崩溃恢复；undo log 保存旧版本，支持回滚和 MVCC；binlog 是 Server 层的逻辑日志，记录可用于复制和归档的变更。三者作用不同，不能把 binlog 当作 InnoDB 崩溃恢复日志。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["redo log 崩溃恢复"]
+      - ["undo log 回滚和版本"]
+      - ["binlog 逻辑变更"]
+      - ["主从复制"]
+      - ["作用边界"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "28.MySQL 日志文件有哪些？"
+        quote: "redo log 用于崩溃恢复，undo log 用于回滚和版本，binlog 主要用于归档与复制。"
+
+  - id: "mysql-009"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "redo log 的两阶段提交是怎么回事"
+    query_hard: "为什么事务提交要先 prepare，再让两个日志最终保持一致？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "为了让 InnoDB 的 redo log 和 Server 层 binlog 保持一致，事务提交会经历 prepare 和 commit 两阶段。redo log 先进入 prepare 状态，binlog 写入并刷盘后，再提交 redo log；崩溃恢复时可以根据两边的状态判断事务是否应该提交，避免一边有记录、一边没有记录。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["prepare"]
+      - ["binlog 写入"]
+      - ["commit"]
+      - ["崩溃恢复判断"]
+      - ["redo/binlog 一致"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "30.为什么要两阶段提交呢？"
+        quote: "两阶段提交用于协调 redo log 和 binlog，避免崩溃后两个日志状态不一致。"
+
+  - id: "mysql-010"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "MySQL 有哪几种锁"
+    query_hard: "记录锁、间隙锁和 Next-Key Lock 分别解决什么问题？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "InnoDB 常见锁包括共享锁和排他锁，以及记录锁、间隙锁和 Next-Key Lock 等锁定范围。记录锁锁定已有记录，间隙锁锁定索引间隙，Next-Key Lock 通常是记录锁与间隙锁的组合，用于在可重复读下减少范围插入造成的幻读。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["共享锁","S"]
+      - ["排他锁","X"]
+      - ["记录锁"]
+      - ["间隙锁"]
+      - ["Next-Key Lock"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "MySQL 锁相关章节"
+        quote: "InnoDB 通过记录锁、间隙锁和 Next-Key Lock 控制记录及索引范围的并发访问。"
+
+  - id: "mysql-011"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是幻读，MySQL 怎么处理"
+    query_hard: "同一事务两次范围查询，为什么可能看到后来多出来的行？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "幻读是同一事务按范围读取时，后一次读取看到前一次没有出现的新记录。InnoDB 的一致性读在可重复读下通过 MVCC 使用同一个 ReadView；当前读则通过记录锁、间隙锁或 Next-Key Lock 阻止其他事务在范围内插入，从而降低幻读。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["范围查询出现新行"]
+      - ["ReadView"]
+      - ["间隙锁"]
+      - ["Next-Key Lock"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "64.请详细说说幻读呢？"
+        quote: "幻读关注同一事务范围查询前后出现了新的满足条件的记录，InnoDB 会结合 MVCC 和范围锁处理。"
+
+  - id: "mysql-012"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "快照读和当前读有什么区别"
+    query_hard: "普通 SELECT 和带锁的 SELECT 在读取哪个版本、是否加锁上有什么不同？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "快照读是普通一致性读，依据 ReadView 从版本链读取当前事务可见的版本，通常不加锁。当前读包括加锁的 SELECT、UPDATE、DELETE 等，读取最新版本并按锁规则执行，可能阻塞其他事务。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["普通一致性读"]
+      - ["ReadView"]
+      - ["当前读最新版本"]
+      - ["加锁读"]
+      - ["阻塞"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "事务隔离与 MVCC 章节"
+        quote: "快照读读取可见历史版本，当前读读取最新版本并遵循锁规则。"
+
+  - id: "mysql-013"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "事务的 ACID 四个特性是什么，分别靠什么实现"
+    query_hard: "原子性、一致性、隔离性和持久性不是四个孤立口号，底层分别依赖什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "原子性依赖事务提交/回滚和 undo log；一致性依赖约束、检查和事务机制；隔离性主要由 MVCC 与锁实现；持久性依赖 redo log 等持久化机制。具体实现还受存储引擎和配置影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["原子性 undo log"]
+      - ["一致性约束"]
+      - ["隔离性 MVCC/锁"]
+      - ["持久性 redo log"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "事务 ACID 章节"
+        quote: "undo log、MVCC、锁和 redo log 分别参与原子性、隔离性和持久性保障。"
+
+  - id: "mysql-014"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "如何系统地优化一条慢 SQL"
+    query_hard: "遇到查询很慢，应该先看什么，再改哪些东西？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "先通过慢查询日志、EXPLAIN 或 EXPLAIN ANALYZE 判断扫描、连接、排序、回表和锁等待的瓶颈；再根据过滤、连接和排序条件设计索引，检查联合索引顺序和选择性，避免对索引列函数处理、隐式转换和无意义的 SELECT *。修改后要用接近生产的数据量验证执行计划和延迟。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["慢查询日志"]
+      - ["EXPLAIN","执行计划"]
+      - ["索引设计"]
+      - ["回表/排序/连接分析"]
+      - ["真实数据验证"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "32.什么是慢 SQL？ / 33.有哪些方法来优化 SQL？"
+        quote: "慢 SQL 优化要先定位执行计划和扫描量，再针对索引、连接、排序和数据量验证。"
+
+  - id: "mysql-015"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "分库分表会带来哪些问题"
+    query_hard: "把一张大表拆到多个库和表后，事务、关联查询、分页和主键会发生什么变化？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "分库分表可以扩展容量和并发，但会引入跨库事务、跨分片 JOIN、全局 ID、排序分页、数据路由和扩容迁移等复杂性。设计时要选择稳定分片键，限制跨分片查询，并用分布式事务、应用聚合或异步一致性解决业务需求。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["跨库事务"]
+      - ["跨分片 JOIN"]
+      - ["全局 ID"]
+      - ["分页排序"]
+      - ["扩容迁移"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "75.你觉得分库分表会带来什么问题呢？"
+        quote: "分库分表会让事务、关联查询、主键生成和分页从单库问题变成分布式问题。"
+
+  - id: "mysql-016"
+    source: "mysql"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "count(*)、count(1) 和 count(字段) 有什么区别"
+    query_hard: "统计行数时这三个写法是否完全等价，NULL 会造成什么影响？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "`COUNT(*)` 统计符合条件的行数；`COUNT(1)` 对每行计算常量，通常也统计行数；`COUNT(字段)` 只统计该字段非 NULL 的行。三者的优化细节由数据库执行计划决定，不能把 COUNT(字段) 当作无视 NULL 的总行数。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["COUNT(*) 行数"]
+      - ["COUNT(1) 常量"]
+      - ["COUNT(字段) 非 NULL"]
+      - ["NULL 影响"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "12.count(1)、count(*) 与 count(列名) 的区别？"
+        quote: "COUNT(字段) 不统计 NULL，COUNT(*) 和 COUNT(1) 通常统计符合条件的行。"
+
+  - id: "mysql-017"
+    source: "mysql"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "MySQL 深分页为什么慢，怎么优化"
+    query_hard: "`LIMIT 1000000000, 20` 为什么需要扫描很多无用记录，怎样改写？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "大 OFFSET 分页需要先扫描并丢弃前面的记录，偏移越大成本越高。可以用基于索引的 seek 分页，例如记录上一页最后一个有序键并使用 `WHERE id > last_id ORDER BY id LIMIT 20`；也可以限制最大页码、使用覆盖索引或按业务设计游标。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["大 OFFSET 扫描丢弃"]
+      - ["seek/cursor 分页"]
+      - ["有序键"]
+      - ["覆盖索引"]
+      - ["限制深页"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "82.什么是深分页？"
+        quote: "深分页的主要问题是扫描并丢弃大量前置记录，通常可以改成基于索引游标的分页。"
+
+  - id: "mysql-018"
+    source: "mysql"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "MySQL 主从复制的基本流程是什么，延迟怎么处理"
+    query_hard: "主库的变更怎样传到从库，读写分离时为什么会读到旧数据？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "主库把事务变更写入 binlog，从库的 I/O 线程拉取并写入 relay log，SQL 线程再重放 relay log。复制通常是异步的，因此从库可能存在延迟；业务可以按一致性要求选择主库读、等待位点追平、延迟感知路由或补偿，而不是无条件把读请求发给从库。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["binlog"]
+      - ["I/O 线程"]
+      - ["relay log"]
+      - ["SQL 线程"]
+      - ["复制延迟处理"]
+    gold_evidence:
+      - doc_id: "mysql-v2.2"
+        section: "68.主从复制原理了解吗？ / 69.主从同步延迟怎么处理？"
+        quote: "主库写 binlog，从库拉取 relay log 并重放；异步复制会造成读写分离延迟。"
+
+  - id: "mysql-019"
+    source: "mysql"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "MySQL 9.0 的正式发布日期和官方支持周期是什么"
+    query_hard: "当前静态知识库能否给出未来版本的实时发布日期？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "mysql-020"
+    source: "mysql"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "某云厂商托管 MySQL 在指定区域的当前价格是多少"
+    query_hard: "这需要实时产品报价和地域配置，能否从面试资料直接计算？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "dist-001"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "CAP 原则是什么，网络分区发生时如何取舍"
+    query_hard: "分布式系统里的数据一致、服务可用和分区容错为什么不能在分区时全都保证？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "CAP 指一致性（Consistency）、可用性（Availability）和分区容错（Partition tolerance）。发生网络分区时，系统必须在一致性和可用性之间取舍；实际系统通常先保证分区容错，再根据业务选择 CP 或 AP。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Consistency 一致性"]
+      - ["Availability 可用性"]
+      - ["Partition tolerance 分区容错"]
+      - ["分区时取舍"]
+      - ["CP/AP"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "1. 说说CAP原则？"
+        quote: "CAP 讨论网络分区存在时一致性和可用性的取舍，不能把三者同时作为无条件保证。"
+
+  - id: "dist-002"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "BASE 理论解决什么问题"
+    query_hard: "强一致代价太高时，为什么允许中间状态并最终收敛？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "BASE 是 Basically Available、Soft State、Eventually Consistent 的缩写，强调基本可用、软状态和最终一致性。它不是放弃一致性，而是在分区和高并发场景下用异步、补偿和重试换取可用性与扩展性。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Basically Available"]
+      - ["Soft State"]
+      - ["Eventually Consistent"]
+      - ["异步补偿"]
+      - ["最终收敛"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "4.BASE理论了解吗？"
+        quote: "BASE 允许系统存在软状态，通过异步处理和补偿最终达到一致。"
+
+  - id: "dist-003"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "有哪些分布式锁实现方案，各自适合什么场景"
+    query_hard: "数据库、ZooKeeper 和 Redis 都能做锁，主要差异是什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "数据库锁可以依赖唯一约束或行锁，简单但吞吐和故障处理受数据库影响；ZooKeeper 可用临时顺序节点和会话语义实现强协调，适合需要可靠通知的场景；Redis 用 SET NX PX 等原子命令，性能高但要处理 TTL、续期和故障切换。选择要结合一致性、性能和运维成本。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["数据库唯一约束/行锁"]
+      - ["ZooKeeper 临时顺序节点"]
+      - ["Redis SET NX PX"]
+      - ["TTL/续期"]
+      - ["场景取舍"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "5.有哪些分布式锁的实现方案呢？"
+        quote: "分布式锁可以基于数据库、ZooKeeper 或 Redis，各方案的可靠性和性能取舍不同。"
+
+  - id: "dist-004"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "MySQL 如何实现分布式锁"
+    query_hard: "如果多个服务要抢同一业务资源，数据库方案怎样防止重复获取？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "可以建立唯一资源键或锁表，在事务中通过唯一约束、行锁或 `SELECT ... FOR UPDATE` 保证同一资源只有一个持有者。需要设置持有状态、超时和释放策略，并考虑事务异常、死锁和锁表膨胀；数据库锁适合低并发或已有强事务边界的场景。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["唯一资源键"]
+      - ["行锁/SELECT FOR UPDATE"]
+      - ["事务边界"]
+      - ["超时释放"]
+      - ["死锁处理"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "5.1 MySQL分布式锁如何实现呢？"
+        quote: "数据库可以通过唯一约束、行锁和事务控制同一资源的并发占用。"
+
+  - id: "dist-005"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "ZooKeeper 分布式锁如何实现"
+    query_hard: "为什么使用临时顺序节点可以减少惊群并判断谁拿到锁？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "客户端在锁目录创建临时顺序节点，序号最小者获得锁；其他客户端只监听前一个节点，当前驱节点删除后再竞争。临时节点会随会话断开而删除，避免持有者崩溃后永久占锁，但仍要处理会话超时、重试和业务幂等。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["临时节点"]
+      - ["顺序节点"]
+      - ["最小序号获锁"]
+      - ["监听前驱节点"]
+      - ["会话断开释放"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "5.2 ZooKeeper如何实现分布式锁？"
+        quote: "ZooKeeper 常用临时顺序节点实现排队，客户端只关注自己的前驱节点变化。"
+
+  - id: "dist-006"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "Redis 分布式锁的正确实现流程是什么"
+    query_hard: "用 Redis 抢锁时，怎样避免过期后误删其他客户端的锁？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "资料支持的实现流程是：使用 setNx（SETNX）在键不存在时抢锁；为避免机器宕机造成死锁，必须设置过期时间，并把加锁与过期设置作为原子操作（Redis 2.8 之后可用 NX 与 EX 组合）；生产中通常使用封装了分布式锁 API 的 Redisson，也可以使用 RedLock。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["setNx", "SETNX"]
+      - ["过期时间"]
+      - ["原子操作"]
+      - ["Redis 2.8", "NX", "EX"]
+      - ["Redisson", "RedLock"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "5.3 Redis怎么实现分布式锁？"
+        quote: "实现分布式锁最简单的一个命令：setNx(set if not exist)；加锁了之后如果机器宕机，那我这个锁就无法释放，所以需要加入过期时间，而且过期时间需要和setNx同一个原子操作；Redis2.8之后Redis支持nx和ex操作是同一原子操作；一般生产中都是使用Redission客户端，封装了分布式锁的api，而且支持RedLock。"
+
+  - id: "dist-007"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "comparison"
+    question: "分布式事务有哪些常见实现方案"
+    query_hard: "跨服务操作要么全部成功要么全部回滚，常见实现路线有哪些？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "常见方案包括 2PC、3PC、TCC、本地消息表、MQ 事务、最大努力通知和 Seata 等。强一致协调方案通常同步阻塞成本更高；TCC 需要业务实现补偿；消息和本地事务方案更偏最终一致；应根据一致性、可用性、性能和改造成本选择。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["2PC/3PC"]
+      - ["TCC"]
+      - ["本地消息表"]
+      - ["MQ 事务"]
+      - ["最大努力通知","Seata"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.分布式事务有哪些常见的实现方案？"
+        quote: "分布式事务方案有 2PC、TCC、本地消息表、消息事务、最大努力通知和 Seata 等。"
+
+  - id: "dist-008"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "2PC 两阶段提交的过程和缺点是什么"
+    query_hard: "协调者先询问参与者能否提交，再统一提交，为什么会阻塞？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "2PC 包括 prepare 和 commit 两阶段：协调者先让参与者准备并投票，全部同意后发送 commit，否则发送 rollback。参与者在 prepare 后会持有资源等待协调者决定，因此协调者故障可能导致阻塞；同步网络交互多，也存在单点和恢复复杂性。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["prepare 阶段"]
+      - ["参与者投票"]
+      - ["commit/rollback"]
+      - ["协调者阻塞"]
+      - ["资源占用"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.1 说说2PC两阶段提交？"
+        quote: "2PC 先准备并投票，再由协调者统一提交或回滚，缺点是同步阻塞和协调者故障影响大。"
+
+  - id: "dist-009"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "3PC 相比 2PC 增加了什么"
+    query_hard: "它怎样通过 canCommit、preCommit 和 doCommit 降低部分阻塞风险？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "3PC 在 2PC 基础上增加 canCommit 预询问，并把提交拆成 preCommit 和 doCommit，使参与者在超时场景有更多状态信息。它可以降低部分阻塞风险，但不能在网络分区下彻底保证一致性，消息轮次和实现复杂度也更高。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["canCommit"]
+      - ["preCommit"]
+      - ["doCommit"]
+      - ["超时处理"]
+      - ["不能消除分区风险"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.2 3PC（三阶段提交）了解吗？"
+        quote: "3PC 将提交过程拆成三个阶段，通过额外的预提交状态改善超时处理，但代价是更多通信和复杂度。"
+
+  - id: "dist-010"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "TCC 是怎么实现分布式事务的"
+    query_hard: "为什么每个业务操作都要分别实现 Try、Confirm 和 Cancel？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "TCC 把一个业务操作拆成 Try 预留资源、Confirm 正式提交和 Cancel 释放/回滚。三个接口必须具备幂等性，并处理空回滚、悬挂和重试；它能把一致性控制交给业务，但开发改造成本较高。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Try 预留"]
+      - ["Confirm 提交"]
+      - ["Cancel 回滚"]
+      - ["幂等"]
+      - ["空回滚/悬挂"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.3 TCC了解吗？"
+        quote: "TCC 通过 Try、Confirm、Cancel 三段业务逻辑完成资源预留、确认和取消。"
+
+  - id: "dist-011"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "本地消息表如何保证最终一致性"
+    query_hard: "业务数据和待发送消息为什么要放在同一个本地事务里？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "业务数据更新和待发送消息写入同一个本地事务，事务提交成功就保证两者不会只成功一边。后台任务扫描未发送消息投递到 MQ，失败重试；消费者要幂等，生产者和消费者还要处理重复投递、死信和对账补偿。因此它提供的是最终一致性，不是实时强一致。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["业务数据与消息同事务"]
+      - ["定时扫描"]
+      - ["失败重试"]
+      - ["消费者幂等"]
+      - ["对账补偿"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.4 本地消息表了解吗？"
+        quote: "本地消息表把业务变更和消息记录放在一个事务中，再通过轮询和重试完成投递。"
+
+  - id: "dist-012"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "MQ 消息事务的流程是什么"
+    query_hard: "生产者先发半消息、执行本地事务，再决定提交还是回滚，这套机制解决什么问题？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "消息事务通常先向 MQ 发送 prepare/半消息，再执行本地事务；本地事务成功则 commit，失败则 rollback。消费者收到消息后仍可能重复消费，需要幂等和重试机制。它解决生产者本地事务与消息发送的一致性问题，但不自动解决消费端业务一致性。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["prepare/半消息"]
+      - ["本地事务"]
+      - ["commit/rollback"]
+      - ["重复消费"]
+      - ["消费幂等"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.5 MQ消息事务了解吗？"
+        quote: "消息事务先保存 prepare 消息，待本地事务成功后提交，否则回滚并删除。"
+
+  - id: "dist-013"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "最大努力通知适合什么场景"
+    query_hard: "支付结果无法保证一次送达时，为什么还要重试并提供查询接口？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "最大努力通知适合通知方无法和业务方共享强事务、但业务方可以接受异步最终确认的场景。通知方按规则重试，达到次数后停止，并提供查询接口；接收方应保存处理中状态、保证幂等，并在必要时主动查询最终结果。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["异步通知"]
+      - ["重试规则"]
+      - ["最大次数"]
+      - ["查询接口"]
+      - ["处理中状态/幂等"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "7.6 最大努力通知了解吗？"
+        quote: "最大努力通知通过重试和结果查询尽量送达，最终状态还需要业务方确认。"
+
+  - id: "dist-014"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Seata 的 TM、TC、RM 分别做什么"
+    query_hard: "一次全局事务跨两个服务时，XID 和分支事务怎样被协调？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "TM 负责开启、提交或回滚全局事务；TC 维护全局事务和分支事务状态并协调决策；RM 管理本地资源并向 TC 注册分支事务。全局事务通过唯一 XID 贯穿调用链，最终由 TC 协调各分支提交或回滚。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["TM 全局事务管理"]
+      - ["TC 协调状态"]
+      - ["RM 本地资源"]
+      - ["XID 传播"]
+      - ["分支提交/回滚"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "8.你们用什么？能说一下Seata吗？"
+        quote: "Seata 通过 TM、TC、RM 和 XID 管理跨服务全局事务及其分支事务。"
+
+  - id: "dist-015"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "Paxos 算法中的角色和多数派有什么作用"
+    query_hard: "提议者、接受者和学习者分别承担什么职责，为什么需要超过半数？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Paxos 中 Proposer 提出提案，Acceptor 对提案编号和取值进行承诺与接受，Learner 学习已经达成的结果。只有超过半数的 Acceptor 接受同一提案才能形成决定，多数派交集保证不同轮次不会轻易形成互相冲突的值。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Proposer"]
+      - ["Acceptor"]
+      - ["Learner"]
+      - ["提案编号"]
+      - ["多数派"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "9.分布式算法paxos了解么？"
+        quote: "Paxos 通过提议者、接受者和学习者协作，在多数派基础上达成一致。"
+
+  - id: "dist-016"
+    source: "distributed"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Raft 算法如何选主和复制日志"
+    query_hard: "一个节点故障后，Raft 如何避免多个领导者同时生效？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Raft 将节点分为 follower、candidate 和 leader。选举超时后 follower 变为 candidate，增加 term 并请求投票，获得多数票后成为 leader；leader 通过心跳维持任期并复制日志，提交通常需要多数节点确认。term、投票和日志匹配规则帮助避免旧 leader 覆盖新状态。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["follower/candidate/leader"]
+      - ["term"]
+      - ["多数派投票"]
+      - ["心跳"]
+      - ["日志复制与提交"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "10.说说Raft算法？"
+        quote: "Raft 通过任期、选举和多数派日志复制选出唯一领导者并保持状态机一致。"
+
+  - id: "dist-017"
+    source: "distributed"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "接口幂等性怎么保证"
+    query_hard: "请求因为超时被重试多次，怎样避免重复扣款或重复写入？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "可以使用业务唯一号或幂等 token，在数据库建立唯一约束；也可以用状态机、防重表、乐观锁或分布式锁控制重复请求。消息消费端必须记录已处理的业务 ID，并把重试设计成安全的重复执行。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["业务唯一号/token"]
+      - ["唯一约束"]
+      - ["防重表"]
+      - ["状态机/乐观锁"]
+      - ["消费者去重"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "11.说说什么是幂等性？"
+        quote: "接口幂等要求相同业务请求重复到达时，最终结果与执行一次相同，可用唯一约束、token 和状态机实现。"
+
+  - id: "dist-018"
+    source: "distributed"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "常见限流算法有哪些，如何选择"
+    query_hard: "固定窗口、滑动窗口、令牌桶和漏桶分别适合什么需求？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "固定窗口实现简单但边界可能突发；滑动窗口统计更平滑但需要更多状态；令牌桶允许一定突发并控制平均速率；漏桶以相对稳定的速率处理请求。选择时要结合是否允许突发、延迟、内存和分布式计数一致性。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["固定窗口"]
+      - ["滑动窗口"]
+      - ["令牌桶"]
+      - ["漏桶"]
+      - ["突发与平均速率取舍"]
+    gold_evidence:
+      - doc_id: "distributed-v1"
+        section: "12.你了解哪些限流算法？"
+        quote: "常见限流算法包括固定窗口、滑动窗口、令牌桶和漏桶，各自对突发流量的处理不同。"
+
+  - id: "dist-019"
+    source: "distributed"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "当前主流共识算法在 2026 年的性能排名是什么"
+    query_hard: "这个问题需要最新实验数据和具体硬件环境，静态分布式面试资料能否直接回答？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "dist-020"
+    source: "distributed"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "本项目线上到底部署了几个节点、每个节点的网络拓扑是什么"
+    query_hard: "这属于项目运行环境配置，当前通用分布式资料能否确定？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "jvm-001"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "JVM 的运行时内存区域如何划分"
+    query_hard: "一个 Java 程序运行起来后，虚拟机把运行时数据分成哪些区域？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "JVM 运行时数据区通常包括程序计数器、Java 虚拟机栈、本地方法栈、堆和方法区。程序计数器和虚拟机栈等区域具有线程私有特征，堆和方法区主要由线程共享；不同 JVM 版本的具体实现可能不同。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["程序计数器"]
+      - ["Java 虚拟机栈"]
+      - ["本地方法栈"]
+      - ["堆"]
+      - ["方法区/元空间"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "3.能说一下 JVM 的内存区域吗？"
+        quote: "JVM 运行时数据区通常包括程序计数器、虚拟机栈、本地方法栈、堆和方法区。"
+
+  - id: "jvm-002"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "Java 里的堆和栈有什么区别"
+    query_hard: "对象、局部变量、线程共享和线程私有分别对应哪块区域？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "堆主要存放对象实例，通常由线程共享；虚拟机栈按线程创建，保存栈帧、局部变量和方法调用状态。对象和局部变量不能简单地用“全部在堆/全部在栈”概括，逃逸分析和具体实现可能改变分配位置。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["堆对象实例"]
+      - ["栈帧/局部变量"]
+      - ["堆线程共享"]
+      - ["栈线程私有"]
+      - ["逃逸分析例外"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "3.能说一下 JVM 的内存区域吗？"
+        quote: "堆通常是线程共享的对象存储区域，虚拟机栈保存线程私有的栈帧和局部变量。"
+
+  - id: "jvm-003"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "一个 class 文件从加载到初始化要经历哪些阶段"
+    query_hard: "类被 JVM 使用前，加载、连接和初始化的顺序是什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "类加载生命周期通常包括加载、验证、准备、解析和初始化，验证、准备、解析合称连接。初始化阶段执行类变量初始化和静态代码块；主动使用可能触发初始化，但加载、连接不一定紧接着初始化发生。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["加载"]
+      - ["验证"]
+      - ["准备"]
+      - ["解析"]
+      - ["初始化"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "48.类装载的过程知道吗？"
+        quote: "类装载过程包括加载、连接和初始化，连接又可分为验证、准备和解析。"
+
+  - id: "jvm-004"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是双亲委派模型，为什么需要它"
+    query_hard: "类加载器收到请求后为什么先交给父加载器尝试？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "双亲委派模型要求类加载器收到加载请求后先交给父加载器，父加载器无法完成时子加载器才尝试。它可以避免核心类被应用自定义类覆盖，并减少同一个类被不同加载器重复加载；实际运行环境也存在打破该模型的场景。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["父加载器优先"]
+      - ["核心类保护"]
+      - ["避免重复加载"]
+      - ["子加载器兜底"]
+      - ["可被特定场景打破"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "49.什么是双亲委派模型？"
+        quote: "双亲委派让类加载请求先由父加载器处理，以保护核心类并减少重复加载。"
+
+  - id: "jvm-005"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "为什么用元空间替代永久代"
+    query_hard: "JDK 8 之后方法区实现变化解决了什么问题？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "永久代属于 JVM 管理的固定大小区域，容易受限于固定容量；元空间使用本地内存存放类元数据，容量边界和 JVM 内存管理更灵活。替换并不意味着类元数据不会耗尽内存，仍需关注类加载器泄漏和元空间参数。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["永久代"]
+      - ["元空间"]
+      - ["本地内存"]
+      - ["类元数据"]
+      - ["类加载器泄漏"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "5.为什么使用元空间替代永久代？"
+        quote: "元空间使用本地内存存放类元数据，减少了永久代固定大小带来的限制。"
+
+  - id: "jvm-006"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "new 一个对象时 JVM 大致经历哪些步骤"
+    query_hard: "从类型检查到构造方法执行，中间会发生什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "创建对象时通常先检查类是否已加载并完成初始化，再为对象分配空间、进行零值初始化、设置对象头，最后执行构造方法完成字段初始化。分配可能使用指针碰撞或空闲列表，并可能通过 TLAB 减少线程竞争。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["类加载/初始化检查"]
+      - ["内存分配"]
+      - ["零值初始化"]
+      - ["对象头"]
+      - ["构造方法"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "6.对象创建的过程了解吗？"
+        quote: "对象创建通常包括类检查、内存分配、零值初始化、设置对象头和执行构造方法。"
+
+  - id: "jvm-007"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "强引用、软引用、弱引用和虚引用有什么区别"
+    query_hard: "内存不足或 GC 时，四种引用对对象存活的影响分别是什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "强引用存在时对象通常不会被回收；软引用对象在内存紧张时可能被回收；弱引用对象在下一次 GC 时通常会被回收；虚引用不能通过它获取对象，主要用于跟踪回收和配合引用队列。具体行为还受 GC 和引用队列使用方式影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["强引用不轻易回收"]
+      - ["软引用内存不足可回收"]
+      - ["弱引用 GC 可回收"]
+      - ["虚引用不可获取对象"]
+      - ["引用队列"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "11.说一下对象有哪几种引用？"
+        quote: "强、软、弱、虚引用对对象存活的影响逐级减弱，虚引用主要用于回收跟踪。"
+
+  - id: "jvm-008"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "新生代的 Eden 和 Survivor 区如何配合"
+    query_hard: "Minor GC 后对象为什么在两个 Survivor 区之间复制？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "新对象通常先在 Eden 分配。Minor GC 时存活对象被复制到 Survivor 区，两个 Survivor 区交替作为 from 和 to，避免在同一块区域内反复整理；对象达到年龄阈值或满足动态年龄规则后可能晋升老年代。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Eden"]
+      - ["from/to Survivor"]
+      - ["Minor GC 复制"]
+      - ["对象年龄"]
+      - ["晋升老年代"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "13.说一下新生代的区域划分？"
+        quote: "新生代通常包含 Eden 和两个 Survivor 区，Minor GC 后存活对象在 Survivor 区之间复制。"
+
+  - id: "jvm-009"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "新生代对象在什么情况下会晋升老年代"
+    query_hard: "年龄、对象大小和 Survivor 空间不足分别有什么影响？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "对象可以因为多次 GC 后年龄达到阈值、对象过大直接分配到老年代、动态年龄判断或 Survivor 空间不足而晋升。具体阈值和行为由收集器及参数决定，不能把“存活一次就晋升”当作通用规则。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["年龄阈值"]
+      - ["大对象直接进入老年代"]
+      - ["动态年龄"]
+      - ["Survivor 空间不足"]
+      - ["收集器参数"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "14.对象什么时候会进入老年代？"
+        quote: "对象可能因年龄达到阈值、体积过大或 Survivor 空间不足而进入老年代。"
+
+  - id: "jvm-010"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "JVM 如何判断一个对象可以被回收"
+    query_hard: "为什么不是简单看对象有没有引用变量？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "现代 JVM 主要使用可达性分析，从 GC Roots 出发沿引用关系遍历；无法从 GC Roots 到达的对象才可能成为垃圾。GC Roots 包括活动线程栈帧中的引用、静态字段、常量和 JNI 等运行时根，最终是否回收还要经过相应的引用处理和 GC 阶段。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["可达性分析"]
+      - ["GC Roots"]
+      - ["引用图遍历"]
+      - ["不可达对象"]
+      - ["引用处理"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "24.如何判断对象仍然存活？"
+        quote: "JVM 从 GC Roots 做可达性分析，无法到达的对象才可能被判定为垃圾。"
+
+  - id: "jvm-011"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "内存溢出和内存泄漏有什么区别"
+    query_hard: "对象仍被无意引用但业务已经不用，和申请不到更多内存是同一回事吗？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "内存泄漏是无用对象仍被引用，导致可回收对象长期留在内存；内存溢出是某个内存区域无法满足新的分配请求。泄漏可能逐步造成 OOM，但 OOM 也可能由堆设置过小、瞬时大对象、线程栈或元空间耗尽等原因引起。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无用对象仍被引用"]
+      - ["无法满足分配"]
+      - ["泄漏导致增长"]
+      - ["堆/栈/元空间 OOM"]
+      - ["原因不等价"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "17.内存溢出和内存泄漏了解吗？"
+        quote: "内存泄漏描述对象生命周期管理问题，内存溢出描述内存区域无法继续满足分配。"
+
+  - id: "jvm-012"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是 Stop The World"
+    query_hard: "GC 时应用线程为什么会暂时停下来？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Stop The World 是垃圾收集或其他 JVM 安全操作期间，应用线程被暂停的现象。不同收集器暂停阶段和时长不同，并发收集器也可能有短暂 STW；排查要结合 GC 日志、暂停时间、堆大小和收集器配置，而不能认为所有 GC 都会长时间全停。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["应用线程暂停"]
+      - ["安全点/安全区域"]
+      - ["收集器暂停阶段"]
+      - ["暂停时间"]
+      - ["GC 日志"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "15.STW 了解吗？"
+        quote: "STW 指 JVM 在特定操作期间暂停应用线程，不同垃圾收集器的停顿阶段和时长不同。"
+
+  - id: "jvm-013"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "常见垃圾回收算法有哪些，各自怎么取舍"
+    query_hard: "标记清除、复制和标记整理为什么适合不同内存区域？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "标记清除先标记存活对象再清除垃圾，速度相对直接但可能产生碎片；复制算法把存活对象复制到另一块区域，适合存活率较低的新生代但需要额外空间；标记整理在标记后把存活对象向一端移动，减少碎片但整理成本更高；分代收集会组合使用这些思想。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["标记清除"]
+      - ["复制"]
+      - ["标记整理"]
+      - ["碎片"]
+      - ["分代收集"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "27.垃圾收集算法了解吗？"
+        quote: "常见垃圾收集算法包括标记清除、复制、标记整理以及分代收集思想。"
+
+  - id: "jvm-014"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "常见垃圾收集器有哪些，如何按场景选择"
+    query_hard: "Serial、Parallel、CMS、G1 等收集器关注点有什么不同？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Serial/ParNew 等收集器更偏向单线程或并行处理，Parallel 关注吞吐量，CMS 通过并发标记清除降低部分停顿但可能产生碎片，G1 按 Region 管理堆并以可预测停顿为目标。选择要结合堆规模、吞吐、延迟目标、JDK 版本和实际监控结果。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Serial/ParNew"]
+      - ["Parallel 吞吐"]
+      - ["CMS 并发标记清除"]
+      - ["G1 Region/停顿目标"]
+      - ["场景选择"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "31.知道哪些垃圾收集器？"
+        quote: "不同收集器在吞吐量、停顿时间、碎片和堆规模方面有不同取舍。"
+
+  - id: "jvm-015"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "CMS 和 G1 垃圾收集器有什么区别"
+    query_hard: "为什么有了 CMS 还要引入 G1？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "CMS 主要针对老年代做并发标记清除，停顿较短但会产生碎片并需要处理并发失败；G1 把堆划分为 Region，按回收收益选择 Region，支持混合回收并更容易设置停顿目标。G1 也不是所有场景都更快，最终要根据延迟、吞吐和版本实测。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["CMS 并发标记清除"]
+      - ["CMS 碎片"]
+      - ["G1 Region"]
+      - ["混合回收"]
+      - ["停顿目标"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "34.有了 CMS，为什么还要引入 G1？"
+        quote: "G1 通过 Region 和混合回收控制停顿目标，减少了 CMS 老年代碎片问题，但有额外管理成本。"
+
+  - id: "jvm-016"
+    source: "jvm"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是 TLAB，它解决了什么竞争"
+    query_hard: "多线程同时创建对象时，为什么给每个线程一小块 Eden 私有缓冲？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "TLAB 是线程本地分配缓冲区，线程可以在自己的 TLAB 中快速分配小对象，减少多个线程争用堆顶指针的同步开销。TLAB 用尽后会重新申请或退化为共享分配，大小和使用效果受收集器及参数影响。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["线程本地分配缓冲"]
+      - ["Eden 私有区域"]
+      - ["减少分配竞争"]
+      - ["共享分配退化"]
+      - ["参数影响"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "8.new 对象时，堆会发生抢占吗？"
+        quote: "TLAB 让线程优先在自己的分配缓冲区中创建对象，以减少共享堆指针竞争。"
+
+  - id: "jvm-017"
+    source: "jvm"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "线上 CPU 飙高或频繁 Full GC 怎么排查"
+    query_hard: "遇到 Java 进程异常，如何把操作系统、线程和堆信息串起来？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "CPU 飙高时先用 top 定位进程和线程，再用 jstack 把线程 ID 转成十六进制定位 Java 堆栈；频繁 Full GC 时结合 jstat、GC 日志、堆转储和 MAT 等工具判断是老年代增长、对象晋升、内存泄漏、元空间或显式 GC。定位后再调整代码、堆和收集器参数。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["top 定位进程/线程"]
+      - ["jstack 线程栈"]
+      - ["jstat/GC 日志"]
+      - ["堆转储/MAT"]
+      - ["原因定位后调参"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "41.CPU 占用过高怎么排查？ / 44.频繁 Full GC 怎么办？"
+        quote: "JVM 问题排查要把操作系统指标、线程栈、GC 统计和堆转储结合起来。"
+
+  - id: "jvm-018"
+    source: "jvm"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是逃逸分析，能带来哪些优化"
+    query_hard: "对象如果没有逃出方法或线程，JIT 可能怎样优化？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "逃逸分析判断对象或锁是否逃出方法、线程范围。若对象不逃逸，JIT 可能进行标量替换或栈上分配等优化；锁不发生线程逃逸时可能进行锁消除。优化是否生效取决于 JIT、代码形态和版本，不能直接假设对象一定分配在栈上。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["方法/线程逃逸"]
+      - ["标量替换"]
+      - ["栈上分配可能性"]
+      - ["锁消除"]
+      - ["JIT 版本依赖"]
+    gold_evidence:
+      - doc_id: "jvm-v2.1"
+        section: "16.对象一定分配在堆中吗？"
+        quote: "逃逸分析可能让 JIT 对不逃逸对象或锁做优化，但不能据此断言所有对象都会分配在栈上。"
+
+  - id: "jvm-019"
+    source: "jvm"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "JDK 21 默认使用哪个垃圾收集器，2026 年是否一定已经改变"
+    query_hard: "这需要实时 JDK 版本和发行版信息，当前 JVM 面试语料能否确定？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "jvm-020"
+    source: "jvm"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "本项目线上 JVM 堆应该设置成多少 GB"
+    query_hard: "没有机器规格、流量和 GC 目标，能否从通用面试资料直接给出数值？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "spring-001"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "concept"
+    question: "什么是 Spring IOC 和 DI"
+    query_hard: "对象为什么不再由业务代码自己 new，而是交给容器管理？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "IoC 是控制反转，把对象创建和依赖关系管理的控制权交给 Spring 容器；DI 是依赖注入，容器通过构造器、setter 或字段等方式把依赖提供给 Bean。IoC 是思想和过程，DI 是常见实现方式。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["控制反转"]
+      - ["容器创建 Bean"]
+      - ["依赖注入"]
+      - ["构造器/setter/字段"]
+      - ["解耦"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "6.说一说什么是IoC？ / 7.能说一下IoC的实现机制吗？"
+        quote: "Spring IoC 容器负责创建和管理 Bean，DI 则把 Bean 需要的依赖注入进去。"
+
+  - id: "spring-002"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "Spring Bean 的生命周期是怎样的"
+    query_hard: "从实例化到销毁，Bean 经过哪些主要回调和后置处理？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Bean 生命周期通常包括实例化、属性填充、Aware 回调、BeanPostProcessor 前置处理、初始化方法、后置处理并返回可用 Bean，容器关闭时执行销毁回调。AOP 代理等增强可能发生在后置处理阶段，具体回调取决于 Bean 的配置方式。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["实例化"]
+      - ["属性填充"]
+      - ["Aware 回调"]
+      - ["初始化"]
+      - ["后置处理/代理"]
+      - ["销毁"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "11.能说一下Bean的生命周期吗？"
+        quote: "Spring Bean 会经历实例化、依赖注入、初始化、后置处理和销毁等阶段。"
+
+  - id: "spring-003"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Spring Bean 有哪些作用域"
+    query_hard: "singleton、prototype 以及 Web 作用域分别意味着什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "常见作用域包括 singleton 和 prototype，Web 环境还可使用 request、session、application 等作用域。singleton 容器通常只维护一个 Bean 实例，prototype 每次获取时创建新实例；作用域选择还要结合线程安全和代理配置。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["singleton"]
+      - ["prototype"]
+      - ["request/session"]
+      - ["实例创建次数"]
+      - ["线程安全"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "15.Bean的作用域有哪些？"
+        quote: "singleton 通常是容器内单实例，prototype 每次获取时创建新实例，Web 环境还有 request/session 等作用域。"
+
+  - id: "spring-004"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Spring 如何解决单例 Bean 的循环依赖"
+    query_hard: "为什么三级缓存能够提前暴露对象，又为什么不是所有循环依赖都能解决？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "对于部分单例、属性注入的循环依赖，Spring 通过三级缓存保存完整单例、提前暴露的单例工厂和早期引用，在一个 Bean 尚未完成初始化时让另一个 Bean 获得早期引用。构造器循环依赖、prototype 循环依赖以及某些代理场景不能简单依靠三级缓存解决。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["一级缓存"]
+      - ["二级早期引用"]
+      - ["三级 ObjectFactory"]
+      - ["单例属性注入"]
+      - ["构造器/prototype 限制"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "18.Spring怎么解决循环依赖呢？ / 19.为什么需要三级缓存而不是两级？"
+        quote: "三级缓存中包含完整单例、早期引用和对象工厂，用于处理部分单例属性注入循环依赖及代理对象暴露。"
+
+  - id: "spring-005"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Spring AOP 的实现原理是什么"
+    query_hard: "方法调用怎样被切面逻辑拦截，JDK 动态代理和 CGLIB 分别适合什么？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring AOP 基于代理和拦截器链，在 Bean 初始化后为符合切点的 Bean 创建代理对象。目标实现接口时通常可使用 JDK 动态代理；没有接口或需要类代理时可使用 CGLIB。调用代理方法时会执行前置、环绕、后置等通知，再进入目标方法。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["代理对象"]
+      - ["切点/拦截器链"]
+      - ["JDK 动态代理"]
+      - ["CGLIB"]
+      - ["通知执行"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "20.说说什么是 AOP？ / 24.说说JDK动态代理和CGLIB代理的区别？"
+        quote: "Spring AOP 在 Bean 后置处理阶段创建代理，通过拦截器链在目标方法前后织入横切逻辑。"
+
+  - id: "spring-006"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "Spring AOP 和 AspectJ 有什么区别"
+    query_hard: "为什么 Spring AOP 解决不了某些第三方类或字段级织入需求？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring AOP 主要基于运行时代理，通常拦截 Spring 容器管理的 Bean 方法；AspectJ 支持编译期或类加载期织入，连接点范围更广，可以处理不由 Spring 管理的对象和更细粒度的连接点。Spring AOP 配置简单，AspectJ 能力更强但构建和调试成本更高。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["运行时代理"]
+      - ["Spring Bean 方法"]
+      - ["AspectJ 编译/类加载织入"]
+      - ["更广连接点"]
+      - ["能力与成本取舍"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "22.说说 Spring AOP 和 AspectJ 区别？"
+        quote: "Spring AOP 主要拦截容器 Bean 的方法，AspectJ 可以通过织入覆盖更广的对象和连接点。"
+
+  - id: "spring-007"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "JDK 动态代理和 CGLIB 代理有什么区别"
+    query_hard: "目标类没有接口时，为什么通常选择 CGLIB？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "JDK 动态代理基于接口生成代理，只能代理接口方法；CGLIB 通过生成目标类子类进行代理，适用于没有接口的类，但 final 类或 final 方法不能被覆盖。两者都需要通过代理对象调用，直接调用目标对象或类内部自调用可能绕过代理。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["基于接口"]
+      - ["目标类子类"]
+      - ["final 限制"]
+      - ["代理对象调用"]
+      - ["自调用绕过"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "24.说说JDK动态代理和CGLIB代理的区别？"
+        quote: "JDK 动态代理依赖接口，CGLIB 通过子类增强，final 类或方法会限制 CGLIB 代理。"
+
+  - id: "spring-008"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Spring 事务传播行为有哪些"
+    query_hard: "默认 REQUIRED 在已有事务和没有事务时分别怎么做？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring 常见事务传播行为包括 REQUIRED、REQUIRES_NEW、SUPPORTS、NOT_SUPPORTED、MANDATORY、NEVER 和 NESTED。REQUIRED 是默认行为：当前有事务就加入，没有事务就新建；REQUIRES_NEW 会挂起外部事务并开启新事务。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["七种传播行为"]
+      - ["REQUIRED 默认"]
+      - ["加入已有事务"]
+      - ["REQUIRES_NEW 挂起外部"]
+      - ["NESTED"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "29.说说Spring的事务传播机制？"
+        quote: "Spring 定义了七种传播行为，REQUIRED 是默认值，表示有事务就加入、没有就新建。"
+
+  - id: "spring-009"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "@Transactional 在哪些情况下会失效"
+    query_hard: "明明写了注解却没有回滚，哪些代理边界和异常处理容易造成问题？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "常见原因包括方法被同类内部直接调用绕过代理、private/final 方法无法按预期代理、对象不是 Spring Bean、异常被 catch 后没有继续抛出、默认只对 RuntimeException 回滚，以及事务管理器或数据源配置不匹配。需要按代理调用链和异常类型逐项排查。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["同类自调用"]
+      - ["private/final 方法"]
+      - ["非 Spring Bean"]
+      - ["异常被吞掉"]
+      - ["checked exception/rollbackFor"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "27.@Transactional在哪些情况下会失效？"
+        quote: "事务依赖 Spring 代理，自调用、不可代理方法、异常被吞掉和回滚规则不匹配都可能导致失效。"
+
+  - id: "spring-010"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Spring 事务隔离级别有哪些"
+    query_hard: "Spring 的隔离级别如何映射到数据库实际隔离行为？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring 使用数据库支持的隔离级别，包括 DEFAULT、READ_UNCOMMITTED、READ_COMMITTED、REPEATABLE_READ 和 SERIALIZABLE。DEFAULT 表示采用底层数据库默认值，实际脏读、不可重复读和幻读行为还取决于数据库引擎。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["DEFAULT"]
+      - ["READ_UNCOMMITTED"]
+      - ["READ_COMMITTED"]
+      - ["REPEATABLE_READ"]
+      - ["SERIALIZABLE"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "28.说说Spring的事务隔离级别？"
+        quote: "Spring 提供标准隔离级别常量，DEFAULT 使用底层数据库的默认隔离级别。"
+
+  - id: "spring-011"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "fact"
+    question: "Spring MVC 的核心组件有哪些"
+    query_hard: "一次 Web 请求从入口到控制器调用，哪些组件负责路由、适配和视图？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring MVC 的核心组件包括 DispatcherServlet、HandlerMapping、HandlerAdapter、Controller、ViewResolver 和 View 等。DispatcherServlet 作为前端控制器协调请求，HandlerMapping 找处理器，HandlerAdapter 调用处理器，ViewResolver 解析视图。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["DispatcherServlet"]
+      - ["HandlerMapping"]
+      - ["HandlerAdapter"]
+      - ["Controller"]
+      - ["ViewResolver/View"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "30.Spring MVC 的核心组件有哪些？"
+        quote: "DispatcherServlet 协调 HandlerMapping、HandlerAdapter、Controller 和 ViewResolver 完成请求处理。"
+
+  - id: "spring-012"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "Spring MVC 一次请求的处理流程是什么"
+    query_hard: "浏览器发起请求后，Spring MVC 按什么顺序找到方法并返回响应？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "请求先进入 DispatcherServlet，HandlerMapping 根据 URL 找到处理器，HandlerAdapter 执行控制器方法；控制器返回 ModelAndView 或响应体，视图解析器选择 View 并渲染，最终由 DispatcherServlet 返回响应。REST 接口通常通过消息转换器直接序列化响应体。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["DispatcherServlet 接收"]
+      - ["HandlerMapping 查找"]
+      - ["HandlerAdapter 调用"]
+      - ["控制器返回"]
+      - ["视图解析/消息转换"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "31.Spring MVC 的工作流程了解吗？"
+        quote: "Spring MVC 请求一般经过 DispatcherServlet、HandlerMapping、HandlerAdapter、控制器和视图/消息转换器。"
+
+  - id: "spring-013"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Spring Boot 自动配置的原理是什么"
+    query_hard: "为什么引入一个 starter 后，容器就能根据 classpath 和配置自动创建 Bean？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "`@SpringBootApplication` 组合了组件扫描和自动配置能力；自动配置类通过条件注解检查 classpath、配置属性和已有 Bean，满足条件时向容器注册默认 Bean，不满足时跳过。用户可以通过配置属性、排除自动配置或自定义 Bean 覆盖默认行为。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["@SpringBootApplication"]
+      - ["@EnableAutoConfiguration"]
+      - ["条件注解"]
+      - ["classpath/已有 Bean"]
+      - ["配置覆盖/排除"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "34.Spring Boot的自动装配原理了解吗？"
+        quote: "Spring Boot 通过自动配置类和条件判断，根据 classpath、配置与已有 Bean 决定是否注册默认 Bean。"
+
+  - id: "spring-014"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "Spring Boot 和 Spring MVC 有什么区别"
+    query_hard: "为什么 Spring Boot 不是 Spring MVC 的替代品？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring MVC 是处理 Web 请求的 Spring 模块，提供 DispatcherServlet、控制器和视图等能力；Spring Boot 是简化 Spring 应用配置、依赖管理和部署的工程化框架，可以通过 starter 自动配置 Spring MVC。两者属于不同层次，可以一起使用。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Spring MVC Web 模块"]
+      - ["Spring Boot 工程化"]
+      - ["starter"]
+      - ["自动配置"]
+      - ["可组合使用"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "37.说一下 SpringBoot 和 SpringMVC 的区别？"
+        quote: "Spring MVC 负责 Web 请求处理，Spring Boot 负责简化应用配置、依赖和部署，两者可以一起使用。"
+
+  - id: "spring-015"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "BeanFactory 和 ApplicationContext 有什么区别"
+    query_hard: "为什么实际项目通常使用 ApplicationContext？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "BeanFactory 是较基础的 IoC 容器，提供 Bean 创建和获取等核心能力；ApplicationContext 在此基础上增加事件发布、国际化、资源加载、自动识别后置处理器等企业级能力，通常也更积极地初始化单例 Bean。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["BeanFactory 基础容器"]
+      - ["ApplicationContext 扩展"]
+      - ["事件发布"]
+      - ["资源/国际化"]
+      - ["后置处理器/单例初始化"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "8.说说BeanFactory和ApplicationContext的区别？"
+        quote: "ApplicationContext 在 BeanFactory 基础能力上增加了事件、资源、国际化和后置处理等功能。"
+
+  - id: "spring-016"
+    source: "spring"
+    split: "dev"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "multi_hop"
+    question: "Spring 框架用到了哪些设计模式"
+    query_hard: "不要只列名称，至少说明这些模式在容器或 AOP 中怎样出现。"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring 中常见设计模式包括工厂模式创建和获取 Bean、单例模式管理 singleton Bean、代理模式实现 AOP、模板方法复用流程、观察者模式发布事件，以及策略模式选择实现。具体类和版本会变化，回答时应把模式与使用位置对应起来。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["工厂模式"]
+      - ["单例模式"]
+      - ["代理模式"]
+      - ["模板方法"]
+      - ["观察者/策略"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "4.Spring用了哪些设计模式？"
+        quote: "Spring 在 Bean 创建、单例管理、AOP、事件和模板流程中使用了多种设计模式。"
+
+  - id: "spring-017"
+    source: "spring"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "concept"
+    question_type: "comparison"
+    question: "Spring Cache 和 Redis 有什么区别"
+    query_hard: "一个是抽象层，一个是具体存储实现，为什么不能把两者当成同一个东西？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "Spring Cache 是缓存抽象，提供 `@Cacheable` 等统一注解和缓存管理接口；Redis 是具体的分布式键值存储，可以作为 Spring Cache 的底层实现。Spring Cache 不决定所有数据结构、持久化和集群能力，Redis 也可以脱离 Spring Cache 直接使用。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["Spring Cache 抽象"]
+      - ["@Cacheable"]
+      - ["Redis 具体实现"]
+      - ["缓存管理器"]
+      - ["可独立使用"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "41.Spring Cache 了解吗？"
+        quote: "Spring Cache 是抽象接口和注解，Redis 是可以被它使用的具体缓存实现。"
+
+  - id: "spring-018"
+    source: "spring"
+    split: "holdout"
+    origin: "corpus_curated"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "synthesis"
+    question_type: "procedure"
+    question: "SpringTask 适合做什么，如何避免任务重复执行"
+    query_hard: "订单超时检查可以直接加一个定时注解吗，多实例部署时有什么风险？"
+    answerable: true
+    expected_refusal: false
+    reference_answer: "SpringTask 提供基于注解的轻量任务调度，例如固定延迟、固定周期和 cron。单机使用简单，但多实例部署时每个实例都可能执行同一任务，需要分布式锁、任务分片或外部调度器；任务本身还要幂等并设置超时和失败告警。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["@Scheduled/cron"]
+      - ["固定延迟/周期"]
+      - ["多实例重复执行"]
+      - ["分布式锁/分片"]
+      - ["幂等与告警"]
+    gold_evidence:
+      - doc_id: "spring-v2.0"
+        section: "40.SpringTask 了解吗？"
+        quote: "SpringTask 可以通过定时配置执行任务，但集群环境需要额外处理重复执行和任务幂等。"
+
+  - id: "spring-019"
+    source: "spring"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "Spring Boot 4.0 的准确发布时间和官方支持周期是什么"
+    query_hard: "这需要实时版本公告，当前 Spring 面试资料能否直接给出？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []
+
+  - id: "spring-020"
+    source: "spring"
+    split: "holdout"
+    origin: "adversarial"
+    corpus_version: "eval-corpus-local-2026-08-11"
+    difficulty: "fact"
+    question_type: "unanswerable"
+    question: "本项目某个 Bean 当前的生产配置和实例数量是多少"
+    query_hard: "这是项目运行时状态，通用 Spring 资料能否直接知道？"
+    answerable: false
+    expected_refusal: true
+    reference_answer: "当前知识库未覆盖该问题，系统应明确说明无法从当前语料回答，不应使用模型自身知识补充。"
+    review_status: "assistant_curated_pending_human_review"
+    key_points:
+      - ["无相关证据"]
+    gold_evidence:
+      []

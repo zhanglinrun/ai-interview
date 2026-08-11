@@ -119,6 +119,11 @@ public class MultiSourceQueryRouter implements QueryRouter {
 
   public Decision decide(String question) {
     Decision heuristic = heuristic(question);
+    // 显式点名 Neo4j/图数据库时，不能让 LLM 把图查询误判为普通 ES 问答。
+    // 这是路由安全边界：图数据源失败时由图检索器内部回退 ES，而不是在入口丢失图意图。
+    if (isExplicitGraphQuestion(question)) {
+      return heuristic;
+    }
     if (!llmEnabled || chatModel == null || question == null || question.isBlank()) {
       return heuristic;
     }
@@ -167,5 +172,12 @@ public class MultiSourceQueryRouter implements QueryRouter {
       }
     }
     return false;
+  }
+
+  private boolean isExplicitGraphQuestion(String question) {
+    String normalized = question == null ? "" : question.toLowerCase(Locale.ROOT);
+    return containsAny(normalized, "neo4j", "图数据库", "图谱", "text2cypher", "cypher 查询")
+        || (containsAny(normalized, "routes_to", "executes_on", "integrates_with", "builds_on", "depends_on")
+        && containsAny(normalized, "关系", "节点", "实体"));
   }
 }

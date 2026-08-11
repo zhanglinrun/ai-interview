@@ -6,7 +6,6 @@ import com.linrun.interview.rag.model.QueryResponse;
 import com.linrun.interview.rag.model.RagDatasetResult;
 import com.linrun.interview.rag.model.RagQaExportRequest;
 import com.linrun.interview.rag.model.RagQaExportResponse;
-import dev.langchain4j.data.segment.TextSegment;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,10 +40,10 @@ public class RagDatasetService {
   }
 
   /**
-   * 批量导出 RAGAS 评测样本：每题走完整 RAG 生成得到 answer，并单独取召回 chunk 作为 contexts。
+   * 批量导出 RAGAS 评测样本：每题走完整 RAG 生成，并返回同一次检索得到的 contexts。
    *
-   * <p>contexts 走 {@code retrieveForEvaluation}（与生成同一增强链路，返回完整 chunk 文本，
-   * 非截断 snippet），保证 RAGAS 的 context_precision / context_recall 基于真实召回上下文。
+   * <p>answer 与 contexts 由 {@code queryForEvaluation} 的同一次 augment 产生，返回完整 chunk
+   * 文本而非截断 snippet，避免 RAGAS 评测到「没有真正喂给模型」的第二次检索结果。
    * ground_truth 由调用方（评测集关键点）透传，本方法不臆造参考答案。
    */
   public RagQaExportResponse exportQa(List<Long> knowledgeBaseIds,
@@ -57,16 +56,20 @@ public class RagDatasetService {
         continue;
       }
       long start = System.nanoTime();
-      List<TextSegment> retrieved = queryService.retrieveForEvaluation(knowledgeBaseIds, question);
-      QueryResponse response = queryService.queryKnowledgeBase(
-          new QueryRequest(knowledgeBaseIds, question));
-      long latencyMs = (System.nanoTime() - start) / 1_000_000;
-      List<String> contexts = retrieved.stream()
-          .map(TextSegment::text)
+      KnowledgeBaseQueryService.EvaluationQueryResult execution =
+          queryService.queryForEvaluation(knowledgeBaseIds, question);
+      long latencyMs = execution.latencyMs() > 0
+          ? execution.latencyMs()
+          : (System.nanoTime() - start) / 1_000_000;
+      List<String> contexts = execution.contexts().stream()
+          .map(segment -> segment == null ? null : segment.text())
           .filter(t -> t != null && !t.isBlank())
           .toList();
       samples.add(new RagQaExportResponse.Sample(
-          question, response.answer(), contexts, item.groundTruth(), latencyMs));
+          item.id(), item.source(), item.difficulty(), question, execution.answer(), contexts,
+          item.referenceAnswer(), item.groundTruth(), latencyMs, execution.noEvidence(),
+          execution.routeSource(), execution.routeIntent(), execution.routeConfidence(),
+          execution.routeReasoning()));
     }
     log.info("[RagDatasetService] export-qa 完成: kbIds={}, 题量={}", knowledgeBaseIds, samples.size());
     return new RagQaExportResponse(samples.size(), samples);

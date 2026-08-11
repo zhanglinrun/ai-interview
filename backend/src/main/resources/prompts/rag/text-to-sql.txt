@@ -10,5 +10,11 @@
 数据库 Schema：
 {{databaseStructure}}
 
+表选择规则（优先级高于模型常识）：
+- 用户上传的知识库文档、文档名称、文档状态、向量化状态、知识库记录，必须查询 documents；不要用 interview_sessions 代替。
+- 面试场次或面试记录才查询 interview_sessions / interview_answers。
+- 简历及简历分析才查询 resumes / resume_analyses；聊天会话才查询 chat_sessions / chat_messages / chat_memories。
+- 只使用 Schema 中真实存在的列；documents 的状态列是 doc_status，删除标记是 deleted。
+
 用户问题：
 {{question}}

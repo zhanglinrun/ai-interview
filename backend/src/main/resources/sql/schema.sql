@@ -176,7 +176,9 @@ CREATE TABLE IF NOT EXISTS `document_versions` (
 CREATE TABLE IF NOT EXISTS `document_segments` (
     `id`                  BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`             BIGINT       NOT NULL,
-    `text`                TEXT         NOT NULL,
+    -- PARENT_CHILD 会保留完整父分段（skip_embedding=1），长章节可能超过 64KB。
+    -- 使用 MEDIUMTEXT，避免中文 PDF 在切块落库时触发 TEXT 截断。
+    `text`                MEDIUMTEXT   NOT NULL,
     `chunk_id`            VARCHAR(64)  NULL,
     `parent_chunk_id`     VARCHAR(64)  NULL,
     `brother_chunk_id`    VARCHAR(64)  NULL,

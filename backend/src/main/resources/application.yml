@@ -427,7 +427,9 @@ app:
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
-        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:replace}
+        # 整篇 PDF 的父块通常是文档级大块；保留命中的子块，再追加上下文，
+        # 避免 replace 用文档前言覆盖掉真正命中的章节。
+        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:append}
         max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
         cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}

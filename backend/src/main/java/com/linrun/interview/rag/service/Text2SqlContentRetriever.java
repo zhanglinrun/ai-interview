@@ -40,7 +40,8 @@ public class Text2SqlContentRetriever implements Text2SqlRetrieverPort {
   private static final Pattern USER_SCOPE_PATTERN = Pattern.compile(
       "(?i)\\buser_id\\s*=\\s*['\"]?(\\d+)['\"]?");
   private static final Pattern WRITE_PATTERN = Pattern.compile(
-      "(?i)(?:;|--|/\\*|\\b(insert|update|delete|drop|alter|truncate|create|rename|grant|revoke|call|load|outfile|dumpfile)\\b)");
+      "(?i)(?:--|/\\*|\\b(insert|update|delete|drop|alter|truncate|create|rename|grant|revoke|call|load|outfile|dumpfile)\\b)");
+  private static final Pattern INTERNAL_STATEMENT_PATTERN = Pattern.compile(";\\s*\\S");
   private static final Set<String> USER_SCOPED_TABLES = Set.of(
       "users", "documents", "document_versions", "document_segments",
       "resumes", "resume_analyses", "interview_sessions", "interview_answers",
@@ -124,6 +125,9 @@ public class Text2SqlContentRetriever implements Text2SqlRetrieverPort {
     if (selectIndex > 0) {
       sql = sql.substring(selectIndex).trim();
     }
+    // LLMs often terminate a single SELECT with ';'. Keep that harmless
+    // delimiter out of the safety check while still rejecting multi-statements.
+    sql = sql.replaceFirst(";\\s*$", "").trim();
     return sql;
   }
 
@@ -131,7 +135,7 @@ public class Text2SqlContentRetriever implements Text2SqlRetrieverPort {
     if (sql.isBlank() || !sql.toLowerCase(Locale.ROOT).startsWith("select")) {
       throw new IllegalArgumentException("Text2SQL 只允许 SELECT");
     }
-    if (WRITE_PATTERN.matcher(sql).find()) {
+    if (WRITE_PATTERN.matcher(sql).find() || INTERNAL_STATEMENT_PATTERN.matcher(sql).find()) {
       throw new IllegalArgumentException("Text2SQL 包含写操作或多语句符号");
     }
     Matcher tableMatcher = TABLE_PATTERN.matcher(sql);

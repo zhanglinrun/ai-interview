@@ -338,6 +338,53 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
+     * 端到端评测入口：一次 augment 后同时生成回答并返回本次 augment 的 contexts。
+     *
+     * <p>不能先调用 {@link #retrieveForEvaluation} 再调用 {@link #queryKnowledgeBase}：
+     * 两次调用可能触发不同的 query rewrite / HyDE / CRAG 结果，RAGAS 会拿到一组
+     * 没有真正喂给生成模型的 contexts，导致 faithfulness 与 context 指标失真。
+     * 这里复用生产查询的 augment → generate 顺序，确保 answer 与 contexts 配对。
+     */
+    public EvaluationQueryResult queryForEvaluation(List<Long> knowledgeBaseIds, String question) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+            || normalizeQuestion(question).isBlank()) {
+            return new EvaluationQueryResult(NO_RESULT_RESPONSE, List.of(), 0L, true);
+        }
+
+        Long userId = UserContext.requireUserId();
+        long start = System.nanoTime();
+        RagQueryTrace trace = new RagQueryTrace();
+        try {
+            if (intentRecognition.isEnabled()) {
+                IntentRecognitionResult intent = recognizeIntent(question, List.of());
+                if (intent != null && !intent.related()) {
+                    // 评测也要保留意图门行为：answerable 题被误判为越域时，样本会明确表现为无证据回答。
+                    String answer = commonChatService.chat(question, userId);
+                    return new EvaluationQueryResult(answer, List.of(), elapsedMillis(start), true);
+                }
+                if (intent != null) {
+                    ACTIVE_INTENT.set(intent);
+                }
+            }
+            // 与同步生产入口相同：包含 query transformation、混合检索、rerank、上下文扩展与 CRAG。
+            // 评测保留改写、路由、混合检索、重排和 CRAG，但关闭复杂问题分解，
+            // 避免一个样本被多个子问题污染，且让 route_source 与 contexts 一一对应。
+            AugmentationOutcome outcome = augment(
+                knowledgeBaseIds, question, List.of(), null, null, trace, false, userId, true);
+            List<Content> contents = outcome.contents();
+            if (contents.isEmpty()) {
+                return new EvaluationQueryResult(NO_RESULT_RESPONSE, List.of(), elapsedMillis(start), true);
+            }
+            String answer = generateAnswer(knowledgeBaseIds, question, outcome, List.of(), userId);
+            List<TextSegment> contexts = contents.stream().map(Content::textSegment).toList();
+            return new EvaluationQueryResult(answer, contexts, elapsedMillis(start), false,
+                trace.routeSource(), trace.routeIntent(), trace.routeConfidence(), trace.routeReasoning());
+        } finally {
+            ACTIVE_INTENT.remove();
+        }
+    }
+
+    /**
      * 面试逐轮证据检索：保留 ES 双路混合检索、RRF、rerank 与后置父子/兄弟上下文扩展，
      * 但跳过 Query Rewrite、HyDE、Query Decomposition 与 CRAG 的 LLM 调用。
      *
@@ -698,14 +745,23 @@ public class KnowledgeBaseQueryService {
                                         Consumer<String> progressCallback, Long assistantMessageId,
                                         RagQueryTrace trace, Long userId) {
         return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, trace,
-            false, userId);
+            false, userId, false);
     }
 
     private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
                                         Consumer<String> progressCallback, Long assistantMessageId,
                                         RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId) {
+        return augment(knowledgeBaseIds, question, history, progressCallback, assistantMessageId, trace,
+            knowledgeBaseOnly, userId, false);
+    }
+
+    private AugmentationOutcome augment(List<Long> knowledgeBaseIds, String question, List<ChatMessage> history,
+                                        Consumer<String> progressCallback, Long assistantMessageId,
+                                        RagQueryTrace trace, boolean knowledgeBaseOnly, Long userId,
+                                        boolean evaluationMode) {
         RetrievalAugmentor augmentor = buildAugmentor(
-            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly, userId);
+            knowledgeBaseIds, history, progressCallback, assistantMessageId, trace, knowledgeBaseOnly, userId,
+            true, evaluationMode);
         UserMessage userMessage = UserMessage.from(question);
         Metadata metadata = Metadata.from(userMessage, SESSION_ID_DEFAULT, history);
         long startNanos = System.nanoTime();
@@ -837,7 +893,7 @@ public class KnowledgeBaseQueryService {
                                               RagQueryTrace trace, boolean knowledgeBaseOnly,
                                               Long modelUserId) {
         return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
-            trace, knowledgeBaseOnly, modelUserId, true);
+            trace, knowledgeBaseOnly, modelUserId, true, false);
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
@@ -846,15 +902,34 @@ public class KnowledgeBaseQueryService {
                                               Long modelUserId,
                                               boolean queryTransformationEnabled) {
         return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
-            trace, knowledgeBaseOnly, modelUserId, queryTransformationEnabled,
-            UserContext.requireUserId());
+            trace, knowledgeBaseOnly, modelUserId, queryTransformationEnabled, false);
     }
 
     private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
                                               Consumer<String> progressCallback, Long assistantMessageId,
                                               RagQueryTrace trace, boolean knowledgeBaseOnly,
                                               Long modelUserId, boolean queryTransformationEnabled,
+                                              boolean evaluationMode) {
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
+            trace, knowledgeBaseOnly, modelUserId, queryTransformationEnabled,
+            UserContext.requireUserId(), evaluationMode);
+    }
+
+    /** 异步面试证据检索使用持久化快照 userId，不读取当前请求线程身份。 */
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId,
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly,
+                                              Long modelUserId, boolean queryTransformationEnabled,
                                               Long dataUserId) {
+        return buildAugmentor(knowledgeBaseIds, history, progressCallback, assistantMessageId,
+            trace, knowledgeBaseOnly, modelUserId, queryTransformationEnabled, dataUserId, false);
+    }
+
+    private RetrievalAugmentor buildAugmentor(List<Long> knowledgeBaseIds, List<ChatMessage> history,
+                                              Consumer<String> progressCallback, Long assistantMessageId,
+                                              RagQueryTrace trace, boolean knowledgeBaseOnly,
+                                              Long modelUserId, boolean queryTransformationEnabled,
+                                              Long dataUserId, boolean evaluationMode) {
         // dataUserId 只控制 ES 数据隔离；modelUserId 只控制 BYOK 路由，禁止混用两种身份。
         requireDataUserId(dataUserId);
         List<InterviewElasticsearchContentRetriever> esRetrievers =
@@ -907,7 +982,7 @@ public class KnowledgeBaseQueryService {
                 rewriteTransformer, getRewriteChatModel(modelUserId), hydePromptTemplate,
                 hydeEnabled, hydeMaxChars);
             // Agentic RAG：复杂问题先分解成子查询；知识库评测路径不分解，保证指标可复现。
-            queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly
+            queryTransformer = decompose.isEnabled() && !knowledgeBaseOnly && !evaluationMode
                 ? new InterviewQueryDecomposer(transformer, getDecomposeChatModel(modelUserId),
                     decomposePromptTemplate, decompose.getMaxSubQueries(), progressCallback, trace)
                 : transformer;
@@ -1455,6 +1530,23 @@ public class KnowledgeBaseQueryService {
 
     /** augment 结果：检索到的 contents 与注入检索内容后的 chatMessage（供 LLM 生成）。 */
     private record AugmentationOutcome(List<Content> contents, ChatMessage chatMessage) {}
+
+    /** 端到端评测样本的运行时结果；contexts 与 answer 来自同一次 augment。 */
+    public record EvaluationQueryResult(
+        String answer,
+        List<TextSegment> contexts,
+        long latencyMs,
+        boolean noEvidence,
+        String routeSource,
+        String routeIntent,
+        Double routeConfidence,
+        String routeReasoning
+    ) {
+        public EvaluationQueryResult(String answer, List<TextSegment> contexts, long latencyMs,
+                                     boolean noEvidence) {
+            this(answer, contexts, latencyMs, noEvidence, null, null, null, null);
+        }
+    }
 
     record StreamCitationResult(
         List<RagSourceDTO> sources,
