@@ -118,6 +118,8 @@ CREATE TABLE IF NOT EXISTS `documents` (
     `doc_status`           VARCHAR(20)  NULL DEFAULT 'INIT',
     `accessible_by`        VARCHAR(32)  NULL DEFAULT 'PRIVATE',
     `expire_date`          DATE         NULL,
+    `knowledge_base_type`  VARCHAR(32)  NULL DEFAULT 'DOCUMENT_SEARCH',
+    `table_name`           VARCHAR(128) NULL,
     `lock_version`         INT          NOT NULL DEFAULT 0,
     `deleted`              TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
@@ -149,8 +151,8 @@ CREATE TABLE IF NOT EXISTS `document_versions` (
     `version`            VARCHAR(32)  NOT NULL,
     `doc_url`            VARCHAR(1000) NULL,
     `storage_key`        VARCHAR(500) NULL,
-    `converted_doc_url`  VARCHAR(1000) NULL,
-    `converted_content`  LONGTEXT     NULL,
+    `converted_doc_url`  VARCHAR(1000) NULL COMMENT '转换后 Markdown 的 MinIO URL',
+    `converted_content`  LONGTEXT     NULL COMMENT '历史兼容：早期全文 Markdown；新上传不再写入',
     `content_hash`       VARCHAR(64)  NULL,
     `status`             VARCHAR(20)  NULL,
     `embedding_attempt`  INT          NOT NULL DEFAULT 0,
@@ -423,6 +425,26 @@ CREATE TABLE IF NOT EXISTS `rag_query_traces` (
     KEY `idx_rag_query_traces_trace_created` (`trace_id`, `created_at` DESC),
     KEY `idx_rag_query_traces_rag_run` (`rag_run_id`),
     KEY `idx_rag_query_traces_user_created` (`user_id`, `created_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- DATA_QUERY 动态表元数据（增加 user_id 做多租户隔离）
+CREATE TABLE IF NOT EXISTS `table_meta` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+    `user_id`      BIGINT       NOT NULL,
+    `table_name`   VARCHAR(128) NOT NULL,
+    `description`  VARCHAR(512) NULL,
+    `create_sql`   TEXT         NULL,
+    `columns_info` TEXT         NULL,
+    `version_id`   BIGINT       NULL,
+    `created_at`   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    `updated_at`   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+                                  ON UPDATE CURRENT_TIMESTAMP(6),
+    `lock_version` INT          NOT NULL DEFAULT 0,
+    `deleted`      TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_table_meta_name` (`table_name`),
+    KEY `idx_table_meta_user_id` (`user_id`),
+    KEY `idx_table_meta_version_id` (`version_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Text2SQL Schema 目录：只暴露启用且在白名单内的业务表结构给模型。

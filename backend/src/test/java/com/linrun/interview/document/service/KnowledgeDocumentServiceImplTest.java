@@ -1,7 +1,13 @@
-package com.linrun.interview.document.service;import com.linrun.interview.rag.service.EvidenceSnapshotService;
+package com.linrun.interview.document.service;
+
+import com.linrun.interview.document.service.ExcelProcessService;
+import com.linrun.interview.document.service.impl.KnowledgeDocumentServiceImpl;
+import com.linrun.interview.document.service.impl.DocumentParseTaskService;
+import com.linrun.interview.document.service.impl.SegmentTextCacheService;
+import com.linrun.interview.document.service.impl.VectorizationTaskService;
+import com.linrun.interview.rag.service.EvidenceSnapshotService;
 
 import com.linrun.interview.common.exception.BusinessException;
-import com.linrun.interview.document.service.FileStorageService;
 import com.linrun.interview.document.constant.DocumentStatus;
 import com.linrun.interview.document.constant.SegmentStatus;
 import com.linrun.interview.document.mapper.KnowledgeBaseEntityMapper;
@@ -38,7 +44,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("知识库文档服务测试")
+@DisplayName("?????????")
 class KnowledgeDocumentServiceImplTest {
 
   private static final String EMBEDDING_CLAIM = "20:1:2026-07-19T12:00";
@@ -53,13 +59,14 @@ class KnowledgeDocumentServiceImplTest {
   @Mock private DocumentParseTaskService documentParseTaskService;
   @Mock private RagSessionKnowledgeBaseMapper sessionKnowledgeBaseMapper;
   @Mock private VectorizationTaskService vectorizationTaskService;
+  @Mock private ExcelProcessService excelProcessService;
   @Mock private TransactionTemplate transactionTemplate;
 
   @InjectMocks
   private KnowledgeDocumentServiceImpl service;
 
   @Test
-  @DisplayName("删除在 ES 写入后提交时应撤销本批孤儿向量")
+  @DisplayName("??? ES ???????????????")
   void deletionAfterEsWriteRemovesOrphanBatch() throws Exception {
     KnowledgeBaseVersionEntity version = version(20L, 10L);
     KnowledgeBaseEntity document = document(10L);
@@ -80,7 +87,7 @@ class KnowledgeDocumentServiceImplTest {
     when(vectorStoreService.embedAndStore(anyList(), eq(EMBEDDING_CLAIM))).thenAnswer(invocation -> {
       esWritten.countDown();
       if (!deletionCommitted.await(2, TimeUnit.SECONDS)) {
-        throw new IllegalStateException("删除事务未按预期提交");
+        throw new IllegalStateException("??????????");
       }
       return List.of("kb-segment-1");
     });
@@ -105,7 +112,7 @@ class KnowledgeDocumentServiceImplTest {
   }
 
   @Test
-  @DisplayName("DB 回写异常时应撤销已经写入的 ES 向量")
+  @DisplayName("DB ????????????? ES ??")
   void dbWriteFailureRemovesStoredBatch() {
     KnowledgeBaseVersionEntity version = version(20L, 10L);
     KnowledgeBaseSegmentEntity segment = segment(1L, 10L, 20L);
@@ -133,7 +140,7 @@ class KnowledgeDocumentServiceImplTest {
   }
 
   @Test
-  @DisplayName("DB 回写失去租约后只按旧批次令牌清理 ES")
+  @DisplayName("DB ???????????????? ES")
   void lostLeaseCleansOnlyOldEmbeddingClaim() {
     KnowledgeBaseVersionEntity version = version(20L, 10L);
     KnowledgeBaseSegmentEntity segment = segment(1L, 10L, 20L);
@@ -160,7 +167,7 @@ class KnowledgeDocumentServiceImplTest {
   }
 
   @Test
-  @DisplayName("租约已被新任务接管时旧任务不得推进文档终态")
+  @DisplayName("?????????????????????")
   void staleLeaseCannotFinalizeDocument() {
     KnowledgeBaseVersionEntity version = version(20L, 10L);
     KnowledgeBaseEntity document = document(10L);
@@ -177,7 +184,7 @@ class KnowledgeDocumentServiceImplTest {
 
     assertThatThrownBy(() -> service.activateVersion(version))
         .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("租约已失效");
+        .hasMessageContaining("versionId=20");
 
     verify(vectorizationTaskService).complete(version);
     verify(vectorizationTaskService).fail(eq(version), any(BusinessException.class));
@@ -185,7 +192,7 @@ class KnowledgeDocumentServiceImplTest {
   }
 
   @Test
-  @DisplayName("文档并发变化时不得静默完成向量化终态")
+  @DisplayName("??????????????????")
   void concurrentDocumentChangeCannotFinalizeVersion() {
     KnowledgeBaseVersionEntity version = version(20L, 10L);
     KnowledgeBaseEntity document = document(10L);
@@ -203,7 +210,7 @@ class KnowledgeDocumentServiceImplTest {
 
     assertThatThrownBy(() -> service.activateVersion(version))
         .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("文档状态已变化");
+        .hasMessageContaining("docId=10");
 
     verify(vectorizationTaskService).complete(version);
     verify(vectorizationTaskService).fail(eq(version), any(BusinessException.class));

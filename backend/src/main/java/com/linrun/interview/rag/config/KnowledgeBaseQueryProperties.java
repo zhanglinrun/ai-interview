@@ -173,11 +173,11 @@ public class KnowledgeBaseQueryProperties {
         /** 是否启用 small-to-big 上下文扩展 */
         private boolean enabled = true;
         /**
-         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块，对齐业界实践）。
+         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块）。
          */
-        private String strategy = "append";
+        private String strategy = "replace";
         /** 单个命中 chunk 扩展后的最大字符数 */
-        private int maxChars = 1200;
+        private int maxChars = 8000;
         /** 最多聚合的兄弟 chunk 数 */
         private int maxSiblings = 5;
         /** parent/brother 文本 Redis 缓存 TTL（秒），0 表示不缓存 */

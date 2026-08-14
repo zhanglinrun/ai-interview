@@ -1,18 +1,23 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.DocumentProcessServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.auth.security.UserContext;
-import com.linrun.interview.document.service.ContentTypeDetectionService;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.ContentTypeDetectionService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.document.service.FileStorageService;
-import com.linrun.interview.document.service.FileValidationService;
+import com.linrun.interview.document.service.impl.FileValidationService;
 import com.linrun.interview.document.constant.DocumentStatus;
 import com.linrun.interview.document.entity.KnowledgeBaseEntity;
 import com.linrun.interview.document.entity.KnowledgeBaseVersionEntity;
 import com.linrun.interview.document.mapper.KnowledgeBaseEntityMapper;
+import com.linrun.interview.document.mapper.TableMetaMapper;
+import com.linrun.interview.document.service.ExcelProcessService;
 import com.linrun.interview.document.service.FileProcessServiceFactory;
-import com.linrun.interview.document.service.FileTypeResolver;
+import com.linrun.interview.document.service.impl.FileTypeResolver;
+import com.linrun.interview.document.service.impl.KnowledgeBaseChunkingService;
+import com.linrun.interview.document.service.impl.VectorizationTaskService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -57,6 +62,8 @@ class DocumentProcessServiceImplTest {
     @Mock private KnowledgeDocumentService knowledgeDocumentService;
     @Mock private VectorStoreService vectorStoreService;
     @Mock private VectorizationTaskService vectorizationTaskService;
+    @Mock private ExcelProcessService excelProcessService;
+    @Mock private TableMetaMapper tableMetaMapper;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ObjectMapper objectMapper;
     @Mock private TransactionTemplate transactionTemplate;
@@ -177,7 +184,7 @@ class DocumentProcessServiceImplTest {
         version.setVersionId(versionId);
         version.setStatus(status);
         version.setDocUrl("http://localhost/bucket/" + fileName);
-        version.setConvertedContent("# test");
+        version.setConvertedDocUrl("http://localhost/bucket/converted/1/3/full.md");
         return version;
     }
 }

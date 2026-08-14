@@ -1,14 +1,14 @@
 package com.linrun.interview.document.service;
-import com.linrun.interview.document.service.MarkdownHeaderBrotherTextSplitter;
-import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
-
 
 import com.linrun.interview.document.constant.DocumentAccessScope;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
 import com.linrun.interview.document.vo.DocumentSplitParam;
 import com.linrun.interview.document.entity.KnowledgeBaseVersionEntity;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.util.Map;
 
 /**
  * 知识库文档处理编排接口（对齐业界实践 DocumentProcessService）。
@@ -39,6 +39,13 @@ public interface DocumentProcessService {
      */
     Long upload(MultipartFile file, String title, String category,
                 DocumentAccessScope accessScope, LocalDate expireDate);
+
+    /**
+     * 上传并解析文档，指定访问范围与知识库类型（DOCUMENT_SEARCH / DATA_QUERY）。
+     */
+    Long upload(MultipartFile file, String title, String category,
+                DocumentAccessScope accessScope, LocalDate expireDate,
+                KnowledgeBaseType knowledgeBaseType);
 
     /**
      * 上传新版本（版本号自动递增，旧版本即时失效）。
@@ -93,4 +100,9 @@ public interface DocumentProcessService {
      * @param versionId 目标版本 ID
      */
     void switchVersion(Long docId, Long versionId);
+
+    /**
+     * DATA_QUERY 类型文档分页预览动态表数据。
+     */
+    Page<Map<String, Object>> previewData(Long docId, int current, int size);
 }

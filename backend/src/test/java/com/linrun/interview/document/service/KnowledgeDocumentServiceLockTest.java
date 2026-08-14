@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.KnowledgeDocumentServiceImpl;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.linrun.interview.common.annotation.DistributeLock;

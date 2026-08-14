@@ -8,7 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.annotation.DistributeLock;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.github.service.GithubRepositoryService;
 import com.linrun.interview.business.config.JobInterviewProperties;
 import com.linrun.interview.business.vo.JobInterviewContracts.CreatePreparationRequest;

@@ -34,8 +34,11 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
     /** 原始文件对象存储键；用于短时预签名与失败补偿，不向前端暴露。 */
     private String storageKey;
 
-    /** 转换后 Markdown 文本内容（解析产物，split 时直接取，省存储往返）。 */
+    /** 转换后 Markdown 文本内容（历史兼容：早期全文存 LOB；新上传优先写 convertedDocUrl）。 */
     private String convertedContent;
+
+    /** 转换后 Markdown 的 MinIO 对象 URL。 */
+    private String convertedDocUrl;
 
     /** 文档内容 SHA-256（跨版本去重）。 */
     private String contentHash;
@@ -116,6 +119,14 @@ public class KnowledgeBaseVersionEntity extends BaseEntity {
 
     public void setConvertedContent(String convertedContent) {
         this.convertedContent = convertedContent;
+    }
+
+    public String getConvertedDocUrl() {
+        return convertedDocUrl;
+    }
+
+    public void setConvertedDocUrl(String convertedDocUrl) {
+        this.convertedDocUrl = convertedDocUrl;
     }
 
     public String getContentHash() {

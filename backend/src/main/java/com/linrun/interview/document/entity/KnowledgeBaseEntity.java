@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import com.linrun.interview.infra.persistence.BaseEntity;
 import com.linrun.interview.document.constant.DocumentStatus;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -72,6 +73,13 @@ public class KnowledgeBaseEntity extends BaseEntity {
 
     /** 到期日；过期后不参与检索。 */
     private LocalDate expireDate;
+
+    /** 知识库类型：DOCUMENT_SEARCH / DATA_QUERY。 */
+    private KnowledgeBaseType knowledgeBaseType;
+
+    /** DATA_QUERY 动态表物理表名。 */
+    private String tableName;
+
     // Getters and Setters
     public Long getId() {
         return id;
@@ -233,6 +241,22 @@ public class KnowledgeBaseEntity extends BaseEntity {
 
     public void setExpireDate(LocalDate expireDate) {
         this.expireDate = expireDate;
+    }
+
+    public KnowledgeBaseType getKnowledgeBaseType() {
+        return knowledgeBaseType;
+    }
+
+    public void setKnowledgeBaseType(KnowledgeBaseType knowledgeBaseType) {
+        this.knowledgeBaseType = knowledgeBaseType;
+    }
+
+    public String getTableName() {
+        return tableName;
+    }
+
+    public void setTableName(String tableName) {
+        this.tableName = tableName;
     }
 }
 

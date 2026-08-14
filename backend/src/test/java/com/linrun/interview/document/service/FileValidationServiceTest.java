@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.FileValidationService;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;

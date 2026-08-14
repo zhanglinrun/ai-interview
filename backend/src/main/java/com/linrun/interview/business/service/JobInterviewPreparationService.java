@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.github.model.GithubRepositoryEntity;
 import com.linrun.interview.github.service.GithubRepositoryService;
 import com.linrun.interview.business.entity.InterviewSessionEntity;

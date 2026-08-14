@@ -168,7 +168,8 @@ minio:
   secretKey: ${MINIO_SECRET_KEY:minioadmin}
   bucketName: ${MINIO_BUCKET:ai-interview}
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-  # MinerU 云服务必须能访问此地址；生产使用 https://files.<domain>，桶仍保持私有。
+  publicRead: ${MINIO_PUBLIC_READ:true}
+  # MinerU 云服务必须能访问此地址；生产使用 https://files.<domain>，桶公共读供 VL 拉取图片。
   externalEndpoint: ${MINIO_EXTERNAL_ENDPOINT:}
 
 file:
@@ -192,10 +193,14 @@ file:
       max-zip-entries: ${MINERU_MAX_ZIP_ENTRIES:10000}
       max-compression-ratio: ${MINERU_MAX_COMPRESSION_RATIO:100}
       max-markdown-bytes: ${MINERU_MAX_MARKDOWN_BYTES:20971520}
+      max-image-bytes: ${MINERU_MAX_IMAGE_BYTES:20971520}
+      max-images: ${MINERU_MAX_IMAGES:200}
       allow-private-result-urls: ${MINERU_ALLOW_PRIVATE_RESULT_URLS:false}
       allow-private-source-urls: ${MINERU_ALLOW_PRIVATE_SOURCE_URLS:false}
       compensation-enabled: ${MINERU_COMPENSATION_ENABLED:true}
       compensation-stale-seconds: ${MINERU_COMPENSATION_STALE_SECONDS:30}
+      vision-alt-enabled: ${MINERU_VISION_ALT_ENABLED:true}
+      vision-model: ${MINERU_VISION_MODEL:qwen3-vl-plus}
 
 # Application custom configuration
 app:
@@ -427,10 +432,10 @@ app:
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
-        # 整篇 PDF 的父块通常是文档级大块；保留命中的子块，再追加上下文，
-        # 避免 replace 用文档前言覆盖掉真正命中的章节。
-        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:append}
-        max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:1200}
+        # 扩展策略：replace = 命中子块后用父块全文替换（small-to-big）
+        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:replace}
+        # replace 时以父块为主；适当放宽避免过早截断整章上下文
+        max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:8000}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
         cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}
       # 最终上下文总预算：按 RRF/rerank 顺序保留完整片段，保证 [n] 与 sources 索引一致。

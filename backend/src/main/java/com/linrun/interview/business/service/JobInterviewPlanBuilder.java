@@ -9,7 +9,7 @@ import com.linrun.interview.rag.model.EvidencePacket;
 import com.linrun.interview.rag.model.EvidenceRef;
 import com.linrun.interview.rag.model.EvidenceScope;
 import com.linrun.interview.rag.model.EvidenceStatus;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.mapper.CapabilityAtomDefinitionMapper;
 import com.linrun.interview.business.mapper.PlatformKnowledgeManifestMapper;
 import com.linrun.interview.business.mapper.QuestionTemplateMapper;

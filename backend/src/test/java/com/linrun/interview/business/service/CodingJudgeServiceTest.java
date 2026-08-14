@@ -9,7 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.client.JudgeClient;
 import com.linrun.interview.business.client.JudgeClientResult;
 import com.linrun.interview.business.vo.SubmitCodeRequest;

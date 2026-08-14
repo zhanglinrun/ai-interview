@@ -1,5 +1,7 @@
 package com.linrun.interview.rag.service;
 
+import com.linrun.interview.document.entity.TableMetaEntity;
+import com.linrun.interview.document.service.TableMetaCatalogService;
 import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,9 +18,7 @@ import java.util.Set;
 /**
  * Text2SQL 的 Schema 目录。
  *
- * <p>优先读取配置的表白名单，再从 {@code information_schema.columns} 获取列信息；
- * 查询失败时返回静态安全描述，避免 Schema 探测故障阻断 ES 问答。表名始终来自白名单，
- * 不把数据库中所有表暴露给模型。</p>
+ * <p>静态表白名单 + {@code table_meta} 中用户 DATA_QUERY 动态表。</p>
  */
 @Slf4j
 @Service
@@ -31,32 +31,49 @@ public class RagSqlSchemaService {
 
   private final JdbcTemplate jdbcTemplate;
   private final KnowledgeBaseQueryProperties properties;
+  private final TableMetaCatalogService tableMetaCatalogService;
   private volatile Snapshot snapshot = new Snapshot("", Instant.EPOCH);
 
-  public RagSqlSchemaService(DataSource dataSource, KnowledgeBaseQueryProperties properties) {
+  public RagSqlSchemaService(DataSource dataSource,
+                             KnowledgeBaseQueryProperties properties,
+                             TableMetaCatalogService tableMetaCatalogService) {
     this.jdbcTemplate = new JdbcTemplate(dataSource);
     this.properties = properties;
+    this.tableMetaCatalogService = tableMetaCatalogService;
   }
 
   public String schemaDescription() {
+    return schemaDescription(null);
+  }
+
+  public String schemaDescription(Long userId) {
     long ttl = Math.max(0L, properties.getMultiSource().getSql().getSchemaCacheSeconds());
     Snapshot current = snapshot;
-    if (!current.description().isBlank()
+    if (userId == null
+        && !current.description().isBlank()
         && Instant.now().isBefore(current.expiresAt())) {
       return current.description();
     }
     synchronized (this) {
-      current = snapshot;
-      if (!current.description().isBlank() && Instant.now().isBefore(current.expiresAt())) {
-        return current.description();
+      if (userId == null) {
+        current = snapshot;
+        if (!current.description().isBlank() && Instant.now().isBefore(current.expiresAt())) {
+          return current.description();
+        }
       }
-      String description = loadSchema();
-      snapshot = new Snapshot(description, Instant.now().plusSeconds(ttl));
+      String description = loadSchema(userId);
+      if (userId == null) {
+        snapshot = new Snapshot(description, Instant.now().plusSeconds(ttl));
+      }
       return description;
     }
   }
 
   public Set<String> allowedTables() {
+    return allowedTables(null);
+  }
+
+  public Set<String> allowedTables(Long userId) {
     List<String> configured = properties.getMultiSource().getSql().getAllowedTables();
     List<String> tables = configured == null || configured.isEmpty() ? DEFAULT_TABLES : configured;
     Set<String> result = new LinkedHashSet<>();
@@ -69,18 +86,26 @@ public class RagSqlSchemaService {
         result.add(normalized);
       }
     }
+    if (userId != null) {
+      for (TableMetaEntity meta : tableMetaCatalogService.listActiveForQuery(userId)) {
+        if (meta.getTableName() != null && !meta.getTableName().isBlank()) {
+          result.add(meta.getTableName().trim().toLowerCase(Locale.ROOT));
+        }
+      }
+    }
     return Set.copyOf(result);
   }
 
-  private String loadSchema() {
-    Set<String> tables = allowedTables();
+  private String loadSchema(Long userId) {
+    Set<String> tables = allowedTables(userId);
     if (tables.isEmpty()) {
       return "无可用业务表；仅允许返回空结果。";
     }
     try {
       String catalog = loadCatalog(tables);
       if (!catalog.isBlank()) {
-        return catalog;
+        catalog = appendDynamicTables(catalog, userId);
+        return catalog.trim();
       }
       String placeholders = String.join(",", tables.stream().map(t -> "?").toList());
       String sql = "SELECT table_name, column_name, data_type "
@@ -91,7 +116,7 @@ public class RagSqlSchemaService {
           (rs, rowNum) -> new Column(rs.getString("table_name"),
               rs.getString("column_name"), rs.getString("data_type")));
       if (columns.isEmpty()) {
-        return staticDescription(tables);
+        return appendDynamicTables(staticDescription(tables), userId).trim();
       }
       StringBuilder builder = new StringBuilder();
       String currentTable = null;
@@ -108,11 +133,30 @@ public class RagSqlSchemaService {
       if (currentTable != null) {
         builder.append(")\n");
       }
-      return builder.toString().trim();
+      return appendDynamicTables(builder.toString().trim(), userId).trim();
     } catch (Exception e) {
       log.warn("读取 Text2SQL Schema 失败，使用静态白名单: {}", e.getMessage());
-      return staticDescription(tables);
+      return appendDynamicTables(staticDescription(tables), userId).trim();
     }
+  }
+
+  private String appendDynamicTables(String base, Long userId) {
+    if (userId == null) {
+      return base;
+    }
+    List<TableMetaEntity> dynamicTables = tableMetaCatalogService.listActiveForQuery(userId);
+    if (dynamicTables.isEmpty()) {
+      return base;
+    }
+    StringBuilder builder = new StringBuilder(base == null ? "" : base);
+    for (TableMetaEntity meta : dynamicTables) {
+      builder.append("\n\nTABLE ").append(meta.getTableName()).append("\n")
+          .append(meta.getCreateSql());
+      if (meta.getDescription() != null && !meta.getDescription().isBlank()) {
+        builder.append("\n说明：").append(meta.getDescription());
+      }
+    }
+    return builder.toString();
   }
 
   private String loadCatalog(Set<String> tables) {
@@ -137,7 +181,6 @@ public class RagSqlSchemaService {
       }
       return result.toString().trim();
     } catch (Exception e) {
-      // 元数据目录不可用时，回退 information_schema，不阻断启动/查询。
       return "";
     }
   }
@@ -145,6 +188,9 @@ public class RagSqlSchemaService {
   private String staticDescription(Set<String> tables) {
     List<String> lines = new ArrayList<>();
     for (String table : tables) {
+      if (table.startsWith("custom_data_query_")) {
+        continue;
+      }
       lines.add("TABLE " + table + " (user_id BIGINT, id BIGINT, created_at DATETIME, updated_at DATETIME)");
     }
     return String.join("\n", lines);

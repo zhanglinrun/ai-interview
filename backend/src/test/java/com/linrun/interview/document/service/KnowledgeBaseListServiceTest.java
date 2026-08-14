@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import com.linrun.interview.rag.model.DataDomain;
 import com.linrun.interview.rag.model.EvidenceScope;
 import com.linrun.interview.common.exception.BusinessException;

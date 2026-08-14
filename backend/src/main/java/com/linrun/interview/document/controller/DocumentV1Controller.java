@@ -3,7 +3,7 @@ package com.linrun.interview.document.controller;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.document.constant.DocumentAccessScope;
 import com.linrun.interview.document.vo.DocumentParseTaskDTO;
-import com.linrun.interview.document.service.DocumentIngestionFacade;
+import com.linrun.interview.document.service.impl.DocumentIngestionFacade;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

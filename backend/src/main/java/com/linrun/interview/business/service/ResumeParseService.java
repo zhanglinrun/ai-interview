@@ -1,6 +1,6 @@
 package com.linrun.interview.business.service;
 
-import com.linrun.interview.document.service.ContentTypeDetectionService;
+import com.linrun.interview.document.service.impl.ContentTypeDetectionService;
 import com.linrun.interview.document.service.DocumentParseService;
 import com.linrun.interview.document.service.FileStorageService;
 import lombok.RequiredArgsConstructor;

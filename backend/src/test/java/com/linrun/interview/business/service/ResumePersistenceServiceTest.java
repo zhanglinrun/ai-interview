@@ -2,7 +2,7 @@ package com.linrun.interview.business.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.auth.security.UserContext;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.converter.ResumeMapper;
 import com.linrun.interview.infra.redis.RedisService;
 import com.linrun.interview.business.vo.ResumeAnalysisResponse;

@@ -1,5 +1,7 @@
 package com.linrun.interview.document.vo;
 
+import com.linrun.interview.document.constant.KnowledgeBaseType;
+
 /** 文档解析的显式上下文；异步、补偿与外部调用均不依赖 UserContext。 */
 public record DocumentParseRequest(
     Long userId,
@@ -8,8 +10,20 @@ public record DocumentParseRequest(
     byte[] fileBytes,
     String fileName,
     String contentType,
-    String storageKey
+    String storageKey,
+    KnowledgeBaseType knowledgeBaseType
 ) {
+
+  public DocumentParseRequest(
+      Long userId,
+      Long documentId,
+      Long versionId,
+      byte[] fileBytes,
+      String fileName,
+      String contentType,
+      String storageKey) {
+    this(userId, documentId, versionId, fileBytes, fileName, contentType, storageKey, null);
+  }
 
   public DocumentParseRequest {
     if (fileBytes == null || fileBytes.length == 0) {

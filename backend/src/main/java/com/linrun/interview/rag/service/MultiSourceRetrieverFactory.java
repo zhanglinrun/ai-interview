@@ -57,8 +57,8 @@ public class MultiSourceRetrieverFactory {
           chatModel(modelUserId),
           new JdbcTemplate(dataSource),
           loadPrompt(sql.getPromptPath()),
-          sqlSchemaService.schemaDescription(),
-          sqlSchemaService.allowedTables(),
+          sqlSchemaService.schemaDescription(dataUserId),
+          sqlSchemaService.allowedTables(dataUserId),
           fallback,
           dataUserId,
           sql.getMaxRows()));

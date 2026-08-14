@@ -1,5 +1,7 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.DocumentParseServiceImpl;
+import com.linrun.interview.document.service.impl.TextCleaningServiceImpl;
 import com.linrun.interview.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,7 +45,7 @@ class DocumentParseServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        documentParseService = new DocumentParseService(textCleaningService);
+        documentParseService = new DocumentParseServiceImpl(textCleaningService);
 
         // 默认行为：TextCleaningService 直接返回输入（单元测试关注 DocumentParseService 逻辑）
         when(textCleaningService.cleanText(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -399,8 +401,8 @@ class DocumentParseServiceTest {
         );
 
         // 使用真实的 TextCleaningService
-        TextCleaningService realCleaningService = new TextCleaningService();
-        DocumentParseService realService = new DocumentParseService(realCleaningService);
+        TextCleaningService realCleaningService = new TextCleaningServiceImpl();
+        DocumentParseService realService = new DocumentParseServiceImpl(realCleaningService);
 
         // When
         String result = realService.parseContent(file);

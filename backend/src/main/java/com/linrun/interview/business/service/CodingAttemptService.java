@@ -3,7 +3,7 @@ package com.linrun.interview.business.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.vo.CodingAttemptDTO;
 import com.linrun.interview.business.vo.CodingDraftDTO;
 import com.linrun.interview.business.vo.CreateCodingAttemptRequest;

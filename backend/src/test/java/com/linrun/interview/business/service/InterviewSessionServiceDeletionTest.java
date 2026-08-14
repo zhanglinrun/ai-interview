@@ -12,7 +12,7 @@ import com.linrun.interview.business.service.InterviewOrchestrator;
 import com.linrun.interview.business.listener.EvaluateStreamProducer;
 import com.linrun.interview.business.service.CandidateMemoryService;
 import com.linrun.interview.business.service.InterviewTopicCatalog;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

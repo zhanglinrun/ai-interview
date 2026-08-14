@@ -11,6 +11,8 @@ import com.linrun.interview.document.vo.KnowledgeBaseListItemDTO;
 import com.linrun.interview.document.vo.KnowledgeBaseStatsDTO;
 import com.linrun.interview.document.vo.KnowledgeBaseVersionDTO;
 import com.linrun.interview.document.constant.DocumentAccessScope;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.linrun.interview.rag.model.RagDatasetResult;
 import com.linrun.interview.rag.service.RagDatasetService;
 import com.linrun.interview.document.vo.DocumentSplitParam;
@@ -22,11 +24,11 @@ import com.linrun.interview.rag.model.RagQaExportRequest;
 import com.linrun.interview.rag.model.RagQaExportResponse;
 import com.linrun.interview.rag.model.RagQueryTraceDTO;
 import com.linrun.interview.document.service.DocumentProcessService;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import com.linrun.interview.rag.service.KnowledgeBaseQueryService;
 import com.linrun.interview.document.service.KnowledgeDocumentService;
 import com.linrun.interview.document.service.KnowledgeDocumentVersionService;
-import com.linrun.interview.document.service.KnowledgeBaseAccessService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseAccessService;
 import com.linrun.interview.rag.service.RagEvaluationService;
 import com.linrun.interview.rag.service.RagQueryTraceService;
 import jakarta.validation.Valid;
@@ -208,19 +210,16 @@ public class KnowledgeBaseController {
             @RequestParam(value = "knowledgeBaseType", required = false) String knowledgeBaseType,
             @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy,
             @RequestParam(value = "expireDate", required = false) String expireDate) {
-        if (knowledgeBaseType != null && !knowledgeBaseType.isBlank()
-            && !"DOCUMENT_SEARCH".equalsIgnoreCase(knowledgeBaseType.trim())) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "仅支持文档语义检索，DATA_QUERY 数据查询模式已下线");
-        }
         DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
         LocalDate expire = parseExpireDate(expireDate);
-        return Result.success(uploadSingle(file, name, category, scope, expire));
+        KnowledgeBaseType kbType = parseKnowledgeBaseType(knowledgeBaseType);
+        return Result.success(uploadSingle(file, name, category, scope, expire, kbType));
     }
 
     /**
      * 批量上传知识库文件
      * <p>逐个复用单文件上传逻辑，单个文件失败不影响其余，最后汇总。
+     * DOCUMENT_SEARCH 上传成功后自动 split；DATA_QUERY 仅导入动态表，不 split。
      */
     @PostMapping(value = "/api/v1/knowledge-bases/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
@@ -228,12 +227,15 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> uploadKnowledgeBaseBatch(
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "knowledgeBaseType", required = false) String knowledgeBaseType,
             @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy) {
         if (files == null || files.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
         }
         DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
-        log.info("收到批量知识库上传请求: 文件数={}, category={}", files.size(), category);
+        KnowledgeBaseType kbType = parseKnowledgeBaseType(knowledgeBaseType);
+        log.info("收到批量知识库上传请求: 文件数={}, category={}, kbType={}",
+            files.size(), category, kbType);
         long startTime = System.currentTimeMillis();
 
         List<Map<String, Object>> items = new ArrayList<>();
@@ -243,12 +245,12 @@ public class KnowledgeBaseController {
         for (MultipartFile file : files) {
             String fileName = file != null ? file.getOriginalFilename() : null;
             try {
-                Map<String, Object> result = uploadSingle(file, null, category, scope, null);
+                Map<String, Object> result = uploadSingle(file, null, category, scope, null, kbType);
                 Object kbObj = result.get("knowledgeBase");
                 if (kbObj instanceof Map<?, ?> kbMap) {
                     Object idObj = kbMap.get("id");
                     if (idObj instanceof Number idNum) {
-                        documentProcessService.split(idNum.longValue());
+                        maybeSplitAfterUpload(idNum.longValue(), kbType);
                     }
                 }
                 success++;
@@ -270,8 +272,8 @@ public class KnowledgeBaseController {
         }
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.info("批量知识库上传完成: 总数={}, 成功={}, 失败={}, 耗时={}ms",
-            files.size(), success, failed, totalTime);
+        log.info("批量知识库上传完成: 总数={}, 成功={}, 失败={}, kbType={}, 耗时={}ms",
+            files.size(), success, failed, kbType, totalTime);
 
         return Result.success(Map.of(
             "total", files.size(),
@@ -280,6 +282,13 @@ public class KnowledgeBaseController {
             "duplicate", 0,
             "items", items
         ));
+    }
+
+    private void maybeSplitAfterUpload(Long docId, KnowledgeBaseType kbType) {
+        if (kbType == KnowledgeBaseType.DATA_QUERY) {
+            return;
+        }
+        documentProcessService.split(docId);
     }
 
     @GetMapping("/api/v1/knowledge-bases/dataset/generate")
@@ -302,17 +311,36 @@ public class KnowledgeBaseController {
     }
 
     /**
-     * 单文件上传内部逻辑：仅 upload（解析落库至 CONVERTED），不自动 split。
+     * DATA_QUERY 动态表数据预览。
+     */
+    @GetMapping("/api/v1/knowledge-bases/{id}/data")
+    public Result<Page<Map<String, Object>>> previewData(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int current,
+            @RequestParam(defaultValue = "50") int size) {
+        accessService.requireOwner(id);
+        return Result.success(documentProcessService.previewData(id, current, size));
+    }
+
+    /**
+     * 单文件上传内部逻辑：仅 upload（解析落库至 CONVERTED/STORED），不自动 split。
      */
     private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
                                              DocumentAccessScope accessScope,
                                              LocalDate expireDate) {
+        return uploadSingle(file, name, category, accessScope, expireDate, KnowledgeBaseType.DOCUMENT_SEARCH);
+    }
+
+    private Map<String, Object> uploadSingle(MultipartFile file, String name, String category,
+                                             DocumentAccessScope accessScope,
+                                             LocalDate expireDate,
+                                             KnowledgeBaseType knowledgeBaseType) {
         String fileName = file.getOriginalFilename();
         log.info("收到知识库上传请求: {}, 大小: {} bytes, category={}, access={}, expire={}",
             fileName, file.getSize(), category, accessScope, expireDate);
 
         Long docId = documentProcessService.upload(
-            file, name, category, accessScope, expireDate);
+            file, name, category, accessScope, expireDate, knowledgeBaseType);
 
         KnowledgeBaseEntity entity;
         try {
@@ -459,6 +487,18 @@ public class KnowledgeBaseController {
     public Result<Void> activateVersion(@PathVariable Long id, @PathVariable Long versionId) {
         knowledgeDocumentService.activateVersion(versionId);
         return Result.success(null);
+    }
+
+    private static KnowledgeBaseType parseKnowledgeBaseType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return KnowledgeBaseType.DOCUMENT_SEARCH;
+        }
+        try {
+            return KnowledgeBaseType.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "无效的知识库类型: " + raw + "，可选 DOCUMENT_SEARCH / DATA_QUERY");
+        }
     }
 
     private static LocalDate parseExpireDate(String raw) {

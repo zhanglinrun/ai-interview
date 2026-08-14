@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.linrun.interview.document.service.impl.VectorizationTaskService;
 import com.linrun.interview.document.config.VectorizationTaskProperties;
 import com.linrun.interview.document.constant.DocumentStatus;
 import com.linrun.interview.document.mapper.KnowledgeBaseVersionMapper;

@@ -6,7 +6,7 @@ import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.auth.security.UserContext;
 import com.linrun.interview.document.service.FileStorageService;
-import com.linrun.interview.document.service.FileValidationService;
+import com.linrun.interview.document.service.impl.FileValidationService;
 import com.linrun.interview.business.vo.ResumeAnalysisResponse;
 import com.linrun.interview.business.listener.AnalyzeStreamProducer;
 import com.linrun.interview.business.entity.ResumeEntity;

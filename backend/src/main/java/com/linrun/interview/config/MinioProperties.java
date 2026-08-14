@@ -13,4 +13,6 @@ public class MinioProperties {
     private String accessKey = "minioadmin";
     private String secretKey = "minioadmin";
     private String bucket = "ai-interview";
+    /** 创建桶时是否设置匿名 s3:GetObject（供视觉模型拉取图片 URL）。 */
+    private boolean publicRead = true;
 }

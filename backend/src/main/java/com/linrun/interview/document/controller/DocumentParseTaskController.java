@@ -5,7 +5,7 @@ import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.auth.security.UserContext;
 import com.linrun.interview.document.vo.DocumentParseTaskDTO;
-import com.linrun.interview.document.service.DocumentParseTaskService;
+import com.linrun.interview.document.service.impl.DocumentParseTaskService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;

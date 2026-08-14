@@ -1,7 +1,7 @@
 package com.linrun.interview.document.job;
 
 import com.linrun.interview.common.annotation.DistributeLock;
-import com.linrun.interview.document.service.Neo4jDomainKnowledgeGraphService;
+import com.linrun.interview.document.service.impl.Neo4jDomainKnowledgeGraphService;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

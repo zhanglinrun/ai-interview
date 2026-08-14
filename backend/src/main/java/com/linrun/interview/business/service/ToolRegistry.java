@@ -2,7 +2,7 @@ package com.linrun.interview.business.service;
 
 import com.linrun.interview.business.vo.InterviewEvidence.Bundle;
 import com.linrun.interview.document.entity.KnowledgeBaseEntity;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import jakarta.annotation.PostConstruct;
 import java.util.Comparator;
 import java.util.List;

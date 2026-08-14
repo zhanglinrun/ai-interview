@@ -10,7 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.linrun.interview.common.exception.BusinessException;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.vo.EvaluationRubricDTO;
 import com.linrun.interview.business.service.CapabilityCatalogService;
 import com.linrun.interview.business.service.EvaluationRubricService;

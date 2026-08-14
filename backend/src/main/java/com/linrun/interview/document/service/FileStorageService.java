@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
@@ -184,6 +185,44 @@ public class FileStorageService {
         return String.format("%s/%s/%s", minioProperties.getEndpoint(), minioProperties.getBucket(), fileKey);
     }
 
+    /**
+     * 上传解析产物 Markdown，路径 {@code converted/{docId}/{versionId}/full.md}。
+     *
+     * @return 可公开访问的对象 URL
+     */
+    public String uploadConvertedMarkdown(Long docId, Long versionId, String markdown) {
+        if (docId == null || versionId == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "docId/versionId 不能为空");
+        }
+        String objectKey = convertedMarkdownKey(docId, versionId);
+        uploadBytes(objectKey, markdown.getBytes(StandardCharsets.UTF_8), "text/markdown; charset=utf-8");
+        return getFileUrl(objectKey);
+    }
+
+    /**
+     * 上传 MinerU 解析包内图片，路径 {@code converted/{docId}/{versionId}/images/{fileName}}。
+     */
+    public String uploadConvertedImage(Long docId, Long versionId, String fileName, byte[] content) {
+        if (docId == null || versionId == null || fileName == null || fileName.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "图片上传参数不完整");
+        }
+        String safeName = fileName.replace('\\', '/');
+        int slash = safeName.lastIndexOf('/');
+        if (slash >= 0) {
+            safeName = safeName.substring(slash + 1);
+        }
+        String objectKey = String.format("converted/%d/%d/images/%s", docId, versionId, safeName);
+        uploadBytes(objectKey, content, guessImageContentType(safeName));
+        return getFileUrl(objectKey);
+    }
+
+    /**
+     * 下载转换后 Markdown；参数可为完整 URL 或 MinIO object key。
+     */
+    public byte[] downloadConvertedMarkdown(String urlOrKey) {
+        return downloadFile(resolveObjectKey(urlOrKey));
+    }
+
     public void ensureBucketExists() {
         try {
             String bucket = minioProperties.getBucket();
@@ -244,5 +283,65 @@ public class FileStorageService {
             return str;
         }
         return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
+
+    private String convertedMarkdownKey(Long docId, Long versionId) {
+        return String.format("converted/%d/%d/full.md", docId, versionId);
+    }
+
+    private void uploadBytes(String objectKey, byte[] content, String contentType) {
+        try {
+            ensureBucketExists();
+            minioClient.putObject(PutObjectArgs.builder()
+                .bucket(minioProperties.getBucket())
+                .object(objectKey)
+                .stream(new ByteArrayInputStream(content), content.length, -1)
+                .contentType(contentType)
+                .build());
+            log.info("对象上传成功: {}", objectKey);
+        } catch (Exception e) {
+            log.error("上传对象失败: {} - {}", objectKey, e.getMessage(), e);
+            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "文件存储失败: " + e.getMessage(), e);
+        }
+    }
+
+    private String resolveObjectKey(String urlOrKey) {
+        if (urlOrKey == null || urlOrKey.isBlank()) {
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件地址不能为空");
+        }
+        if (!urlOrKey.contains("://")) {
+            return urlOrKey;
+        }
+        String bucketPrefix = "/" + minioProperties.getBucket() + "/";
+        int bucketIdx = urlOrKey.indexOf(bucketPrefix);
+        if (bucketIdx >= 0) {
+            return urlOrKey.substring(bucketIdx + bucketPrefix.length());
+        }
+        try {
+            String path = URI.create(urlOrKey).getPath();
+            if (path != null && path.startsWith("/" + minioProperties.getBucket() + "/")) {
+                return path.substring(("/" + minioProperties.getBucket() + "/").length());
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "无法解析 MinIO 对象键: " + urlOrKey);
+    }
+
+    private String guessImageContentType(String fileName) {
+        String lower = fileName.toLowerCase();
+        if (lower.endsWith(".png")) {
+            return "image/png";
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (lower.endsWith(".gif")) {
+            return "image/gif";
+        }
+        if (lower.endsWith(".webp")) {
+            return "image/webp";
+        }
+        return "application/octet-stream";
     }
 }

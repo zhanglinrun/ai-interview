@@ -1,4 +1,5 @@
 package com.linrun.interview.document.service;
+import com.linrun.interview.document.service.impl.KnowledgeBaseChunkingService;
 import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
 
 

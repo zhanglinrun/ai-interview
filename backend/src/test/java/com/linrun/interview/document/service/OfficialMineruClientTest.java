@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.OfficialMineruClient;
 import com.linrun.interview.document.constant.MineruTaskStatus;
 import com.linrun.interview.document.vo.MineruTaskResult;
 import com.fasterxml.jackson.databind.ObjectMapper;

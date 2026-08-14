@@ -12,7 +12,7 @@ import static org.mockito.Mockito.when;
 import com.linrun.interview.ai.service.LlmProviderRegistry;
 import com.linrun.interview.ai.service.PromptSanitizer;
 import com.linrun.interview.ai.service.StructuredOutputInvoker;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.vo.CapabilityAtomDTO;
 import com.linrun.interview.business.vo.CapabilityTemplateDTO;
 import com.linrun.interview.business.constant.JobTrack;

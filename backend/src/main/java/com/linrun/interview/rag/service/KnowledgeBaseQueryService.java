@@ -3,8 +3,8 @@ import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
 import com.linrun.interview.ai.service.RagPromptService;
 import com.linrun.interview.chat.service.CommonChatService;
 import com.linrun.interview.chat.service.RagCardService;
-import com.linrun.interview.document.service.KnowledgeBaseCountService;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseCountService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import com.linrun.interview.document.service.KnowledgeSegmentService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

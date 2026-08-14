@@ -258,7 +258,11 @@ export const knowledgeBaseApi = {
     file: File,
     name?: string,
     category?: string,
-    options?: { accessibleBy?: DocumentAccessScope; expireDate?: string },
+    options?: {
+      accessibleBy?: DocumentAccessScope;
+      expireDate?: string;
+      knowledgeBaseType?: 'DOCUMENT_SEARCH' | 'DATA_QUERY';
+    },
   ): Promise<UploadKnowledgeBaseResponse> {
     const formData = new FormData();
     formData.append('file', file);
@@ -273,6 +277,9 @@ export const knowledgeBaseApi = {
     }
     if (options?.expireDate) {
       formData.append('expireDate', options.expireDate);
+    }
+    if (options?.knowledgeBaseType) {
+      formData.append('knowledgeBaseType', options.knowledgeBaseType);
     }
     return request.upload<UploadKnowledgeBaseResponse>('/api/v1/knowledge-bases/upload', formData);
   },

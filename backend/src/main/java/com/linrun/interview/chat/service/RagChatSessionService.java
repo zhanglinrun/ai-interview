@@ -1,6 +1,6 @@
 package com.linrun.interview.chat.service;
 import com.linrun.interview.chat.dto.RagChatDTO;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
 import com.linrun.interview.rag.service.KnowledgeBaseQueryService;
 

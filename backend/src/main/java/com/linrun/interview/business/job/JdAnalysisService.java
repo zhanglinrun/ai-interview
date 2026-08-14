@@ -6,7 +6,7 @@ import com.linrun.interview.ai.service.PromptSecurityConstants;
 import com.linrun.interview.ai.service.StructuredOutputInvoker;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.vo.CapabilityAtomDTO;
 import com.linrun.interview.business.vo.CapabilityTemplateDTO;
 import com.linrun.interview.business.service.CapabilityCatalogService;

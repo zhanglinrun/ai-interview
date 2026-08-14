@@ -2,8 +2,8 @@ package com.linrun.interview.document.job;
 
 import com.linrun.interview.document.config.MineruProperties;
 import com.linrun.interview.document.entity.DocumentParseTaskEntity;
-import com.linrun.interview.document.service.DocumentParseTaskService;
-import com.linrun.interview.document.service.MineruProcessService;
+import com.linrun.interview.document.service.impl.DocumentParseTaskService;
+import com.linrun.interview.document.service.impl.MineruProcessServiceImpl;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +29,7 @@ public class MineruParseCompensationJob {
 
   private final MineruProperties properties;
   private final DocumentParseTaskService taskService;
-  private final MineruProcessService mineruProcessService;
+  private final MineruProcessServiceImpl mineruProcessService;
 
   @Scheduled(fixedDelayString = "${file.parse.mineru.compensation-delay-ms:30000}")
   @XxlJob("ragMineruParseCompensation")

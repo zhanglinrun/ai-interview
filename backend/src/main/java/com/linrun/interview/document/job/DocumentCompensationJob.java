@@ -10,7 +10,7 @@ import com.linrun.interview.document.service.DocumentCleanupService;
 import com.linrun.interview.document.service.KnowledgeDocumentService;
 import com.linrun.interview.document.service.KnowledgeDocumentVersionService;
 import com.linrun.interview.document.service.KnowledgeSegmentService;
-import com.linrun.interview.document.service.VectorizationTaskService;
+import com.linrun.interview.document.service.impl.VectorizationTaskService;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

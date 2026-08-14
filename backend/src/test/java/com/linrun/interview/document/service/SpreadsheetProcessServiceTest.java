@@ -1,6 +1,6 @@
 package com.linrun.interview.document.service;
 
-import com.linrun.interview.document.service.DocumentParseService;
+import com.linrun.interview.document.service.impl.SpreadsheetProcessServiceImpl;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -21,7 +21,7 @@ class SpreadsheetProcessServiceTest {
     @Test
     @DisplayName("CSV 应转为 Markdown 表格和行记录")
     void csvToMarkdown() {
-        SpreadsheetProcessService service = new SpreadsheetProcessService(mock(DocumentParseService.class));
+        SpreadsheetProcessServiceImpl service = new SpreadsheetProcessServiceImpl(mock(DocumentParseService.class));
 
         String markdown = service.processDocument(
             "题目,分类,答案\nJVM GC 是什么,Java,垃圾回收\n".getBytes(StandardCharsets.UTF_8),
@@ -34,7 +34,7 @@ class SpreadsheetProcessServiceTest {
     @Test
     @DisplayName("CSV 引号和逗号应按单元格处理")
     void quotedCsv() {
-        SpreadsheetProcessService service = new SpreadsheetProcessService(mock(DocumentParseService.class));
+        SpreadsheetProcessServiceImpl service = new SpreadsheetProcessServiceImpl(mock(DocumentParseService.class));
 
         String markdown = service.processDocument(
             "公司,备注\n\"A,B\",\"一面, 技术\"\n".getBytes(StandardCharsets.UTF_8),
@@ -46,7 +46,7 @@ class SpreadsheetProcessServiceTest {
     @Test
     @DisplayName("XLSX 应按 Sheet 行列转为表格和行记录")
     void xlsxToMarkdown() throws IOException {
-        SpreadsheetProcessService service = new SpreadsheetProcessService(mock(DocumentParseService.class));
+        SpreadsheetProcessServiceImpl service = new SpreadsheetProcessServiceImpl(mock(DocumentParseService.class));
 
         String markdown = service.processDocument(xlsxBytes(), "questions.xlsx");
 

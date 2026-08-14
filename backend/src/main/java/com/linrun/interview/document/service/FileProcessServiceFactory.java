@@ -3,6 +3,7 @@ package com.linrun.interview.document.service;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.document.constant.FileType;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,14 +29,23 @@ public class FileProcessServiceFactory {
      * @throws BusinessException 无匹配解析器时
      */
     public FileProcessService get(FileType fileType) {
+        return get(fileType, KnowledgeBaseType.DOCUMENT_SEARCH);
+    }
+
+    /**
+     * 按文件类型与知识库类型选择解析器。
+     */
+    public FileProcessService get(FileType fileType, KnowledgeBaseType knowledgeBaseType) {
+        KnowledgeBaseType kbType = knowledgeBaseType != null
+            ? knowledgeBaseType : KnowledgeBaseType.DOCUMENT_SEARCH;
         for (FileProcessService processor : processors) {
-            if (processor.supports(fileType)) {
-                log.debug("选择文件解析器: fileType={}, processor={}", fileType,
-                    processor.getClass().getSimpleName());
+            if (processor.supports(fileType, kbType)) {
+                log.debug("选择文件解析器: fileType={}, kbType={}, processor={}",
+                    fileType, kbType, processor.getClass().getSimpleName());
                 return processor;
             }
         }
         throw new BusinessException(ErrorCode.BAD_REQUEST,
-            "不支持的文件类型: " + fileType + "，无可用解析器");
+            "不支持的文件类型: " + fileType + "（知识库类型: " + kbType + "），无可用解析器");
     }
 }

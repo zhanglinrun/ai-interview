@@ -6,7 +6,7 @@ import com.linrun.interview.common.result.Result;
 import com.linrun.interview.document.vo.KnowledgeBaseSegmentDTO;
 import com.linrun.interview.document.entity.KnowledgeBaseSegmentEntity;
 import com.linrun.interview.document.vo.KnowledgeBaseSegmentPageDTO;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import com.linrun.interview.document.service.KnowledgeSegmentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;

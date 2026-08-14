@@ -76,4 +76,10 @@ public class MineruProperties {
 
     /** 多久未更新才由补偿任务接管，避免与前台轮询竞争。 */
     private long compensationStaleSeconds = 30;
+
+    /** 是否调用视觉模型为 MinerU 图片生成 alt 文本。 */
+    private boolean visionAltEnabled = true;
+
+    /** 视觉模型名称（DashScope 等多模态模型）。 */
+    private String visionModel = "qwen3-vl-plus";
 }

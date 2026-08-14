@@ -1,6 +1,7 @@
 package com.linrun.interview.document.service;
 
 import com.linrun.interview.document.vo.DocumentParseRequest;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
 import com.linrun.interview.document.constant.FileType;
 
 /**
@@ -16,6 +17,13 @@ public interface FileProcessService {
      * 当前实现是否支持该文件类型。
      */
     boolean supports(FileType fileType);
+
+    /**
+     * 按知识库类型进一步筛选（如 DATA_QUERY 与 DOCUMENT_SEARCH 对 Excel 走不同处理器）。
+     */
+    default boolean supports(FileType fileType, KnowledgeBaseType knowledgeBaseType) {
+        return supports(fileType);
+    }
 
     /**
      * 解析文件字节数据为 Markdown 文本。

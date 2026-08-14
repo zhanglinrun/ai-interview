@@ -1,8 +1,8 @@
 package com.linrun.interview.document.job;
 
 import com.linrun.interview.document.config.MineruProperties;
-import com.linrun.interview.document.service.DocumentParseTaskService;
-import com.linrun.interview.document.service.MineruProcessService;
+import com.linrun.interview.document.service.impl.DocumentParseTaskService;
+import com.linrun.interview.document.service.impl.MineruProcessServiceImpl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -57,8 +57,8 @@ class MineruParseCompensationJobConditionTest {
     }
 
     @Bean
-    MineruProcessService mineruProcessService() {
-      return mock(MineruProcessService.class);
+    MineruProcessServiceImpl mineruProcessService() {
+      return mock(MineruProcessServiceImpl.class);
     }
   }
 }

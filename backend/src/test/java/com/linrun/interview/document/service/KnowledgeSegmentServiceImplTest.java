@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.KnowledgeSegmentServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.document.constant.SegmentStatus;
 import com.linrun.interview.document.mapper.KnowledgeBaseSegmentMapper;

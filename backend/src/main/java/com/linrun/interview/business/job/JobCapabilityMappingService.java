@@ -3,7 +3,7 @@ package com.linrun.interview.business.job;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.job.ConfirmJobCapabilitiesRequest;
 import com.linrun.interview.business.job.JobCapabilityMappingDTO;
 import com.linrun.interview.business.mapper.JobCapabilityMappingMapper;

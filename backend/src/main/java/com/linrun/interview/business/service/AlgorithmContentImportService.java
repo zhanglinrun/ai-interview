@@ -5,7 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.mapper.AlgorithmContentImportMapper;
 import com.linrun.interview.business.mapper.CodingProblemMapper;
 import com.linrun.interview.business.mapper.CodingProblemVersionMapper;

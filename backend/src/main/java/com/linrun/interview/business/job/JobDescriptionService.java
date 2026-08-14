@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.rag.model.DataDomain;
-import com.linrun.interview.document.service.FileHashService;
+import com.linrun.interview.document.service.impl.FileHashService;
 import com.linrun.interview.business.vo.CapabilityTemplateDTO;
 import com.linrun.interview.business.service.CapabilityCatalogService;
 import com.linrun.interview.business.service.EvaluationRubricService;

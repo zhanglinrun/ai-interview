@@ -1,5 +1,7 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.DocumentParseServiceImpl;
+import com.linrun.interview.document.service.impl.TextCleaningServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -26,8 +28,8 @@ class DocumentParseIntegrationTest {
     @BeforeEach
     void setUp() {
         // 使用真实的服务实例
-        textCleaningService = new TextCleaningService();
-        documentParseService = new DocumentParseService(textCleaningService);
+        textCleaningService = new TextCleaningServiceImpl();
+        documentParseService = new DocumentParseServiceImpl(textCleaningService);
     }
 
     @Test

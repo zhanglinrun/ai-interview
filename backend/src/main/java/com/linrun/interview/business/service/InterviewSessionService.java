@@ -35,7 +35,7 @@ import com.linrun.interview.business.service.InterviewReportPort;
 import com.linrun.interview.business.vo.InterviewSessionDTO.SessionStatus;
 import com.linrun.interview.business.service.InterviewTopic;
 import com.linrun.interview.business.service.InterviewTopicCatalog;
-import com.linrun.interview.document.service.KnowledgeBaseListService;
+import com.linrun.interview.document.service.impl.KnowledgeBaseListService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import dev.langchain4j.model.chat.ChatModel;

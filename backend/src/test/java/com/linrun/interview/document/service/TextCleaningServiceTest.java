@@ -1,5 +1,6 @@
 package com.linrun.interview.document.service;
 
+import com.linrun.interview.document.service.impl.TextCleaningServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -20,7 +21,7 @@ class TextCleaningServiceTest {
 
     @BeforeEach
     void setUp() {
-        textCleaningService = new TextCleaningService();
+        textCleaningService = new TextCleaningServiceImpl();
     }
 
     @Nested
