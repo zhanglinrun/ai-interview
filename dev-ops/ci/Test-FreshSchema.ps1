@@ -103,12 +103,12 @@ if ($declaredForeignKeyCount -lt 1) {
   throw 'schema.sql contains no foreign-key constraints'
 }
 
+# 岗位实战下线后 schema.sql 已不再建 job_descriptions / job_interview_preparation_runs。
 $keyV1Tables = @(
   'capability_content_imports',
   'capability_atom_definitions',
   'capability_templates',
-  'job_descriptions',
-  'job_interview_preparation_runs',
+  'interview_sessions',
   'interview_questions',
   'interview_commands',
   'document_tasks',

@@ -28,6 +28,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("自适应下一题决策数据集回归")
 class InterviewTurnDecisionDatasetTest {
 
+  /** 提交到测试资源，不依赖 gitignore 的 /eval/。 */
   private static final String DATASET = "turn-decision-eval/decision-cases.yaml";
 
   @Test

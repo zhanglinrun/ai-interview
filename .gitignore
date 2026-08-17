@@ -83,8 +83,9 @@ Thumbs.db
 
 study/**
 
-# RAG evaluation (local only — do not commit)
-eval/
+# RAG evaluation (local only — do not commit).
+# Anchor at repo root so Java package com.linrun.interview.eval is not ignored.
+/eval/
 
 .trellis/
 .cursor/

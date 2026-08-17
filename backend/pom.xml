@@ -293,13 +293,6 @@
           <include>critic-badcase-dataset.yaml</include>
         </includes>
       </testResource>
-      <testResource>
-        <directory>${project.basedir}/../eval/interview-next-question</directory>
-        <targetPath>turn-decision-eval</targetPath>
-        <includes>
-          <include>decision-cases.yaml</include>
-        </includes>
-      </testResource>
     </testResources>
     <plugins>
       <plugin>
