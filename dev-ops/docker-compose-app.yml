@@ -1,17 +1,28 @@
 # 全栈容器化部署（基础设施 + 后端 + 前端）
 # 用法：
-#   cd dev-ops
-#   docker compose -f docker-compose-app.yml up -d --build
+#   cd 仓库根目录
+#   docker compose --project-directory dev-ops --env-file .env -f dev-ops/docker-compose-app.yml up -d --build
+#
+# 默认按单机 4C6G 演示/上线限内存（约 5.1G 盖子，留给系统和 Docker）。
+# 更大机器只改 .env 里的 *_MEM_LIMIT / 堆参数，不要关 Neo4j 或 XXL-Job。
+# 上线把 COMPOSE_PUBLISH_HOST=127.0.0.1，公网只暴露前端。
 #
 # name 显式钉死，防止与 ai-group 的 docs/dev-ops compose 撞默认项目名 "dev-ops"（详见
 # docker-compose-environment.yml 头注）。
 
 name: ai-interview
 
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mysql:
     image: mysql:8.0
     container_name: interview-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       # 应用栈使用独立 V2 数据库，避免复用旧版本卷中的表结构和数据。
@@ -22,8 +33,14 @@ services:
       - mysql_data:/var/lib/mysql
       - ../backend/src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
-      - "${MYSQL_HOST_PORT:-33306}:3306"
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${MYSQL_HOST_PORT:-33306}:3306"
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL:-128M}
+      --performance-schema=OFF
+    mem_limit: ${MYSQL_MEM_LIMIT:-512m}
+    logging: *container-logging
     healthcheck:
       # 强制探测 TCP 3306，避免首次初始化时把仅开放 Unix Socket 的临时 server
       # 误判为 ready，导致 app 在正式 MySQL 重启窗口内连接失败后退出。
@@ -35,10 +52,14 @@ services:
   redis:
     image: redis:7
     container_name: interview-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "${REDIS_HOST_PORT:-26379}:6379"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${REDIS_HOST_PORT:-26379}:6379"
     volumes:
       - redis_data:/data
+    mem_limit: ${REDIS_MEM_LIMIT:-128m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -48,14 +69,17 @@ services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     container_name: interview-elasticsearch
+    restart: unless-stopped
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
-      - "${ES_HOST_PORT:-29200}:9200"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${ES_HOST_PORT:-29200}:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
+    mem_limit: ${ES_MEM_LIMIT:-1280m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
@@ -65,15 +89,18 @@ services:
   minio:
     image: minio/minio
     container_name: interview-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
-      - "${MINIO_API_HOST_PORT:-29000}:9000"
-      - "${MINIO_CONSOLE_HOST_PORT:-29001}:9001"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${MINIO_API_HOST_PORT:-29000}:9000"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${MINIO_CONSOLE_HOST_PORT:-29001}:9001"
     volumes:
       - minio_data:/data
+    mem_limit: ${MINIO_MEM_LIMIT:-256m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -83,33 +110,43 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: interview-rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "${RABBITMQ_HOST_PORT:-5672}:5672"
-      - "${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    mem_limit: ${RABBITMQ_MEM_LIMIT:-256m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  # Neo4j 图检索：对应 RAG 的 Text2Cypher 数据源。
+  # Neo4j 图检索：对应 RAG 的 Text2Cypher 数据源。堆和 page cache 必须写死，
+  # 否则 5.x 会按宿主机内存自估，在 4C6G 上把 ES / 后端挤掉。
   neo4j:
     image: neo4j:5.26-community
     container_name: interview-neo4j
+    restart: unless-stopped
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-change-me-neo4j-password}
       NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL:-256m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-384m}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-192m}
     ports:
-      - "${NEO4J_BOLT_HOST_PORT:-27687}:7687"
-      - "${NEO4J_HTTP_HOST_PORT:-27474}:7474"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${NEO4J_BOLT_HOST_PORT:-27687}:7687"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${NEO4J_HTTP_HOST_PORT:-27474}:7474"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
+    mem_limit: ${NEO4J_MEM_LIMIT:-768m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' >/dev/null 2>&1"]
       interval: 15s
@@ -120,16 +157,23 @@ services:
   xxl-job-mysql:
     image: mysql:8.0
     container_name: interview-xxl-job-mysql
+    restart: unless-stopped
     environment:
       MYSQL_DATABASE: xxl_job
       MYSQL_USER: xxl_job
       MYSQL_PASSWORD: ${XXL_JOB_MYSQL_PASSWORD:-xxl_job_dev}
       MYSQL_ROOT_PASSWORD: ${XXL_JOB_MYSQL_ROOT_PASSWORD:-xxl_job_root_dev}
       TZ: Asia/Shanghai
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=${XXL_JOB_MYSQL_INNODB_BUFFER_POOL:-64M}
+      --performance-schema=OFF
     volumes:
       - xxl_job_mysql_data:/var/lib/mysql
       - ./docker/xxl-job/tables_xxl_job.sql:/docker-entrypoint-initdb.d/01-tables_xxl_job.sql:ro
+    mem_limit: ${XXL_JOB_MYSQL_MEM_LIMIT:-384m}
+    logging: *container-logging
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping --protocol=TCP -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
@@ -144,15 +188,18 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Shanghai
+      JAVA_OPTS: ${XXL_JOB_JAVA_OPTS:--Xms128m -Xmx384m}
       PARAMS: >-
         --spring.datasource.url=jdbc:mysql://xxl-job-mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
         --spring.datasource.username=xxl_job
         --spring.datasource.password=${XXL_JOB_MYSQL_PASSWORD:-xxl_job_dev}
         --xxl.job.accessToken=${XXL_JOB_ACCESS_TOKEN:-local_xxl_token}
     ports:
-      - "${XXL_JOB_ADMIN_HOST_PORT:-28081}:8080"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${XXL_JOB_ADMIN_HOST_PORT:-28081}:8080"
     volumes:
       - xxl_job_admin_logs:/data/applogs
+    mem_limit: ${XXL_JOB_ADMIN_MEM_LIMIT:-512m}
+    logging: *container-logging
     restart: unless-stopped
 
   app:
@@ -177,9 +224,10 @@ services:
         condition: service_started
     environment:
       SERVER_PORT: 8080
+      # 覆盖镜像默认 MaxRAMPercentage=75（无 cgroup 时按整机 6G 去要 4.5G 堆）。
+      JAVA_OPTS: ${APP_JAVA_OPTS:--Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -Xms256m -Xmx768m -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError}
       # Provider 密钥使用独立加密密钥；登录会话由 Sa-Token + Redis 管理
-      # 开发编排使用固定本地默认值；生产 compose 仍要求显式配置强随机密钥。
-      # 与 ApiKeyEncryptionService 的本地开发回退值保持一致；生产 Compose 仍要求显式注入密钥。
+      # 开发编排使用固定本地默认值；上线必须在 .env 换成强随机串。
       APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:-ai-interview-dev-only-provider-api-key-encryption}
       APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
       MYSQL_HOST: mysql
@@ -194,8 +242,8 @@ services:
       ES_DIMENSIONS: ${ES_DIMENSIONS:-1536}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-}
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ai-interview
       AI_BAILIAN_API_KEY: ${AI_BAILIAN_API_KEY}
       AI_MODEL: ${AI_MODEL:-qwen3.5-flash}
@@ -215,20 +263,8 @@ services:
       GITHUB_MCP_ENDPOINT: ${GITHUB_MCP_ENDPOINT:-https://api.githubcopilot.com/mcp/}
       GITHUB_MCP_ACCESS_TOKEN: ${GITHUB_MCP_ACCESS_TOKEN:-}
       GITHUB_MCP_MAX_RESPONSE_BYTES: ${GITHUB_MCP_MAX_RESPONSE_BYTES:-1048576}
-      JUDGE0_ENABLED: ${JUDGE0_ENABLED:-false}
-      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
-      JUDGE0_API_KEY: ${JUDGE0_API_KEY:-}
-      JUDGE0_API_HOST: ${JUDGE0_API_HOST:-}
-      JUDGE0_CONNECT_TIMEOUT_MS: ${JUDGE0_CONNECT_TIMEOUT_MS:-5000}
-      JUDGE0_REQUEST_TIMEOUT_MS: ${JUDGE0_REQUEST_TIMEOUT_MS:-10000}
-      JUDGE0_JAVA_LANGUAGE_ID: ${JUDGE0_JAVA_LANGUAGE_ID:-}
-      JUDGE0_PYTHON3_LANGUAGE_ID: ${JUDGE0_PYTHON3_LANGUAGE_ID:-}
-      JUDGE0_POLL_INTERVAL_MS: ${JUDGE0_POLL_INTERVAL_MS:-1000}
-      JUDGE0_TIMEOUT_SECONDS: ${JUDGE0_TIMEOUT_SECONDS:-30}
-      JUDGE0_CPU_TIME_LIMIT_SECONDS: ${JUDGE0_CPU_TIME_LIMIT_SECONDS:-3}
-      JUDGE0_MEMORY_LIMIT_KB: ${JUDGE0_MEMORY_LIMIT_KB:-262144}
       APP_INTERVIEW_FOLLOW_UP_COUNT: ${APP_INTERVIEW_FOLLOW_UP_COUNT:-1}
-      APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-8}
+      APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-3}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
@@ -255,9 +291,11 @@ services:
     expose:
       - "9999"
     ports:
-      - "${APP_HOST_PORT:-28082}:8080"
+      - "${COMPOSE_PUBLISH_HOST:-0.0.0.0}:${APP_HOST_PORT:-28082}:8080"
     volumes:
       - app_logs:/app/logs
+    mem_limit: ${APP_MEM_LIMIT:-1536m}
+    logging: *container-logging
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
@@ -273,7 +311,9 @@ services:
       app:
         condition: service_healthy
     ports:
-      - "${FRONTEND_HOST_PORT:-28080}:80"
+      - "${FRONTEND_PUBLISH_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-28080}:80"
+    mem_limit: ${FRONTEND_MEM_LIMIT:-128m}
+    logging: *container-logging
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null || exit 1"]

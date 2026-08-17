@@ -2,7 +2,7 @@ package com.linrun.interview.business.controller;
 
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.auth.security.UserContext;
-import com.linrun.interview.business.vo.ReportContracts.CapabilityProfileView;
+import com.linrun.interview.business.vo.CapabilityProfileView;
 import com.linrun.interview.business.service.CapabilityProfileService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;

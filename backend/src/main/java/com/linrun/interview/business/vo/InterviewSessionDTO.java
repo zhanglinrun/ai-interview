@@ -1,5 +1,6 @@
 package com.linrun.interview.business.vo;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -12,12 +13,13 @@ public record InterviewSessionDTO(
     int currentQuestionIndex,
     List<InterviewQuestionDTO> questions,
     SessionStatus status,
-    long sessionVersion
+    long sessionVersion,
+    LocalDateTime createdAt
 ) {
     public InterviewSessionDTO(String sessionId, String resumeText, int totalQuestions,
                                int currentQuestionIndex, List<InterviewQuestionDTO> questions,
                                SessionStatus status) {
-        this(sessionId, resumeText, totalQuestions, currentQuestionIndex, questions, status, 0L);
+        this(sessionId, resumeText, totalQuestions, currentQuestionIndex, questions, status, 0L, null);
     }
     public enum SessionStatus {
         CREATED,      // 会话已创建

@@ -22,9 +22,7 @@ public class RabbitDlqAlarmConsumer {
 
     private static final Map<String, String> QUEUE_TO_PIPELINE = Map.of(
         AsyncTaskStreamConstants.RABBIT_RESUME_ANALYZE_DLQ, "resume-analyze",
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ, "interview-evaluate",
-        AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ, "job-interview-prepare",
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ, "interview-report"
+        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ, "interview-evaluate"
     );
 
     private final MeterRegistry meterRegistry;
@@ -35,9 +33,7 @@ public class RabbitDlqAlarmConsumer {
 
     @RabbitListener(queues = {
         AsyncTaskStreamConstants.RABBIT_RESUME_ANALYZE_DLQ,
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ,
-        AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ,
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ
+        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ
     })
     public void onDlqMessage(Message message) {
         String queue = message.getMessageProperties() != null

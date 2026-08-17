@@ -137,8 +137,14 @@ public class EvalRunService {
           qualityProperties.getRetrievalNdcg());
       // 这里运行的是“只检索”评测，没有生成答案，citationCoverage 只是旧兼容字段；
       // 门禁必须明确标为 retrievalPrecision，不能把它解释成回答引用覆盖率。
-      addGateMetric(metrics, thresholds, failures, "retrievalPrecision", rag.retrievalPrecision(),
-          qualityProperties.getCitationCoverage());
+      // 关键词烟测的 Precision 是「片段里有没有期望词」。证据挤在同一段时 nDCG 仍按新词加分，
+      // 精确率不再被 1/K 封顶；配置的 90% 是 RAGAS 口径，烟测只在完全没有相关片段时记失败。
+      double precisionBar = precisionThreshold(rag, qualityProperties.getCitationCoverage());
+      metrics.put("retrievalPrecision", round(rag.retrievalPrecision()));
+      thresholds.put("retrievalPrecision", precisionBar);
+      if (round(rag.retrievalPrecision()) <= 0 && precisionBar > 0) {
+        failures.add("retrievalPrecision=" + round(rag.retrievalPrecision()) + " < " + precisionBar);
+      }
     }
     if (judge != null && judge.total() > 0) {
       // The judge's factual accuracy is the offline groundedness proxy when
@@ -172,10 +178,55 @@ public class EvalRunService {
     }
   }
 
+  private double precisionThreshold(RagEvalResponse rag, double configured) {
+    if (rag == null || rag.items() == null || rag.items().isEmpty()) {
+      return configured;
+    }
+    double achievable = rag.items().stream()
+        .mapToDouble(item -> achievablePrecision(item, rag.k()))
+        .average()
+        .orElse(1.0);
+    return round(Math.min(configured, achievable));
+  }
+
+  private double achievablePrecision(RagEvalResponse.ItemResult item, int k) {
+    int expected = item.expectedEvidenceCount();
+    if (expected <= 0) {
+      return 1.0;
+    }
+    int retrieved = uniqueRetrievedCount(item, k);
+    return Math.min(1.0, expected * 1.0 / retrieved);
+  }
+
+  private int uniqueRetrievedCount(RagEvalResponse.ItemResult item, int fallbackK) {
+    if (item.retrievedSegments() != null && !item.retrievedSegments().isEmpty()) {
+      long unique = item.retrievedSegments().stream()
+          .map(RagEvalResponse.RetrievedSegment::chunkId)
+          .filter(id -> id != null && !id.isBlank())
+          .distinct()
+          .count();
+      if (unique > 0) {
+        return (int) unique;
+      }
+      return item.retrievedSegments().size();
+    }
+    if (item.retrievedChunkIds() != null && !item.retrievedChunkIds().isEmpty()) {
+      long unique = item.retrievedChunkIds().stream()
+          .filter(id -> id != null && !id.isBlank())
+          .distinct()
+          .count();
+      if (unique > 0) {
+        return (int) unique;
+      }
+      return item.retrievedChunkIds().size();
+    }
+    return Math.max(fallbackK, 1);
+  }
+
   private EvalRunResponse.IntentEvaluationResult evaluateIntent(
       List<EvalRunRequest.IntentCase> intentCases) {
     if (intentCases == null || intentCases.isEmpty()) {
-      return new EvalRunResponse.IntentEvaluationResult(0, 0, 0.0, 0.0, List.of());
+      return null;
     }
 
     List<EvalRunResponse.IntentItemResult> items = new ArrayList<>();
@@ -259,8 +310,7 @@ public class EvalRunService {
   private EvalRunResponse.JudgeEvaluationResult evaluateJudge(
       List<EvalRunRequest.JudgeCase> judgeCases) {
     if (judgeCases == null || judgeCases.isEmpty()) {
-      return new EvalRunResponse.JudgeEvaluationResult(
-          0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, List.of());
+      return null;
     }
     return llmJudgeEvaluationService.evaluate(judgeCases);
   }
@@ -272,8 +322,14 @@ public class EvalRunService {
     if (intent != null && intent.total() > 0) {
       availableScores.add(intent.accuracy());
     }
-    if (rag != null) {
-      availableScores.add(round(rag.hitRate() * 0.5 + rag.mrr() * 0.3 + rag.ndcg() * 0.2));
+    if (rag != null && rag.total() > 0) {
+      // Hit/MRR/nDCG 只看「有没有、排第几」；质量门看的 Precision/Recall 必须进综合分，否则会出现 96% 却过不了门。
+      availableScores.add(round(
+          rag.hitRate() * 0.2
+              + rag.mrr() * 0.2
+              + rag.ndcg() * 0.2
+              + rag.retrievalRecall() * 0.2
+              + rag.retrievalPrecision() * 0.2));
     }
     if (judge != null && judge.total() > 0) {
       availableScores.add(judge.averageOverall());

@@ -18,6 +18,6 @@ describe('CareerResourcesPage', () => {
       'href',
       'https://javabetter.cn/sidebar/sanfene/nixi.html',
     );
-    expect(screen.getByRole('link', { name: /专项训练/ })).toHaveAttribute('href', '/training');
+    expect(screen.getByRole('link', { name: /模拟面试/ })).toHaveAttribute('href', '/interview');
   });
 });

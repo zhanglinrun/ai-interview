@@ -47,7 +47,7 @@ public class RagCardService {
   public Optional<Flux<String>> maybeInteractionCards(IntentRecognitionResult intent, String question) {
     return maybeResumeSelectionCards(intent)
         .or(() -> maybeResumeDetailCard(intent))
-        .or(() -> maybeScheduleSelectionCards(intent))
+        .or(() -> maybeScheduleSelectionCards(intent, question))
         .or(() -> maybeInterviewSessionSelectionCards(intent, question))
         .or(() -> maybeInterviewReportHintCard(intent))
         .or(() -> maybeTopicSelectionCards(intent, question));
@@ -105,9 +105,13 @@ public class RagCardService {
     return Optional.of(Flux.just(CARD_PREFIX + msg));
   }
 
-  public Optional<Flux<String>> maybeScheduleSelectionCards(IntentRecognitionResult intent) {
+  public Optional<Flux<String>> maybeScheduleSelectionCards(IntentRecognitionResult intent, String question) {
     if (intent == null || !intent.related()
         || intent.resolvedIntent() != InterviewIntent.SCHEDULE) {
+      return Optional.empty();
+    }
+    // 卡片追问已带「面试安排 ID=…」时不再重复弹卡，避免选完又短路。
+    if (mentionsScheduleId(question)) {
       return Optional.empty();
     }
     if (UserContext.getUserId() == null) {
@@ -168,7 +172,7 @@ public class RagCardService {
     if (intent.entities() == null || intent.entities().sessionId() == null) {
       return Optional.empty();
     }
-    String sessionId = String.valueOf(intent.entities().sessionId());
+    String sessionId = intent.entities().sessionId();
     return Optional.of(Flux.just(CARD_PREFIX
         + "已定位面试会话 " + sessionId
         + "，可在「模拟面试 → 面试记录」查看完整报告。"));
@@ -182,8 +186,8 @@ public class RagCardService {
     if (resolved != InterviewIntent.INTERVIEW_PREP && resolved != InterviewIntent.CAREER) {
       return Optional.empty();
     }
-    if (intent.entities() != null && intent.entities().skill() != null
-        && !intent.entities().skill().isBlank()) {
+    if (intent.entities() != null && intent.entities().jobTrack() != null
+        && !intent.entities().jobTrack().isBlank()) {
       return Optional.empty();
     }
     if (!asksForTopicSelection(question)) {
@@ -230,6 +234,13 @@ public class RagCardService {
         || normalized.contains("成绩")
         || normalized.contains("评分");
     return reportRequest;
+  }
+
+  private boolean mentionsScheduleId(String question) {
+    if (question == null || question.isBlank()) {
+      return false;
+    }
+    return question.matches("(?s).*(?:面试安排|日程|schedule)\\s*(?:id|ID)?\\s*[:：#=\\-]?\\s*\\d+.*");
   }
 
   private Optional<Flux<String>> buildChoiceCard(String prompt, List<RagCardChoiceDTO> choices) {

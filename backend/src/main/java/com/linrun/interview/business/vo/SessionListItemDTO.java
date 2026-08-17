@@ -1,6 +1,7 @@
 package com.linrun.interview.business.vo;
 
 import com.linrun.interview.business.entity.InterviewSessionEntity;
+import com.linrun.interview.business.service.EvaluationQuality;
 import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.business.entity.InterviewSessionEntity.SessionStatus;
 
@@ -19,9 +20,7 @@ public record SessionListItemDTO(
     AsyncTaskStatus evaluateStatus,
     String evaluateError,
     Integer overallScore,
-    boolean jobInterview,
-    Long jobDescriptionId,
-    String currentStage,
+    boolean evaluationDegraded,
     Long sessionVersion,
     LocalDateTime createdAt,
     LocalDateTime completedAt
@@ -37,9 +36,7 @@ public record SessionListItemDTO(
             e.getEvaluateStatus(),
             e.getEvaluateError(),
             e.getOverallScore(),
-            e.getPreparationRunId() != null && !e.getPreparationRunId().isBlank(),
-            e.getJobDescriptionId(),
-            e.getCurrentStage(),
+            EvaluationQuality.isDegradedFeedback(e.getOverallFeedback()),
             e.getSessionVersion(),
             e.getCreatedAt(),
             e.getCompletedAt()

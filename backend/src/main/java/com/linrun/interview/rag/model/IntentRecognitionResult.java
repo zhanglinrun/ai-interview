@@ -38,12 +38,12 @@ public record IntentRecognitionResult(
   }
 
   public record Entities(
-      @JsonPropertyDescription("技能/方向，如 Java、前端")
-      String skill,
+      @JsonPropertyDescription("岗位方向/主题，如 java-backend、Java、前端")
+      String jobTrack,
       @JsonPropertyDescription("简历 ID（数字）")
       Long resumeId,
-      @JsonPropertyDescription("面试会话 ID（数字）")
-      Long sessionId,
+      @JsonPropertyDescription("面试会话 ID（业务 sessionId 字符串，如短 UUID）")
+      String sessionId,
       @JsonPropertyDescription("公司名")
       String company
   ) {

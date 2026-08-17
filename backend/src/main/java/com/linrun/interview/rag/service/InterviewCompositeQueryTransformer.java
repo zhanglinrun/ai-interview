@@ -12,6 +12,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 组合查询改写器：先改写，再可选 HyDE 追加假设文档 query（多路召回）。
@@ -24,17 +28,28 @@ public class InterviewCompositeQueryTransformer implements QueryTransformer {
   private final PromptTemplate hydePromptTemplate;
   private final boolean hydeEnabled;
   private final int hydeMaxChars;
+  private final long hydeTimeoutMs;
 
   public InterviewCompositeQueryTransformer(InterviewQueryTransformer rewriteTransformer,
                                             ChatModel hydeChatModel,
                                             PromptTemplate hydePromptTemplate,
                                             boolean hydeEnabled,
                                             int hydeMaxChars) {
+    this(rewriteTransformer, hydeChatModel, hydePromptTemplate, hydeEnabled, hydeMaxChars, 4000);
+  }
+
+  public InterviewCompositeQueryTransformer(InterviewQueryTransformer rewriteTransformer,
+                                            ChatModel hydeChatModel,
+                                            PromptTemplate hydePromptTemplate,
+                                            boolean hydeEnabled,
+                                            int hydeMaxChars,
+                                            long hydeTimeoutMs) {
     this.rewriteTransformer = rewriteTransformer;
     this.hydeChatModel = hydeChatModel;
     this.hydePromptTemplate = hydePromptTemplate;
     this.hydeEnabled = hydeEnabled;
     this.hydeMaxChars = hydeMaxChars;
+    this.hydeTimeoutMs = hydeTimeoutMs;
   }
 
   @Override
@@ -68,10 +83,9 @@ public class InterviewCompositeQueryTransformer implements QueryTransformer {
     variables.put("question", question);
     variables.put("maxChars", hydeMaxChars);
     String prompt = hydePromptTemplate.render(variables);
-    String text = hydeChatModel.chat(ChatRequest.builder()
-            .messages(UserMessage.from(prompt))
-            .build())
-        .aiMessage().text();
+    String text = hydeTimeoutMs > 0
+        ? invokeHydeWithTimeout(prompt)
+        : invokeHyde(prompt);
     if (text == null) {
       return null;
     }
@@ -80,5 +94,29 @@ public class InterviewCompositeQueryTransformer implements QueryTransformer {
       normalized = normalized.substring(0, hydeMaxChars);
     }
     return normalized;
+  }
+
+  private String invokeHydeWithTimeout(String prompt) {
+    try {
+      return CompletableFuture.supplyAsync(() -> invokeHyde(prompt))
+          .orTimeout(hydeTimeoutMs, TimeUnit.MILLISECONDS)
+          .join();
+    } catch (CompletionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof TimeoutException) {
+        throw new IllegalStateException("HyDE 超过 " + hydeTimeoutMs + "ms", cause);
+      }
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      throw e;
+    }
+  }
+
+  private String invokeHyde(String prompt) {
+    return hydeChatModel.chat(ChatRequest.builder()
+            .messages(UserMessage.from(prompt))
+            .build())
+        .aiMessage().text();
   }
 }

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.business.mapper.CapabilityAtomDefinitionMapper;
 import com.linrun.interview.business.entity.CapabilityAtomDefinitionEntity;
-import com.linrun.interview.business.vo.ReportContracts.CapabilityProfileView;
+import com.linrun.interview.business.vo.CapabilityProfileView;
 import com.linrun.interview.business.mapper.CapabilityEvidenceMapper;
 import com.linrun.interview.business.mapper.CapabilityProfileMapper;
 import com.linrun.interview.business.entity.CapabilityEvidenceEntity;

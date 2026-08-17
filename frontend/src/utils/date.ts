@@ -91,6 +91,18 @@ export function getElapsedSecondsSince(dateStr: string | null | undefined): numb
   return Math.max(0, Math.floor((Date.now() - startTime) / 1000));
 }
 
+export function getDurationSeconds(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): number | undefined {
+  const startTime = getDateTime(start);
+  const endTime = getDateTime(end);
+  if (startTime <= 0 || endTime <= 0 || endTime < startTime) {
+    return undefined;
+  }
+  return Math.floor((endTime - startTime) / 1000);
+}
+
 export function compareDateAsc(
   left: string | null | undefined,
   right: string | null | undefined

@@ -42,8 +42,25 @@ public record RagEvalResponse(
         double retrievalRecall,
         double retrievalPrecision,
         List<String> retrievedChunkIds,
-        List<RetrievedSegment> retrievedSegments
+        List<RetrievedSegment> retrievedSegments,
+        int expectedEvidenceCount,
+        List<String> matchedKeywords,
+        List<String> missingKeywords
     ) {
+        public ItemResult(
+            String question,
+            boolean hit,
+            int firstHitRank,
+            double reciprocalRank,
+            double ndcg,
+            double retrievalRecall,
+            double retrievalPrecision,
+            List<String> retrievedChunkIds,
+            List<RetrievedSegment> retrievedSegments
+        ) {
+            this(question, hit, firstHitRank, reciprocalRank, ndcg, retrievalRecall, retrievalPrecision,
+                retrievedChunkIds, retrievedSegments, 0, List.of(), List.of());
+        }
         /** @deprecated 检索阶段未生成答案，旧字段实际表示期望证据召回率。 */
         @Deprecated
         @JsonProperty("citationHitRate")

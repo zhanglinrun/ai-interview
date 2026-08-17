@@ -15,7 +15,9 @@ import dev.langchain4j.data.segment.TextSegment;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +54,7 @@ public class RagEvaluationService
             results.add(evaluateItem(item, retrieved, k));
         }
         int total = results.size();
+        // hitRate = 按题 0/1，简历 Context Precision 落地这一列，不是 ragas 库的逐块精度。
         double hitRate = total == 0 ? 0 : results.stream().filter(RagEvalResponse.ItemResult::hit).count() * 1.0 / total;
         double mrr = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::reciprocalRank).average().orElse(0);
         double ndcg = total == 0 ? 0 : results.stream().mapToDouble(RagEvalResponse.ItemResult::ndcg).average().orElse(0);
@@ -131,13 +134,8 @@ public class RagEvaluationService
                 .filter(chunkId -> chunkId != null && !chunkId.isBlank())
                 .map(String::strip)
                 .collect(Collectors.toSet());
-        Set<String> expectedKeywords = item.expectedKeywords() == null
-            ? Set.of()
-            : item.expectedKeywords().stream()
-                .filter(keyword -> keyword != null && !keyword.isBlank())
-                .map(keyword -> keyword.strip().toLowerCase(Locale.ROOT))
-                .collect(Collectors.toSet());
-        int expectedEvidenceCount = expectedEvidenceCount(expectedChunkIds, expectedKeywords);
+        List<KeywordGroup> expectedKeywordGroups = parseKeywordGroups(item.expectedKeywords());
+        int expectedEvidenceCount = expectedEvidenceCount(expectedChunkIds, expectedKeywordGroups);
         if (expectedEvidenceCount == 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "RAG 评测项必须提供 expectedKeywords 或 expectedChunkIds: " + item.question());
@@ -170,11 +168,12 @@ public class RagEvaluationService
                 segmentEvidence.add("chunk:" + chunkId);
             }
             String text = segment.text() == null ? "" : segment.text().toLowerCase(Locale.ROOT);
-            for (String keyword : expectedKeywords) {
-                if (text.contains(keyword)) {
-                    segmentEvidence.add("keyword:" + keyword);
+            for (KeywordGroup group : expectedKeywordGroups) {
+                if (group.matches(text)) {
+                    segmentEvidence.add(group.evidenceId());
                 }
             }
+            boolean relevant = !segmentEvidence.isEmpty();
             segmentEvidence.removeAll(matchedEvidence);
             if (!segmentEvidence.isEmpty()) {
                 matchedEvidence.addAll(segmentEvidence);
@@ -182,8 +181,10 @@ public class RagEvaluationService
                 if (firstHitRank == 0) {
                     firstHitRank = rank;
                 }
+                dcg += segmentEvidence.size() / log2(rank + 1);
+            }
+            if (relevant) {
                 relevantResultCount++;
-                dcg += 1.0 / log2(rank + 1);
             }
         }
         int matchedEvidenceCount = matchedEvidence.size();
@@ -193,20 +194,63 @@ public class RagEvaluationService
             idcg += 1.0 / log2(i + 1);
         }
         double reciprocalRank = firstHitRank == 0 ? 0 : 1.0 / firstHitRank;
-        double ndcg = idcg == 0 ? 0 : dcg / idcg;
+        double ndcg = idcg == 0 ? 0 : Math.min(1.0, dcg / idcg);
         double retrievalRecall = Math.min(
             1.0, matchedEvidenceCount * 1.0 / expectedEvidenceCount);
         double retrievalPrecision = uniqueRetrievedCount == 0
             ? 0 : relevantResultCount * 1.0 / uniqueRetrievedCount;
+        List<String> matchedKeywords = expectedKeywordGroups.stream()
+            .filter(group -> matchedEvidence.contains(group.evidenceId()))
+            .map(KeywordGroup::label)
+            .toList();
+        List<String> missingKeywords = expectedKeywordGroups.stream()
+            .filter(group -> !matchedEvidence.contains(group.evidenceId()))
+            .map(KeywordGroup::label)
+            .toList();
         return new RagEvalResponse.ItemResult(
             item.question(), firstHitRank > 0, firstHitRank, round(reciprocalRank), round(ndcg),
-            round(retrievalRecall), round(retrievalPrecision), chunkIds, retrievedSegments);
+            round(retrievalRecall), round(retrievalPrecision), chunkIds, retrievedSegments,
+            expectedEvidenceCount, matchedKeywords, missingKeywords);
     }
 
-    private int expectedEvidenceCount(Set<String> expectedChunkIds, Set<String> expectedKeywords) {
+    private List<KeywordGroup> parseKeywordGroups(List<String> expectedKeywords) {
+        if (expectedKeywords == null || expectedKeywords.isEmpty()) {
+            return List.of();
+        }
+        List<KeywordGroup> groups = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String raw : expectedKeywords) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            String label = raw.strip();
+            List<String> aliases = Arrays.stream(label.split("\\|"))
+                .map(alias -> alias.strip().toLowerCase(Locale.ROOT))
+                .filter(alias -> !alias.isBlank())
+                .distinct()
+                .toList();
+            if (aliases.isEmpty() || !seen.add(label.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            groups.add(new KeywordGroup(label, aliases));
+        }
+        return List.copyOf(groups);
+    }
+
+    private int expectedEvidenceCount(Set<String> expectedChunkIds, List<KeywordGroup> expectedKeywords) {
         int chunkCount = expectedChunkIds == null ? 0 : expectedChunkIds.size();
         int keywordCount = expectedKeywords == null ? 0 : expectedKeywords.size();
         return chunkCount + keywordCount;
+    }
+
+    private record KeywordGroup(String label, List<String> aliases) {
+        String evidenceId() {
+            return "keyword:" + label.toLowerCase(Locale.ROOT);
+        }
+
+        boolean matches(String text) {
+            return aliases.stream().anyMatch(text::contains);
+        }
     }
 
     private String snippet(String text) {

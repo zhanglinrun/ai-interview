@@ -12,6 +12,7 @@ import com.linrun.interview.common.model.AsyncTaskStatus;
 import com.linrun.interview.business.listener.EvaluateStreamProducer;
 import com.linrun.interview.business.mapper.InterviewSessionMapper;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
+import com.linrun.interview.business.service.InterviewPersistenceService;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -31,6 +32,8 @@ class InterviewEvaluationCompensationJobTest {
   private InterviewSessionMapper sessionMapper;
   @Mock
   private EvaluateStreamProducer evaluateStreamProducer;
+  @Mock
+  private InterviewPersistenceService persistenceService;
 
   private InterviewEvaluationCompensationJob job;
 
@@ -39,7 +42,8 @@ class InterviewEvaluationCompensationJobTest {
     TableInfoHelper.initTableInfo(
         new MapperBuilderAssistant(new MybatisConfiguration(), "evaluation-compensation-test"),
         InterviewSessionEntity.class);
-    job = new InterviewEvaluationCompensationJob(sessionMapper, evaluateStreamProducer);
+    job = new InterviewEvaluationCompensationJob(
+        sessionMapper, evaluateStreamProducer, persistenceService);
   }
 
   @Test
@@ -54,6 +58,29 @@ class InterviewEvaluationCompensationJobTest {
 
     verify(evaluateStreamProducer).sendEvaluateTask("legacy-session");
     verify(evaluateStreamProducer, never()).sendEvaluateTask("job-session");
+  }
+
+  @Test
+  @DisplayName("降级已评估报告会重派，真全未答 0 分不会")
+  void requeuesDegradedEvaluatedButNotUnansweredZero() {
+    InterviewSessionEntity degraded = completedSession("degraded-session", null);
+    degraded.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
+    degraded.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    degraded.setOverallFeedback("8道题均按0分兜底");
+    InterviewSessionEntity unanswered = completedSession("unanswered-session", null);
+    unanswered.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
+    unanswered.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    unanswered.setOverallFeedback("作答率 0/8。");
+    when(sessionMapper.selectList(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(degraded, unanswered));
+
+    job.runEvaluationCompensation();
+
+    verify(persistenceService).prepareReevaluation(
+        org.mockito.ArgumentMatchers.eq("degraded-session"),
+        org.mockito.ArgumentMatchers.any());
+    verify(evaluateStreamProducer).sendEvaluateTask("degraded-session");
+    verify(evaluateStreamProducer, never()).sendEvaluateTask("unanswered-session");
   }
 
   private InterviewSessionEntity completedSession(String sessionId, String preparationRunId) {

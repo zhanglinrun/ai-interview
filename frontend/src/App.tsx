@@ -2,8 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useOu
 import Layout from './components/Layout';
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { historyApi, type InterviewDetail } from './api/history';
+import { interviewApi } from './api/interview';
+import { getErrorMessage } from './api/request';
 import type { UploadKnowledgeBaseResponse } from './api/knowledgebase';
 import type { CategoryDTO, Difficulty } from './types/interview';
+import type { InterviewSetupResult } from './pages/InterviewSetupPage';
 import { ErrorState, LoadingState } from './components/PageState';
 import { ROUTES } from './app/routes';
 import { ArrowLeft } from 'lucide-react';
@@ -15,6 +18,7 @@ const UploadPage = lazy(() => import('./pages/UploadPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 const ResumeDetailPage = lazy(() => import('./pages/ResumeDetailPage'));
 const Interview = lazy(() => import('./pages/InterviewPage'));
+const InterviewSetupPage = lazy(() => import('./pages/InterviewSetupPage'));
 const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
 const KnowledgeBaseQueryPage = lazy(() => import('./pages/KnowledgeBaseQueryPage'));
 const KnowledgeBaseUploadPage = lazy(() => import('./pages/KnowledgeBaseUploadPage'));
@@ -27,11 +31,6 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const JobPracticePage = lazy(() => import('./pages/JobPracticePage'));
-const JobInterviewRuntimePage = lazy(() => import('./pages/JobInterviewRuntimePage'));
-const JobInterviewReportPage = lazy(() => import('./pages/JobInterviewReportPage'));
-const TrainingPage = lazy(() => import('./pages/TrainingPage'));
-const AlgorithmPracticePage = lazy(() => import('./pages/AlgorithmPracticePage'));
 const RecruitmentRadarPage = lazy(() => import('./pages/RecruitmentRadarPage'));
 const CareerResourcesPage = lazy(() => import('./pages/CareerResourcesPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
@@ -126,61 +125,59 @@ function InterviewWrapper() {
   const navigate = useNavigate();
   const location = useLocation();
   const entryState = (location.state as InterviewEntryState | undefined) ?? {};
-  const [resumeText, setResumeText] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const effectiveResumeId = resumeId ? parseInt(resumeId, 10) : entryState.resumeId;
-
-  useEffect(() => {
-    // 优先从location state获取resumeText
-    const stateText = entryState.resumeText;
-    if (stateText) {
-      setResumeText(stateText);
-      setLoading(false);
-    } else if (effectiveResumeId) {
-      // 如果没有，从API获取简历详情
-      historyApi.getResumeDetail(effectiveResumeId)
-        .then(resume => {
-          setResumeText(resume.resumeText);
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error('获取简历文本失败', err);
-          setLoading(false);
-        });
-    } else {
-      setLoading(false);
-    }
-  }, [effectiveResumeId, entryState.resumeText]);
+  const presetResumeId = resumeId ? parseInt(resumeId, 10) : entryState.resumeId;
+  const [prepared, setPrepared] = useState<InterviewSetupResult | null>(null);
 
   const handleBack = () => {
-    if (effectiveResumeId) {
-      navigate(`/history/${effectiveResumeId}`, { replace: false });
+    if (prepared) {
+      setPrepared(null);
       return;
     }
-    navigate('/history', { replace: false });
+    if (presetResumeId) {
+      navigate(`/history/${presetResumeId}`, { replace: false });
+      return;
+    }
+    navigate('/dashboard', { replace: false });
   };
 
   const handleInterviewComplete = () => {
-    // 面试完成后跳转到面试记录页
     navigate('/interviews');
   };
 
-  if (loading) {
+  if (entryState.sessionIdToResume) {
     return (
-      <LoadingState
-        label="正在加载简历…"
-        className="flex flex-col items-center justify-center min-h-screen gap-3"
-        spinnerClassName="w-10 h-10 text-primary-500 animate-spin"
+      <Interview
+        resumeText={entryState.resumeText ?? ''}
+        resumeId={presetResumeId}
+        sessionIdToResume={entryState.sessionIdToResume}
+        initialConfig={entryState.interviewConfig}
+        autoStart
+        onBack={handleBack}
+        onInterviewComplete={handleInterviewComplete}
+      />
+    );
+  }
+
+  if (!prepared) {
+    return (
+      <InterviewSetupPage
+        initialResumeId={presetResumeId}
+        onStart={setPrepared}
       />
     );
   }
 
   return (
     <Interview
-      resumeText={resumeText}
-      resumeId={effectiveResumeId}
-      sessionIdToResume={entryState.sessionIdToResume}
-      initialConfig={entryState.interviewConfig}
+      resumeText={prepared.resumeText}
+      resumeId={prepared.resumeId}
+      initialConfig={{
+        skillId: prepared.skillId,
+        questionCount: prepared.questionCount,
+        jdText: prepared.jdText,
+        knowledgeBaseIds: prepared.knowledgeBaseIds,
+      }}
+      autoStart
       onBack={handleBack}
       onInterviewComplete={handleInterviewComplete}
     />
@@ -197,13 +194,8 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
 
-              {/* 面向求职者的七个一级入口 */}
+              {/* 面向求职者的一级入口 */}
               <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="job-practice" element={<JobPracticePage />} />
-              <Route path="job-practice/session/:sessionId" element={<JobInterviewRuntimePage />} />
-              <Route path="job-practice/report/:sessionId" element={<JobInterviewReportPage />} />
-              <Route path="training" element={<TrainingPage />} />
-              <Route path="training/algorithm/:problemVersionId" element={<AlgorithmPracticePage />} />
               <Route path="recruitment" element={<RecruitmentRadarPage />} />
               <Route path="resources" element={<CareerResourcesPage />} />
               <Route path="profile" element={<ProfilePage />} />
@@ -218,7 +210,8 @@ function App() {
               <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
 
               {/* 面试中心 */}
-              <Route path="interview-hub" element={<Navigate to="/job-practice" replace />} />
+              <Route path="interview-hub" element={<Navigate to="/interview" replace />} />
+              <Route path="job-practice/*" element={<Navigate to="/interview" replace />} />
 
               {/* 面试记录列表 */}
               <Route path="interviews" element={<InterviewHistoryWrapper />} />
@@ -279,24 +272,15 @@ function InterviewHistoryWrapper() {
     navigate('/history');
   };
 
-  const handleViewInterview = async (
-    sessionId: string,
-    _resumeId?: number,
-    jobInterview?: boolean,
-    status?: string,
-  ) => {
-    navigate(getInterviewViewPath(sessionId, jobInterview, status));
+  const handleViewInterview = async (sessionId: string) => {
+    navigate(getInterviewViewPath(sessionId));
   };
 
   const handleRestartInterview = (resumeId: number) => {
     openInterviewModalWithResume(resumeId);
   };
 
-  const handleContinueInterview = (sessionId: string, jobInterview?: boolean) => {
-    if (jobInterview) {
-      navigate(`/job-practice/session/${sessionId}`);
-      return;
-    }
+  const handleContinueInterview = (sessionId: string) => {
     navigate('/interview', { state: { sessionIdToResume: sessionId } });
   };
 
@@ -310,6 +294,7 @@ function InterviewDetailPageWrapper() {
   const [interview, setInterview] = useState<InterviewDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reevaluating, setReevaluating] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -364,7 +349,23 @@ function InterviewDetailPageWrapper() {
           <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">回看每道题的回答和改进建议。</p>
         </div>
       </div>
-      <InterviewDetailPanel interview={interview} />
+      <InterviewDetailPanel
+        interview={interview}
+        reevaluating={reevaluating}
+        onReevaluate={async () => {
+          if (!sessionId) return;
+          setReevaluating(true);
+          try {
+            await interviewApi.reevaluateInterview(sessionId);
+            const detail = await historyApi.getInterviewDetail(sessionId);
+            setInterview(detail);
+          } catch (err) {
+            alert(getErrorMessage(err, '重新评估失败，请稍后重试'));
+          } finally {
+            setReevaluating(false);
+          }
+        }}
+      />
     </div>
   );
 }

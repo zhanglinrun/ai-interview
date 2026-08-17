@@ -298,7 +298,7 @@ public class InterviewQuestionService implements InterviewQuestionPort {
                 && customCategories != null && !customCategories.isEmpty()) {
             return topicCatalog.buildCustomTopic(customCategories, jdText != null ? jdText : "");
         }
-        return topicCatalog.getTopic(topicId);
+        return topicCatalog.getTopic(topicId).withSourceJd(jdText);
     }
 
     private String resolveDifficulty(String difficulty) {

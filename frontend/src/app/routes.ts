@@ -3,12 +3,10 @@
  */
 export const ROUTES = {
   dashboard: '/dashboard',
-  jobPractice: '/job-practice',
-  training: '/training',
+  interview: '/interview',
   recruitment: '/recruitment',
   resources: '/resources',
   profile: '/profile',
   resumeUpload: '/upload',
   knowledgebaseUpload: '/knowledgebase/upload',
 } as const;
-

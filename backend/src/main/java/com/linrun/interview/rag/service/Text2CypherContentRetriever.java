@@ -322,12 +322,12 @@ public class Text2CypherContentRetriever implements Text2CypherRetrieverPort {
   private Content markStructured(String text) {
     Map<String, Object> values = new HashMap<>();
     values.put(MetadataKeyConstant.RETRIEVAL_SOURCE, "GRAPH_DB");
-    values.put(MetadataKeyConstant.SKIP_RERANK, "1");
     values.put("dataUserId", String.valueOf(dataUserId));
     values.put("fileName", "Neo4j 图关系查询");
     values.put("category", "GRAPH_DB");
-    return Content.from(TextSegment.from(text, Metadata.from(values)), Map.of(
+    Content content = Content.from(TextSegment.from(text, Metadata.from(values)), Map.of(
         ContentMetadata.SCORE, 1.0d,
         ContentMetadata.RERANKED_SCORE, 1.0d));
+    return RagContentUtil.markAsSkipRerank(content);
   }
 }

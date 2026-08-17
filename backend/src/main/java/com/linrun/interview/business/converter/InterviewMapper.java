@@ -32,7 +32,7 @@ public interface InterviewMapper {
     @Mapping(target = "question", source = "question")
     @Mapping(target = "category", source = "category")
     @Mapping(target = "userAnswer", source = "userAnswer")
-    @Mapping(target = "score", source = "score", qualifiedByName = "nullScoreToZero")
+    @Mapping(target = "score", source = "score")
     @Mapping(target = "feedback", source = "feedback")
     InterviewReportDTO.QuestionEvaluation toQuestionEvaluation(InterviewAnswerEntity entity);
 
@@ -145,7 +145,7 @@ public interface InterviewMapper {
     }
 
     @Named("nullScoreToZero")
-    default int nullScoreToZero(Integer value) {
-        return value != null ? value : 0;
+    default Integer nullScoreToZero(Integer value) {
+        return value;
     }
 }

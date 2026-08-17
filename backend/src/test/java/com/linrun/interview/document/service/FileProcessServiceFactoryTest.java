@@ -4,7 +4,6 @@ import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.document.constant.FileType;
 import com.linrun.interview.document.constant.KnowledgeBaseType;
 import com.linrun.interview.document.service.impl.MarkdownProcessServiceImpl;
-import com.linrun.interview.document.service.impl.SpreadsheetProcessServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,7 +47,6 @@ class FileProcessServiceFactoryTest {
     factory = new FileProcessServiceFactory(List.of(
         new MarkdownProcessServiceImpl(
             mock(com.linrun.interview.document.service.impl.ImageDescriptionService.class)),
-        new SpreadsheetProcessServiceImpl(documentParseService),
         dataQueryExcelProcessor));
   }
 
@@ -60,10 +58,11 @@ class FileProcessServiceFactoryTest {
   }
 
   @Test
-  @DisplayName("DOCUMENT_SEARCH + Excel 走 Spreadsheet 解析器")
-  void routesSpreadsheetForDocumentSearch() {
-    FileProcessService processor = factory.get(FileType.EXCEL, KnowledgeBaseType.DOCUMENT_SEARCH);
-    assertThat(processor).isInstanceOf(SpreadsheetProcessServiceImpl.class);
+  @DisplayName("DOCUMENT_SEARCH + Excel 无工厂解析器（convert 阶段 passthrough 原文件）")
+  void noProcessorForDocumentSearchExcel() {
+    assertThatThrownBy(() -> factory.get(FileType.EXCEL, KnowledgeBaseType.DOCUMENT_SEARCH))
+        .isInstanceOf(BusinessException.class)
+        .hasMessageContaining("不支持的文件类型");
   }
 
   @Test

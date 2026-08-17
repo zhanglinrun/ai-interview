@@ -14,7 +14,10 @@ public class EvalQualityProperties {
     private double retrievalRecall = 0.85;
     private double retrievalMrr = 0.75;
     private double retrievalNdcg = 0.75;
-    /** 检索精确率门槛；字段名保留 citationCoverage 以兼容已有配置。 */
+    /**
+     * 检索精确率门槛；字段名保留 citationCoverage 以兼容已有配置。
+     * 关键词烟测会再按 |期望证据|/实际召回条数封顶，避免 2 个词、Top-5 永远过不了 90%。
+     */
     private double citationCoverage = 0.90;
     private double groundedness = 0.80;
     private double answerQuality = 0.75;

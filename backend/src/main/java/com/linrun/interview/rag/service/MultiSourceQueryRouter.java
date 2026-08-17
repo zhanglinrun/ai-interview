@@ -15,15 +15,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
  * ES / MySQL / Neo4j 三源查询路由器。
  *
- * <p>先用低成本规则给出安全默认值，再让 LLM 输出结构化策略；LLM 失败、JSON 异常或
- * 目标数据源未配置时统一回退 ES。路由只返回一个主数据源，SQL/Cypher 检索器内部再
- * 负责空结果回退，避免多源结果相互污染非结构化 BGE 重排。Neo4j 只承载业务实体关系，
- * 不承载文档分段父子关系。</p>
+ * <p>先用低成本规则给出安全默认值。默认知识库路径不再打路由 LLM；仅规则命中
+ * SQL/图时才让 LLM 纠偏。同一请求内 {@link #route(Query)} 复用第一次决策，避免
+ * HyDE 多 query 重复打路由。LLM 失败、JSON 异常或目标数据源未配置时统一回退 ES。</p>
  */
 @Slf4j
 public class MultiSourceQueryRouter implements QueryRouter {
@@ -80,6 +80,7 @@ public class MultiSourceQueryRouter implements QueryRouter {
   private final RagQueryTrace trace;
   private final AtomicBoolean progressSent = new AtomicBoolean(false);
   private final AtomicBoolean routeRecorded = new AtomicBoolean(false);
+  private final AtomicReference<Decision> cachedDecision = new AtomicReference<>();
 
   public MultiSourceQueryRouter(Map<Source, ContentRetriever> retrievers,
                                 ChatModel chatModel,
@@ -104,7 +105,12 @@ public class MultiSourceQueryRouter implements QueryRouter {
       progressCallback.accept("正在路由数据源...");
     }
     String question = query == null || query.text() == null ? "" : query.text();
-    Decision decision = decide(question);
+    RagQueryTrace.Span span = RagQueryTrace.start(trace, RagQueryTrace.SPAN_ROUTE, RagQueryTrace.TYPE_SPAN);
+    if (span != null) {
+      span.input(question);
+    }
+    Decision decision = cachedDecision.updateAndGet(
+        existing -> existing != null ? existing : decide(question));
     ContentRetriever selected = retrievers.get(decision.source());
     if (selected == null) {
       selected = fallbackRetriever;
@@ -114,14 +120,23 @@ public class MultiSourceQueryRouter implements QueryRouter {
     if (trace != null && routeRecorded.compareAndSet(false, true)) {
       trace.route(decision.source().wireValue(), decision.intent(), decision.confidence(), decision.reasoning());
     }
+    if (span != null) {
+      span.dataSource(decision.source().wireValue());
+      span.confidence(decision.confidence());
+      span.complete(decision.source().wireValue() + " " + decision.intent()
+          + (decision.reasoning() == null ? "" : " " + decision.reasoning()));
+    }
     return selected == null ? List.of() : List.of(selected);
   }
 
   public Decision decide(String question) {
-    Decision heuristic = heuristic(question);
+    Decision heuristic = heuristicOf(question);
     // 显式点名 Neo4j/图数据库时，不能让 LLM 把图查询误判为普通 ES 问答。
     // 这是路由安全边界：图数据源失败时由图检索器内部回退 ES，而不是在入口丢失图意图。
     if (isExplicitGraphQuestion(question)) {
+      return heuristic;
+    }
+    if (heuristic.source() == Source.KNOWLEDGE_BASE) {
       return heuristic;
     }
     if (!llmEnabled || chatModel == null || question == null || question.isBlank()) {
@@ -148,7 +163,19 @@ public class MultiSourceQueryRouter implements QueryRouter {
     }
   }
 
-  private Decision heuristic(String question) {
+  /** 规则命中知识库时不必组装 SQL/图检索器。question 为空时保守返回 true。 */
+  public static boolean needsStructuredSource(String question) {
+    if (question == null || question.isBlank()) {
+      return true;
+    }
+    return heuristicOf(question).source() != Source.KNOWLEDGE_BASE;
+  }
+
+  public Decision heuristic(String question) {
+    return heuristicOf(question);
+  }
+
+  static Decision heuristicOf(String question) {
     String normalized = question == null ? "" : question.toLowerCase(Locale.ROOT);
     // 分段父子/兄弟是 ES 命中后的上下文扩展，不是 Neo4j 领域图谱关系。
     if (containsAny(normalized, "父子分段", "父子切片", "兄弟分段", "兄弟切片", "分段关系", "切片关系", "chunk")) {
@@ -159,13 +186,13 @@ public class MultiSourceQueryRouter implements QueryRouter {
         "集成", "依赖", "技术栈", "如何连接", "怎么配合")) {
       return new Decision("实体关系查询", Source.GRAPH_DB, 0.86, "命中关系/路径类关键词");
     }
-    if (containsAny(normalized, "我的简历", "简历记录", "面试记录", "多少分", "统计", "数量", "列表", "最近", "时间范围", "sql", "数据库")) {
+    if (containsAny(normalized, "我的简历", "简历记录", "面试记录", "多少分", "统计", "数量", "列表", "最近", "时间范围", "sql", "text2sql")) {
       return new Decision("结构化记录查询", Source.RELATIONAL_DB, 0.84, "命中记录/统计/结构化查询关键词");
     }
     return new Decision("文档语义问答", Source.KNOWLEDGE_BASE, 0.72, "默认使用非结构化知识库");
   }
 
-  private boolean containsAny(String text, String... keywords) {
+  private static boolean containsAny(String text, String... keywords) {
     for (String keyword : keywords) {
       if (text.contains(keyword)) {
         return true;

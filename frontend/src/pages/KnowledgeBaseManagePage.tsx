@@ -39,6 +39,7 @@ import {downloadBlob} from '../utils/download';
 import {formatFileSize} from '../utils/format';
 import {isVectorStatusFailed, isVectorStatusProcessing} from '../utils/vectorStatus';
 import {NORMAL_POLLING_INTERVAL_MS, useConditionalPolling} from '../hooks/useConditionalPolling';
+import {dismissKbUploadQueueSummary, getKbUploadQueueSummary, subscribeKbUploadQueue} from '../stores/kbUploadQueue';
 
 interface KnowledgeBaseManagePageProps {
   onUpload: () => void;
@@ -74,6 +75,12 @@ function parseJsonList(json: string | null | undefined): string[] {
   }
 }
 
+function segmentKindLabel(seg: KnowledgeBaseSegment): string {
+  if (seg.skipEmbedding === 1) return '父分段 · 不入库向量';
+  if (seg.parentChunkId) return '子分段 · 检索';
+  return '检索段';
+}
+
 function parseSourceList(json: string | null): Array<{ documentTitle?: string; snippet?: string; similarity?: number | null }> {
   if (!json) return [];
   try {
@@ -104,9 +111,10 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   // 重新向量化状态
   const [revectorizing, setRevectorizing] = useState<number | null>(null);
   const [splitModalKb, setSplitModalKb] = useState<KnowledgeBaseItem | null>(null);
-  const [splitType, setSplitType] = useState('PARENT_CHILD');
+  const [splitType, setSplitType] = useState('TITLE');
   const [splitChunkSize, setSplitChunkSize] = useState(800);
   const [splitOverlap, setSplitOverlap] = useState(80);
+  const [splitTitleLevel, setSplitTitleLevel] = useState(3);
   const [splitting, setSplitting] = useState(false);
 
   // 版本管理状态
@@ -186,11 +194,27 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
     loadData();
   }, [loadData]);
 
-  // 轮询：当有处理中文档时，每5秒刷新一次
+  const [queueSummary, setQueueSummary] = useState(getKbUploadQueueSummary);
+
+  useEffect(() => subscribeKbUploadQueue(() => {
+    setQueueSummary(getKbUploadQueueSummary());
+  }), []);
+
+  useEffect(() => {
+    if (queueSummary.accepted > 0) {
+      void loadDataSilent();
+    }
+  }, [queueSummary.accepted, loadDataSilent]);
+
+  // 轮询：当有处理中文档或浏览器还在逐个投递时，每5秒刷新一次
   const hasPendingItems = knowledgeBases.some(
     kb => isVectorStatusProcessing(kb.docStatus)
   );
-  useConditionalPolling(hasPendingItems && !loading, loadDataSilent, NORMAL_POLLING_INTERVAL_MS);
+  useConditionalPolling(
+    (hasPendingItems || queueSummary.active) && !loading,
+    loadDataSilent,
+    NORMAL_POLLING_INTERVAL_MS,
+  );
 
   // 重新向量化
   const handleRevectorize = async (id: number) => {
@@ -213,6 +237,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
         splitType,
         chunkSize: splitChunkSize,
         overlap: splitOverlap,
+        titleLevel: splitTitleLevel,
       });
       setSplitModalKb(null);
       await loadDataSilent();
@@ -457,6 +482,33 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
           </div>
         )}
       />
+      {(queueSummary.active || queueSummary.failed > 0) && (
+        <div className="relative mb-4 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 pr-10 text-sm text-amber-800 dark:text-amber-200">
+          {queueSummary.active
+            ? `后台上传进行中：已接收 ${queueSummary.accepted}/${queueSummary.total}，队列中 ${queueSummary.pending} 个（最多 2 路并行）。请勿关闭或刷新本标签页，否则尚未发出的文件会中断。`
+            : `后台上传结束：成功 ${queueSummary.accepted}，失败 ${queueSummary.failed}。`}
+          {queueSummary.failedItems.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {queueSummary.failedItems.map((item) => (
+                <li key={item.id}>
+                  {item.fileName}
+                  {item.error ? `：${item.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!queueSummary.active && (
+            <button
+              type="button"
+              onClick={dismissKbUploadQueueSummary}
+              className="absolute right-2 top-2 p-1.5 text-amber-700/70 hover:text-amber-900 dark:text-amber-300/70 dark:hover:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors"
+              aria-label="关闭上传结果"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
       {/* 统计卡片 */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -1082,9 +1134,16 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                       <span className="font-medium text-slate-500 dark:text-slate-400">
                         第 {seg.chunkOrder + 1} 段
                       </span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                        {seg.parentChunkId ? '子块' : '顶层块'}
+                      <span className={`rounded-full px-2 py-0.5 ${
+                        seg.skipEmbedding === 1
+                          ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+                          : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                      }`}>
+                        {segmentKindLabel(seg)}
                       </span>
+                      {seg.textLength != null && (
+                        <span className="text-slate-400 dark:text-slate-500">{seg.textLength} 字</span>
+                      )}
                       {seg.brotherChunkId && (
                         <span
                           className="rounded-full bg-primary-50 px-2 py-0.5 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
@@ -1139,15 +1198,16 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
               onChange={e => setSplitType(e.target.value)}
               className="w-full mb-3 rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm bg-white dark:bg-slate-700"
             >
-              <option value="PARENT_CHILD">PARENT_CHILD（父子分段，默认）</option>
+              <option value="TITLE">TITLE（按标题切分，默认）</option>
+              <option value="PARENT_CHILD">PARENT_CHILD（TITLE 别名）</option>
               <option value="BROTHER">BROTHER（兄弟分段 + 层级关系）</option>
-              <option value="SMART">SMART（父子分段 + 10% overlap）</option>
+              <option value="SMART">SMART（按 1～6 级标题 + 10% overlap）</option>
               <option value="LENGTH">LENGTH（按长度）</option>
             </select>
             <p className="mb-4 text-xs leading-5 text-slate-400">
-              默认按标题层级生成父块与子块：子块负责向量检索，命中后扩展父块上下文；需要同级连续内容时再选择 BROTHER。
+              标准父子：一节/一题≤分段长度则直接入库（检索段）；超长才留父块（不入库）并按约 40% 长度切子块。空的「## 基础」只写入后续题目。
             </p>
-            <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="grid grid-cols-3 gap-3 mb-4">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">分段长度</label>
                 <input
@@ -1163,6 +1223,17 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   type="number"
                   value={splitOverlap}
                   onChange={e => setSplitOverlap(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">标题级数</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={splitTitleLevel}
+                  onChange={e => setSplitTitleLevel(Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2 text-sm"
                 />
               </div>

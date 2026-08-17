@@ -1,7 +1,10 @@
 import {ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, useCallback, useState} from 'react';
 import {AlertCircle, FileText, Info, Upload, X} from 'lucide-react';
 import LoadingButtonContent from './LoadingButtonContent';
+import {collectDroppedFiles, matchesAccept, mergeUniqueFiles} from '../utils/collectDroppedFiles';
 import {formatFileSize} from '../utils/format';
+
+const VISIBLE_FILE_PREVIEW = 8;
 
 export interface FileUploadCardProps {
   title: string;
@@ -53,19 +56,23 @@ export default function FileUploadCard({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [name, setName] = useState('');
+  const [expandedList, setExpandedList] = useState(false);
   const isEmbedded = variant === 'embedded';
+  const visibleFiles = multiple && !expandedList && selectedFiles.length > VISIBLE_FILE_PREVIEW
+    ? selectedFiles.slice(0, VISIBLE_FILE_PREVIEW)
+    : selectedFiles;
 
   const applyFiles = useCallback((files: FileList | File[]) => {
-    const list = Array.from(files);
+    const list = Array.from(files).filter((file) => matchesAccept(file.name, accept));
     if (list.length === 0) return;
     if (multiple) {
-      setSelectedFiles(list);
+      setSelectedFiles((previous) => mergeUniqueFiles(previous, list));
       onFileSelect?.(list[0]);
     } else {
       setSelectedFile(list[0]);
       onFileSelect?.(list[0]);
     }
-  }, [multiple, onFileSelect]);
+  }, [accept, multiple, onFileSelect]);
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -77,13 +84,14 @@ export default function FileUploadCard({
     setDragOver(false);
   }, []);
 
-  const handleDrop = useCallback((e: DragEvent) => {
+  const handleDrop = useCallback(async (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      applyFiles(e.dataTransfer.files);
+    const dropped = await collectDroppedFiles(e.dataTransfer, accept);
+    if (dropped.length > 0) {
+      applyFiles(dropped);
     }
-  }, [applyFiles]);
+  }, [accept, applyFiles]);
 
   const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -154,6 +162,18 @@ export default function FileUploadCard({
           onChange={handleFileChange}
           disabled={uploading}
         />
+        {multiple && (
+          <input
+            type="file"
+            id={`${inputId}-dir`}
+            className="hidden"
+            multiple
+            // @ts-expect-error non-standard folder picker
+            webkitdirectory=""
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
+        )}
 
         {!hasSelection ? (
           <div className="text-center py-3">
@@ -163,30 +183,48 @@ export default function FileUploadCard({
               <Upload className="w-6 h-6" />
             </div>
             <p className="text-base font-medium text-stone-800 dark:text-stone-200">
-              {multiple ? '拖拽多个文件到此处' : '拖拽文件到此处'}
+              {multiple ? '拖拽文件或整个文件夹到此处' : '拖拽文件到此处'}
             </p>
             <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
               {formatHint} · {maxSizeHint}
             </p>
-            <button
-              type="button"
-              className="mt-5 btn-secondary px-5 py-2.5 rounded-lg text-sm font-medium"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                document.getElementById(inputId)?.click();
-              }}
-            >
-              {multiple ? '选择多个文件' : selectButtonText}
-            </button>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                className="btn-secondary px-5 py-2.5 rounded-lg text-sm font-medium"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  document.getElementById(inputId)?.click();
+                }}
+              >
+                {multiple ? '选择多个文件' : selectButtonText}
+              </button>
+              {multiple && (
+                <button
+                  type="button"
+                  className="btn-secondary px-5 py-2.5 rounded-lg text-sm font-medium"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    document.getElementById(`${inputId}-dir`)?.click();
+                  }}
+                >
+                  选择文件夹
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
             {multiple ? (
               <>
-                {selectedFiles.map((file) => (
+                <p className="text-center text-sm font-medium text-stone-700 dark:text-stone-200">
+                  已选 {selectedFiles.length} 个文件，将全部上传
+                </p>
+                {visibleFiles.map((file) => (
                   <div
-                    key={`${file.name}-${file.size}`}
+                    key={`${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`}
                     className="flex items-center gap-3 rounded-lg bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3"
                   >
                     <FileText className="w-5 h-5 text-primary-600 shrink-0" />
@@ -204,7 +242,36 @@ export default function FileUploadCard({
                     </button>
                   </div>
                 ))}
-                <p className="text-center text-xs text-stone-500">已选 {selectedFiles.length} 个文件</p>
+                {selectedFiles.length > VISIBLE_FILE_PREVIEW && (
+                  <button
+                    type="button"
+                    className="w-full text-center text-xs text-primary-600 hover:underline"
+                    onClick={() => setExpandedList((open) => !open)}
+                  >
+                    {expandedList
+                      ? '收起列表'
+                      : `其余 ${selectedFiles.length - VISIBLE_FILE_PREVIEW} 个文件已加入，点击查看全部`}
+                  </button>
+                )}
+                <div className="flex justify-center gap-3 text-xs">
+                  <button
+                    type="button"
+                    className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300"
+                    onClick={() => document.getElementById(inputId)?.click()}
+                  >
+                    继续添加
+                  </button>
+                  <button
+                    type="button"
+                    className="text-stone-500 hover:text-red-500"
+                    onClick={() => {
+                      setSelectedFiles([]);
+                      setExpandedList(false);
+                    }}
+                  >
+                    清空
+                  </button>
+                </div>
               </>
             ) : selectedFile && (
               <div className="flex items-center gap-3 rounded-lg bg-white dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700 px-4 py-3 max-w-md mx-auto">

@@ -278,25 +278,38 @@ public class EvidenceRetrievalService {
     if (contents.isEmpty()) {
       return contents;
     }
+    StructuredAwareReranker.Partition partition = StructuredAwareReranker.partition(contents);
+    if (partition.unstructured().isEmpty()) {
+      return partition.structured();
+    }
     if (!queryProperties.getRerank().isEnabled() || !rerankService.isEnabled()) {
       degraded.add("RERANK_UNAVAILABLE");
-      return contents;
+      return StructuredAwareReranker.merge(partition, partition.unstructured());
     }
+
+    double minScore = queryProperties.getRerank().getMinScore();
     Response<List<Double>> response = rerankService.scoreAll(
-        contents.stream().map(Content::textSegment).toList(), query);
+        partition.unstructured().stream().map(Content::textSegment).toList(), query);
     List<Double> scores = response.content();
-    if (scores == null || scores.size() != contents.size()) {
+    if (scores == null || scores.size() != partition.unstructured().size()) {
       degraded.add("RERANK_INVALID_RESPONSE");
-      return contents;
+      return StructuredAwareReranker.merge(partition, partition.unstructured());
     }
+
+    List<Double> unitScores = RerankScoreNormalizer.toUnitInterval(scores);
     List<ScoredContent> scored = new ArrayList<>();
-    for (int i = 0; i < contents.size(); i++) {
-      scored.add(new ScoredContent(withRerankScore(contents.get(i), scores.get(i)), scores.get(i)));
+    for (int i = 0; i < partition.unstructured().size(); i++) {
+      double score = unitScores.get(i);
+      if (minScore > 0 && score < minScore) {
+        continue;
+      }
+      scored.add(new ScoredContent(
+          withRerankScore(partition.unstructured().get(i), score), score));
     }
     scored.sort(Comparator.comparingDouble(ScoredContent::score).reversed());
-    int limit = Math.min(
-        Math.max(queryProperties.getRerank().getTopN(), 1), scored.size());
-    return scored.subList(0, limit).stream().map(ScoredContent::content).toList();
+    int limit = Math.min(Math.max(queryProperties.getRerank().getTopN(), 1), scored.size());
+    List<Content> reranked = scored.subList(0, limit).stream().map(ScoredContent::content).toList();
+    return StructuredAwareReranker.merge(partition, reranked);
   }
 
   private Content withRerankScore(Content content, double score) {

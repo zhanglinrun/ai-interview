@@ -11,7 +11,9 @@ import com.linrun.interview.business.vo.InterviewReportDTO;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
 import com.linrun.interview.business.vo.InterviewSessionDTO.SessionStatus;
 import com.linrun.interview.business.service.AnswerEvaluationService;
+import com.linrun.interview.business.service.InterviewOrchestrator;
 import com.linrun.interview.business.service.InterviewPersistenceService;
+import com.linrun.interview.common.model.AsyncTaskStatus;
 import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -32,6 +35,27 @@ import static org.mockito.Mockito.when;
 
 @DisplayName("面试评估消费者测试")
 class EvaluateStreamConsumerTest {
+
+  @Test
+  @DisplayName("COMPLETED 且有效报告才跳过；降级报告允许再消费")
+  void shouldSkipOnlyWhenCompletedWithValidReport() {
+    Fixture fixture = fixture();
+    InterviewSessionEntity session = session(
+        InterviewSessionEntity.SessionStatus.EVALUATED, "[]");
+    session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    when(fixture.persistenceService.findBySessionIdInternal("session-1"))
+        .thenReturn(Optional.of(session));
+    when(fixture.persistenceService.loadStoredReportInternal("session-1"))
+        .thenReturn(Optional.empty());
+
+    assertThat(fixture.consumer.shouldSkip(
+        new EvaluateStreamConsumer.EvaluatePayload("session-1", 1L))).isFalse();
+
+    when(fixture.persistenceService.loadStoredReportInternal("session-1"))
+        .thenReturn(Optional.of(report(question())));
+    assertThat(fixture.consumer.shouldSkip(
+        new EvaluateStreamConsumer.EvaluatePayload("session-1", 1L))).isTrue();
+  }
 
   @Test
   @DisplayName("报告已落库时从持久化数据恢复能力观测且不重复调用 LLM")
@@ -99,9 +123,11 @@ class EvaluateStreamConsumerTest {
     CandidateMemoryService candidateMemoryService = mock(CandidateMemoryService.class);
     InterviewSessionCache sessionCache = mock(InterviewSessionCache.class);
     ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    InterviewOrchestrator orchestrator = mock(InterviewOrchestrator.class);
+    when(orchestrator.openEvaluatingUsage(any(), any())).thenReturn(() -> { });
     EvaluateStreamConsumer consumer = new EvaluateStreamConsumer(
         redisService, sessionMapper, evaluationService, persistenceService, objectMapper,
-        llmProviderRegistry, candidateMemoryService, sessionCache);
+        llmProviderRegistry, candidateMemoryService, sessionCache, orchestrator);
     return new Fixture(consumer, evaluationService, persistenceService, objectMapper,
         llmProviderRegistry, candidateMemoryService, sessionCache);
   }

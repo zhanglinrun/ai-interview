@@ -46,6 +46,27 @@ public class AsyncConfig {
     }
 
     /**
+     * 文档解析专用线程池：批量上传后的 MinerU/Tika 转换。
+     * 并发限制为 2，避免十几个大 PDF 同时进内存把堆打满。
+     */
+    @Bean("documentConvertExecutor")
+    public Executor documentConvertExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("doc-convert-");
+        executor.setTaskDecorator(new TraceTaskDecorator());
+        executor.setKeepAliveSeconds(60);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.initialize();
+        log.info("文档解析线程池初始化完成: core=2, max=2, queue=100");
+        return executor;
+    }
+
+    /**
      * 面试出题并行执行器：简历题与方向题两路 LLM 调用并行，虚拟线程 + 并发上限。
      */
     @Bean("questionExecutor")

@@ -35,7 +35,7 @@ export const LEARNING_RESOURCES: readonly ExternalResource[] = [
     id: 'leetcode-cn',
     name: '力扣中国',
     url: 'https://leetcode.cn/',
-    description: '练习算法题和参加周赛，补充平台内 Hot 100 之外的题目。',
+    description: '练习算法题和参加周赛，作为平台外的刷题补充。',
     badge: '算法平台',
   },
   {

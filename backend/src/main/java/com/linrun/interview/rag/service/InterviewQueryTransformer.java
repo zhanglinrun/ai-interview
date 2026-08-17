@@ -28,7 +28,7 @@ import static java.util.Collections.singletonList;
  *
  * <p>与早期实现的差异（取精华弃糟粕）：
  * <ul>
- *   <li>改写策略沿用本项目现有的 {@code prompts/rag/knowledgebase-query-rewrite.txt} 模板（面试领域），不照搬汽车领域 5 策略</li>
+ *   <li>改写策略沿用 {@code prompts/rag/knowledgebase-query-rewrite.txt}</li>
  *   <li><b>亮点2</b>：接 {@code progressCallback}，改写前推 {@code 正在优化您的问题...} 进度（null 安全）</li>
  *   <li><b>亮点5</b>：改写完成用虚拟线程异步回写 {@code chat_messages.transform_content}，
  *       repository 由调用方 Spring 注入传入（弃用早期 静态 ApplicationContext 反模式）</li>
@@ -76,13 +76,24 @@ public class InterviewQueryTransformer implements QueryTransformer {
 
     @Override
     public List<Query> transform(Query query) {
-        if (!enabled || query == null || query.text() == null || query.text().isBlank()) {
+        if (query == null || query.text() == null || query.text().isBlank()) {
             return singletonList(query);
+        }
+        RagQueryTrace.Span span = RagQueryTrace.start(trace, RagQueryTrace.SPAN_REWRITE, RagQueryTrace.TYPE_SPAN);
+        if (span != null) {
+            span.input(query.text());
+        }
+        String ruleApplied = InterviewQueryRewriteRules.applyRules(query.text());
+        if (!enabled) {
+            List<Query> result = buildResultQuery(query, ruleApplied);
+            if (span != null) {
+                span.complete(result.getFirst().text());
+            }
+            return result;
         }
         if (progressCallback != null) {
             progressCallback.accept(PROGRESS_REWRITING);
         }
-        String ruleApplied = InterviewQueryRewriteRules.applyRules(query.text());
         try {
             Map<String, Object> variables = new HashMap<>();
             variables.put("question", ruleApplied);
@@ -93,7 +104,11 @@ public class InterviewQueryTransformer implements QueryTransformer {
                     .build())
                 .aiMessage().text();
             if (rewritten == null || rewritten.isBlank()) {
-                return buildResultQuery(query, ruleApplied);
+                List<Query> result = buildResultQuery(query, ruleApplied);
+                if (span != null) {
+                    span.complete(result.getFirst().text(), "DEGRADED");
+                }
+                return result;
             }
             String normalized = rewritten.trim();
             log.info("[InterviewQueryTransformer] 改写: origin='{}', rewritten='{}'",
@@ -101,10 +116,18 @@ public class InterviewQueryTransformer implements QueryTransformer {
             if (trace != null) {
                 trace.rewrittenQuestion(normalized);
             }
-            return buildResultQuery(query, normalized);
+            List<Query> result = buildResultQuery(query, normalized);
+            if (span != null) {
+                span.complete(result.getFirst().text());
+            }
+            return result;
         } catch (Exception e) {
             log.warn("[InterviewQueryTransformer] 改写失败，使用规则/原问题: {}", e.getMessage(), e);
-            return buildResultQuery(query, ruleApplied);
+            List<Query> result = buildResultQuery(query, ruleApplied);
+            if (span != null) {
+                span.complete(result.getFirst().text(), "DEGRADED");
+            }
+            return result;
         }
     }
 

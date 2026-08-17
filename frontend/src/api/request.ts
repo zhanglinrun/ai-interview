@@ -21,7 +21,7 @@ interface Result<T = unknown> {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const AI_REQUEST_TIMEOUT_MS = 180_000;
-export const UPLOAD_REQUEST_TIMEOUT_MS = 300_000;
+export const UPLOAD_REQUEST_TIMEOUT_MS = 600_000;
 
 /** 后端错误码：用户尚未配置自己的模型访问凭证。见后端 ErrorCode.USER_LLM_NOT_CONFIGURED。 */
 export const USER_LLM_NOT_CONFIGURED_CODE = 7006;
@@ -219,13 +219,20 @@ instance.interceptors.response.use(
       ?? error.response?.headers?.['X-Trace-Id']);
     // 有响应的情况：后端返回了结果（即使是错误）
     if (error.response) {
-      const { data } = error.response;
-      // 尝试解析 Result 格式
+      const { data, status } = error.response;
       if (isResult(data)) {
         return rejectResult(data);
       }
-      // 响应格式不对
-      return Promise.reject(new Error('请求失败，请重试'));
+      if (status === 413) {
+        return Promise.reject(new Error('文件超过网关上限，请压缩后重试'));
+      }
+      if (status === 400) {
+        return Promise.reject(new Error('上传请求被拒绝，请单个文件重试'));
+      }
+      if (status === 502 || status === 503 || status === 504) {
+        return Promise.reject(new Error('服务暂时不可用，请稍后重试'));
+      }
+      return Promise.reject(new Error(`请求失败（${status}），请重试`));
     }
 
     // 没有响应的情况：真正的网络错误或连接被重置
@@ -281,7 +288,7 @@ export const request = {
    */
   upload<T>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
     return instance.post(url, formData, {
-      timeout: UPLOAD_REQUEST_TIMEOUT_MS, // 5分钟，与Nginx proxy_read_timeout对齐
+      timeout: UPLOAD_REQUEST_TIMEOUT_MS,
       ...config,
     }).then(res => res.data);
   },

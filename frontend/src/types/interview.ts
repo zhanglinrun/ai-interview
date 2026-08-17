@@ -2,7 +2,7 @@
 
 export type Difficulty = 'junior' | 'mid' | 'senior';
 
-/** 仅用于兼容历史文字面试快照；新岗位实战使用版本化能力目录。 */
+/** 仅用于兼容历史文字面试快照；新会话使用版本化能力目录。 */
 export interface CategoryDTO {
   key: string;
   label: string;
@@ -19,6 +19,7 @@ export interface InterviewSession {
   questions: InterviewQuestion[];
   status: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'EVALUATED';
   sessionVersion: number;
+  createdAt?: string | null;
 }
 
 export interface InterviewQuestion {
@@ -147,6 +148,81 @@ export interface AgentTraceGroup {
   steps: AgentTraceStep[];
 }
 
+export interface AgentTraceCatalogItem {
+  sessionId: string;
+  label: string;
+  status: string | null;
+  totalQuestions: number;
+  orphanRun: boolean;
+  hasPlan: boolean;
+  stepCount: number;
+  lastState: string | null;
+  createdAt: string | null;
+}
+
+export interface AgentTraceEvent {
+  step: number;
+  questionIndex: number | null;
+  role: string;
+  action: string;
+  state: string;
+  headline: string;
+  body: string;
+  approved: boolean | null;
+  score: number | null;
+  retryHint: string | null;
+  followUpAction: string | null;
+  capability: string | null;
+  evidenceIds: string[];
+  reflexion: boolean;
+  input?: string | null;
+}
+
+export interface AgentTraceAct {
+  questionIndex: number | null;
+  title: string;
+  statePath: string[];
+  reflexionRounds: number;
+  finalQuestion: string | null;
+  followUpAction: string | null;
+  criticApproved: boolean | null;
+  events: AgentTraceEvent[];
+}
+
+export interface AgentTracePlayback {
+  sessionId: string;
+  sourceIds: string[];
+  agentMode: boolean;
+  stepCount: number;
+  reflexionRounds: number;
+  criticRejects: number;
+  groundingRejects: number;
+  toolCalls: number;
+  emptyReason: string | null;
+  emptyHint: string | null;
+  plan: AgentInterviewPlan | null;
+  acts: AgentTraceAct[];
+  spans?: AgentTraceSpan[];
+}
+
+export interface AgentTraceSpan {
+  spanId: string;
+  parentSpanId: string | null;
+  kind: 'agent' | 'chat' | 'tool' | string;
+  role: string | null;
+  action: string | null;
+  title: string;
+  input: string | null;
+  output: string | null;
+  status: string | null;
+  latencyMs: number | null;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  questionIndex: number | null;
+  children: AgentTraceSpan[];
+}
+
 export interface CandidateMemoryProfile {
   capabilityAtomId: string | null;
   topic: string;
@@ -164,4 +240,56 @@ export interface CandidateMemoryProfile {
   latestEvidenceIds: string[];
   lastSessionId: string;
   lastAt: string;
+}
+
+export type MemoryMasteryLevel = 'STRENGTH' | 'DEVELOPING' | 'WEAKNESS';
+export type MemoryVerificationState = 'PROVISIONAL' | 'VERIFIED';
+
+export interface ShortTermMemoryTurn {
+  role: 'USER' | 'ASSISTANT' | 'OTHER' | string;
+  text: string;
+}
+
+export interface ShortTermMemory {
+  sessionId: string | null;
+  skillId: string | null;
+  live: boolean;
+  windowSize: number;
+  agentMessageCount: number;
+  turns: ShortTermMemoryTurn[];
+}
+
+export interface CompressedMemoryTurn {
+  questionIndex: number;
+  topic: string;
+  followUpAction: string | null;
+  meaningfulChars: number;
+  hasReasoning: boolean;
+  hasExample: boolean;
+  hasTradeOff: boolean;
+  expressesUncertainty: boolean;
+}
+
+export interface CompressedMemory {
+  sessionId: string | null;
+  skillId: string | null;
+  turns: CompressedMemoryTurn[];
+}
+
+export interface LongTermMemoryItem {
+  topic: string;
+  capabilityAtomId: string | null;
+  masteryLevel: MemoryMasteryLevel;
+  verificationState: MemoryVerificationState;
+  averageScore: number | null;
+  observationCount: number;
+  sessionCount: number;
+  latestEvidence: string | null;
+  lastAt: string | null;
+}
+
+export interface InterviewMemory {
+  shortTerm: ShortTermMemory;
+  compressed: CompressedMemory;
+  longTerm: LongTermMemoryItem[];
 }

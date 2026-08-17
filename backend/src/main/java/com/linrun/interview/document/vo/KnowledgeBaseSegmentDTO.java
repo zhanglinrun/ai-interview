@@ -18,24 +18,47 @@ public record KnowledgeBaseSegmentDTO(
     SegmentStatus status,
     String parentChunkId,
     String brotherChunkId,
-    Integer brotherChunkIndex
+    Integer brotherChunkIndex,
+    Integer skipEmbedding,
+    Integer textLength
 ) {
   private static final int PREVIEW_MAX = 240;
 
   public static KnowledgeBaseSegmentDTO from(KnowledgeBaseSegmentEntity entity) {
     String text = entity.getText();
-    String preview = text == null ? ""
-        : (text.length() <= PREVIEW_MAX ? text : text.substring(0, PREVIEW_MAX) + "…");
+    int length = text == null ? 0 : text.length();
+    Integer skip = entity.getSkipEmbedding();
     return new KnowledgeBaseSegmentDTO(
         entity.getId(),
         entity.getChunkId(),
-        preview,
+        previewOf(text, skip, length),
         entity.getDocumentId(),
         entity.getDocumentVersion(),
         entity.getChunkOrder(),
         entity.getStatus(),
         entity.getParentChunkId(),
         entity.getBrotherChunkId(),
-        entity.getBrotherChunkIndex());
+        entity.getBrotherChunkIndex(),
+        skip == null ? 0 : skip,
+        length);
+  }
+
+  static String previewOf(String text, Integer skipEmbedding, int length) {
+    if (text == null || text.isEmpty()) {
+      return "";
+    }
+    if (skipEmbedding != null && skipEmbedding == 1) {
+      return firstContentLine(text) + "\n… 父分段全文 · " + length + " 字，不入库向量";
+    }
+    return length <= PREVIEW_MAX ? text : text.substring(0, PREVIEW_MAX) + "…";
+  }
+
+  private static String firstContentLine(String text) {
+    for (String line : text.split("\n", -1)) {
+      if (!line.isBlank()) {
+        return line.trim();
+      }
+    }
+    return "父块";
   }
 }

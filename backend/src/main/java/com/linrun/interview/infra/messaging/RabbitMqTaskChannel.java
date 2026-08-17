@@ -29,11 +29,7 @@ public class RabbitMqTaskChannel implements TaskQueueChannel {
         AsyncTaskStreamConstants.RESUME_ANALYZE_STREAM_KEY,
         AsyncTaskStreamConstants.RABBIT_RESUME_ANALYZE_ROUTING,
         AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY,
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_ROUTING,
-        AsyncTaskStreamConstants.JOB_INTERVIEW_PREPARE_STREAM_KEY,
-        AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_ROUTING,
-        AsyncTaskStreamConstants.INTERVIEW_REPORT_STREAM_KEY,
-        AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_ROUTING
+        AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_ROUTING
     );
 
     public RabbitMqTaskChannel(RabbitTemplate rabbitTemplate, ObjectMapper objectMapper) {

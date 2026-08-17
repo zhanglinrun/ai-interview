@@ -1,9 +1,9 @@
 import { AI_REQUEST_TIMEOUT_MS, request } from './request';
 
 export interface RagIntentEntities {
-  skill: string | null;
+  jobTrack: string | null;
   resumeId: number | null;
-  sessionId: number | null;
+  sessionId: string | null;
   company: string | null;
 }
 

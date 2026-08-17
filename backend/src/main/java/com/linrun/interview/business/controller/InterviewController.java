@@ -6,8 +6,11 @@ import com.linrun.interview.common.exception.ErrorCode;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.common.web.AttachmentResponseBuilder;
 import com.linrun.interview.business.service.CandidateMemoryService.CandidateMemoryProfileDTO;
+import com.linrun.interview.business.vo.InterviewMemoryView;
 import com.linrun.interview.business.vo.AgentPlanProgressDTO;
+import com.linrun.interview.business.vo.AgentTraceCatalogItemDTO;
 import com.linrun.interview.business.vo.AgentTraceGroupDTO;
+import com.linrun.interview.business.vo.AgentTracePlaybackDTO;
 import com.linrun.interview.business.vo.AnswerBody;
 import com.linrun.interview.business.vo.DraftAnswerBody;
 import com.linrun.interview.business.vo.CreateInterviewRequest;
@@ -17,7 +20,9 @@ import com.linrun.interview.business.vo.InterviewSessionDTO;
 import com.linrun.interview.business.vo.SessionListItemDTO;
 import com.linrun.interview.business.vo.SubmitAnswerRequest;
 import com.linrun.interview.business.vo.SubmitAnswerResponse;
+import com.linrun.interview.business.service.AgentTracePlaybackService;
 import com.linrun.interview.business.service.InterviewHistoryService;
+import com.linrun.interview.business.service.InterviewMemoryService;
 import com.linrun.interview.business.service.InterviewPersistenceService;
 import com.linrun.interview.business.service.InterviewSessionService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -52,6 +57,8 @@ public class InterviewController {
     private final InterviewSessionService sessionService;
     private final InterviewHistoryService historyService;
     private final InterviewPersistenceService persistenceService;
+    private final AgentTracePlaybackService agentTracePlaybackService;
+    private final InterviewMemoryService memoryService;
     
     /**
      * 列出所有面试会话（用于面试记录页）
@@ -150,6 +157,13 @@ public class InterviewController {
         sessionService.completeInterview(sessionId);
         return Result.success(null);
     }
+
+    @PostMapping("/sessions/{sessionId}/reevaluate")
+    public Result<Void> reevaluateInterview(@PathVariable String sessionId) {
+        log.info("重新评估面试: {}", sessionId);
+        sessionService.reevaluate(sessionId);
+        return Result.success(null);
+    }
     
     /**
      * 获取面试会话详情
@@ -162,12 +176,28 @@ public class InterviewController {
     }
 
     /**
+     * Agent Trace 目录：带步骤数，回放页优先选有轨迹的会话。
+     */
+    @GetMapping("/agent-traces")
+    public Result<List<AgentTraceCatalogItemDTO>> listAgentTraces() {
+        return Result.success(agentTracePlaybackService.listCatalog());
+    }
+
+    /**
      * 获取会话的 Multi-Agent 决策轨迹（Planner→Interviewer→Critic→Reflexion，按题号分组回放）
      * GET /api/v1/interviews/sessions/{sessionId}/agent-trace
      */
     @GetMapping("/sessions/{sessionId}/agent-trace")
     public Result<List<AgentTraceGroupDTO>> getAgentTrace(@PathVariable String sessionId) {
         return Result.success(sessionService.getAgentTrace(sessionId));
+    }
+
+    /**
+     * 结构化回放：解释 TurnDecision / Critic / Grounding / Reflexion。
+     */
+    @GetMapping("/sessions/{sessionId}/agent-trace/playback")
+    public Result<AgentTracePlaybackDTO> getAgentTracePlayback(@PathVariable String sessionId) {
+        return Result.success(agentTracePlaybackService.getPlayback(sessionId));
     }
 
     /**
@@ -180,7 +210,17 @@ public class InterviewController {
     }
 
     /**
-     * 获取当前用户的候选人画像（按 topic 聚合的历史薄弱点/掌握点），skillId 可选
+     * 三层记忆：短期原文、本场压缩摘要、跨场长期观测。skillId 可选。
+     * GET /api/v1/interviews/memory
+     */
+    @GetMapping("/memory")
+    public Result<InterviewMemoryView> getMemory(
+            @RequestParam(required = false) String skillId) {
+        return Result.success(memoryService.getMemory(skillId));
+    }
+
+    /**
+     * 仅长期记忆列表。新页面走 /memory；保留此接口避免旧客户端中断。
      * GET /api/v1/interviews/candidate-memory/profile
      */
     @GetMapping("/candidate-memory/profile")

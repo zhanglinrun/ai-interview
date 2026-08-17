@@ -51,11 +51,6 @@ minio:
 app:
   capability-content:
     auto-import: false
-  algorithm-content:
-    auto-import: false
-  algorithm:
-    judge0:
-      enabled: false
   ai:
     default-provider: dashscope
     embedding-dimensions: 1536
@@ -79,9 +74,40 @@ app:
         enabled: true
       hybrid:
         enabled: true
+        dual-channel: true
         mode: hybrid
       rerank:
-        provider: local
+        enabled: true
+        min-score: 0.6
+        top-n: 6
+        fail-fast-on-missing-model: false
+      parent-expand:
+        enabled: true
+        strategy: replace
+      decompose:
+        enabled: true
+      crag:
+        enabled: true
+      adaptive:
+        enabled: true
+      hyde:
+        enabled: true
+      citation:
+        enabled: true
+      history:
+        enabled: true
+      intent-recognition:
+        enabled: true
+        progress-enabled: true
+      title-summary:
+        enabled: true
+      multi-source:
+        enabled: true
+        llm-route-enabled: true
+        sql:
+          enabled: true
+        neo4j:
+          enabled: false
       search:
         short-query-length: 4
         topk-short: 20
@@ -95,7 +121,7 @@ app:
   interview:
     follow-up-count: 1
     evaluation:
-      batch-size: 8
+      batch-size: 3
   resume:
     upload-dir: ${java.io.tmpdir}/ai-interview/resumes
     allowed-types:

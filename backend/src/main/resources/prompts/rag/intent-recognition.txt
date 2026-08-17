@@ -10,13 +10,13 @@
 - OFF_TOPIC：与上述无关（仅当 related=false 时使用）
 
 实体 entities（能识别则填，不能则 null）：
-- skill：技能/方向，如 Java、前端
+- jobTrack：岗位方向/主题，如 java-backend、Java、前端
 - resumeId：简历 ID（数字）
-- sessionId：面试会话 ID（数字）
+- sessionId：面试会话 ID（字符串，短 UUID 或数字串均可）
 - company：公司名
 
 输出 JSON（不要 markdown）：
-{"related":true,"reason":"简短理由","intent":"TECH_KB","confidence":0.85,"entities":{"skill":null,"resumeId":null,"sessionId":null,"company":null}}
+{"related":true,"reason":"简短理由","intent":"TECH_KB","confidence":0.85,"entities":{"jobTrack":null,"resumeId":null,"sessionId":null,"company":null}}
 
 related=false 时：
 {"related":false,"reason":"简短理由","intent":"OFF_TOPIC","confidence":0.9,"entities":null}

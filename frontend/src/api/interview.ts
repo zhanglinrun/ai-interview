@@ -1,8 +1,11 @@
 import { AI_REQUEST_TIMEOUT_MS, request } from './request';
 import type {
   AgentPlanProgress,
+  AgentTraceCatalogItem,
   AgentTraceGroup,
+  AgentTracePlayback,
   CandidateMemoryProfile,
+  InterviewMemory,
   CreateInterviewRequest,
   CurrentQuestionResponse,
   InterviewReport,
@@ -26,9 +29,7 @@ export interface TextSessionMeta {
   evaluateStatus: EvaluateStatus | null;
   evaluateError: string | null;
   overallScore: number | null;
-  jobInterview: boolean;
-  jobDescriptionId: number | null;
-  currentStage: string | null;
+  evaluationDegraded?: boolean;
   sessionVersion: number | null;
   createdAt: string;
   completedAt: string | null;
@@ -121,6 +122,10 @@ export const interviewApi = {
     return request.post<void>(`/api/v1/interviews/sessions/${sessionId}/complete`);
   },
 
+  async reevaluateInterview(sessionId: string): Promise<void> {
+    return request.post<void>(`/api/v1/interviews/sessions/${sessionId}/reevaluate`);
+  },
+
   /**
    * 获取会话的面试大纲与进度（Multi-Agent 侧栏进度条）
    */
@@ -135,9 +140,21 @@ export const interviewApi = {
     return request.get<AgentTraceGroup[]>(`/api/v1/interviews/sessions/${sessionId}/agent-trace`);
   },
 
-  /**
-   * 获取当前用户候选人画像（按 topic 聚合的历史薄弱点/掌握点），skillId 可选
-   */
+  async listAgentTraces(): Promise<AgentTraceCatalogItem[]> {
+    return request.get<AgentTraceCatalogItem[]>('/api/v1/interviews/agent-traces');
+  },
+
+  async getAgentTracePlayback(sessionId: string): Promise<AgentTracePlayback> {
+    return request.get<AgentTracePlayback>(
+      `/api/v1/interviews/sessions/${encodeURIComponent(sessionId)}/agent-trace/playback`);
+  },
+
+  async getMemory(skillId?: string): Promise<InterviewMemory> {
+    const qs = skillId ? `?skillId=${encodeURIComponent(skillId)}` : '';
+    return request.get<InterviewMemory>(`/api/v1/interviews/memory${qs}`);
+  },
+
+  /** 仅长期记忆列表；资料页走 getMemory。 */
   async getCandidateProfile(skillId?: string): Promise<CandidateMemoryProfile[]> {
     const qs = skillId ? `?skillId=${encodeURIComponent(skillId)}` : '';
     return request.get<CandidateMemoryProfile[]>(`/api/v1/interviews/candidate-memory/profile${qs}`);

@@ -32,6 +32,9 @@ public class ElasticSearchConfiguration {
         log.info("[ElasticSearch] RestClient 初始化: host={}", properties.getHost());
         return RestClient
             .builder(HttpHost.create(properties.getHost()))
+            .setRequestConfigCallback(requestConfig -> requestConfig
+                .setConnectTimeout(3_000)
+                .setSocketTimeout(10_000))
             .build();
     }
 

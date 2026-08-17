@@ -38,4 +38,17 @@ class LlmUsageContextTest {
     }
     assertThat(LlmUsageContext.current()).isNull();
   }
+
+  @Test
+  @DisplayName("覆盖 agent 角色后能恢复")
+  void overlayAgentRoleRestores() {
+    try (var ignored = LlmUsageContext.open(1L, "s", null, "agent.question", "BYOK", null, "run-1", null, "root")) {
+      assertThat(LlmUsageContext.current().agentRole()).isNull();
+      try (var role = LlmUsageContext.overlayAgentRole("critic")) {
+        assertThat(LlmUsageContext.current().agentRole()).isEqualTo("critic");
+        assertThat(LlmUsageContext.current().agentRunId()).isEqualTo("run-1");
+      }
+      assertThat(LlmUsageContext.current().agentRole()).isNull();
+    }
+  }
 }

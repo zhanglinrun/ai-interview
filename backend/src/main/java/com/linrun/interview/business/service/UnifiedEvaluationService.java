@@ -5,6 +5,7 @@ import com.linrun.interview.ai.service.StructuredOutputInvoker;
 import com.linrun.interview.business.service.EvaluationReport.CategoryScore;
 import com.linrun.interview.business.service.EvaluationReport.QuestionEvaluation;
 import com.linrun.interview.business.service.EvaluationReport.ReferenceAnswer;
+import com.linrun.interview.common.exception.BusinessException;
 import com.linrun.interview.common.exception.ErrorCode;
 import dev.langchain4j.model.chat.ChatModel;
 import org.slf4j.Logger;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 
 /**
  * 统一面试评估服务
- * 面试场景共用的评估逻辑：分批评估 + 结构化输出 + 二次汇总 + 降级兜底
+ * 分批评估 + 结构化输出 + 二次汇总。批次失败上抛或标未评，不再把空结果写成 0 分成功。
  */
 @Service
 public class UnifiedEvaluationService {
@@ -41,8 +42,7 @@ public class UnifiedEvaluationService {
     private final int evaluationBatchSize;
     private final ResourceLoader resourceLoader;
 
-    // 批次评估结果
-    private record BatchReportDTO(
+    record BatchReportDTO(
         int overallScore,
         String overallFeedback,
         List<String> strengths,
@@ -50,18 +50,19 @@ public class UnifiedEvaluationService {
         List<QuestionEvalDTO> questionEvaluations
     ) {}
 
-    private record QuestionEvalDTO(
+    record QuestionEvalDTO(
         int questionIndex,
-        int score,
+        Integer score,
         String feedback,
         String referenceAnswer,
         List<String> keyPoints
     ) {}
 
-    private record BatchResult(
+    record BatchResult(
         int startIndex,
         int endIndex,
-        BatchReportDTO report
+        BatchReportDTO report,
+        boolean failed
     ) {}
 
     private record SummaryDTO(
@@ -83,15 +84,6 @@ public class UnifiedEvaluationService {
         this.evaluationBatchSize = Math.max(1, evaluationProperties.getBatchSize());
     }
 
-    /**
-     * 评估面试问答
-     *
-     * @param chatModel  LLM 客户端
-     * @param sessionId   会话ID（用于日志）
-     * @param qaRecords   问答记录列表
-     * @param resumeText  简历摘要（可选，可为 null）
-     * @return 评估报告
-     */
     public EvaluationReport evaluate(ChatModel chatModel,
                                      String sessionId,
                                      List<QaRecord> qaRecords,
@@ -107,7 +99,6 @@ public class UnifiedEvaluationService {
         log.info("开始评估面试: sessionId={}, 共{}题", sessionId, qaRecords.size());
 
         String resumeContext = resumeText != null ? resumeText : "";
-        // 超长简历截断，保留前 3000 字符（约 1500~2000 tokens），避免极端情况下 token 消耗过大
         if (resumeContext.length() > 3000) {
             resumeContext = resumeContext.substring(0, 3000) + "\n...(简历内容过长，已截断)";
         }
@@ -117,18 +108,15 @@ public class UnifiedEvaluationService {
                 + "\n...(参考基线过长，已截断)";
         }
 
-        // 分批评估
         List<BatchResult> batchResults = evaluateInBatches(
             chatModel, sessionId, resumeContext, qaRecords, referenceBaseline
         );
 
-        // 合并批次结果
-        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults);
+        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(qaRecords, batchResults);
         String fallbackFeedback = mergeOverallFeedback(batchResults);
         List<String> fallbackStrengths = mergeListItems(batchResults, true);
         List<String> fallbackImprovements = mergeListItems(batchResults, false);
 
-        // 二次汇总
         SummaryDTO summary = summarizeBatchResults(
             chatModel, sessionId, resumeContext, referenceBaseline, qaRecords,
             mergedEvaluations, fallbackFeedback, fallbackStrengths, fallbackImprovements
@@ -147,11 +135,33 @@ public class UnifiedEvaluationService {
                                                  String resumeContext, List<QaRecord> qaRecords,
                                                  String referenceContext) {
         List<BatchResult> results = new ArrayList<>();
+        int failedBatches = 0;
         for (int start = 0; start < qaRecords.size(); start += evaluationBatchSize) {
             int end = Math.min(start + evaluationBatchSize, qaRecords.size());
             List<QaRecord> batch = qaRecords.subList(start, end);
-            BatchReportDTO report = evaluateBatch(chatModel, sessionId, resumeContext, referenceContext, batch);
-            results.add(new BatchResult(start, end, report));
+            try {
+                BatchReportDTO report = evaluateBatch(
+                    chatModel, sessionId, resumeContext, referenceContext, batch);
+                if (!isCompleteBatch(report, batch.size())) {
+                    log.error("批次评估返回不完整: sessionId={}, expected={}, actual={}",
+                        sessionId, batch.size(),
+                        report == null || report.questionEvaluations() == null
+                            ? 0 : report.questionEvaluations().size());
+                    results.add(new BatchResult(start, end, null, true));
+                    failedBatches++;
+                } else {
+                    results.add(new BatchResult(start, end, report, false));
+                }
+            } catch (Exception e) {
+                log.error("批次评估失败: sessionId={}, batchSize={}, error={}",
+                    sessionId, batch.size(), e.getMessage(), e);
+                results.add(new BatchResult(start, end, null, true));
+                failedBatches++;
+            }
+        }
+        if (!results.isEmpty() && failedBatches == results.size()) {
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                "全部评估批次失败，未生成有效评分");
         }
         return results;
     }
@@ -169,17 +179,20 @@ public class UnifiedEvaluationService {
             (referenceContext != null && !referenceContext.isBlank()) ? referenceContext : "无");
         String userPrompt = userPromptTemplate.render(variables);
 
-        try {
-            return structuredOutputInvoker.invoke(
-                chatModel, systemPrompt, userPrompt, BatchReportDTO.class,
-                ErrorCode.INTERVIEW_EVALUATION_FAILED, "批次评估失败：", "批次评估", log
-            );
-        } catch (Exception e) {
-            log.error("批次评估失败: sessionId={}, batchSize={}, error={}",
-                sessionId, batch.size(), e.getMessage(), e);
-            // 返回零分空报告（不返回 null），让合并逻辑按 0 分兜底
-            return new BatchReportDTO(0, "批次评估失败，已按 0 分兜底。", List.of(), List.of(), List.of());
+        return structuredOutputInvoker.invoke(
+            chatModel, systemPrompt, userPrompt, BatchReportDTO.class,
+            ErrorCode.INTERVIEW_EVALUATION_FAILED, "批次评估失败：", "批次评估", log
+        );
+    }
+
+    private boolean isCompleteBatch(BatchReportDTO report, int expectedSize) {
+        if (report == null || report.questionEvaluations() == null
+            || report.questionEvaluations().size() < expectedSize) {
+            return false;
         }
+        return report.questionEvaluations().stream()
+            .limit(expectedSize)
+            .allMatch(eval -> eval != null && eval.score() != null);
     }
 
     private String buildQARecords(List<QaRecord> batch) {
@@ -187,28 +200,40 @@ public class UnifiedEvaluationService {
         for (QaRecord q : batch) {
             sb.append(String.format("问题%d [%s]: %s\n",
                 q.questionIndex() + 1, q.category(), q.question()));
+            if (Boolean.FALSE.equals(q.criticApproved())) {
+                sb.append("【未过审题，评估时降权，不得按正常题均分】\n");
+            }
             sb.append(String.format("回答: %s\n\n",
                 q.userAnswer() != null ? q.userAnswer() : "(未回答)"));
         }
         return sb.toString();
     }
 
-    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<BatchResult> batchResults) {
+    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<QaRecord> qaRecords,
+                                                           List<BatchResult> batchResults) {
         List<QuestionEvalDTO> merged = new ArrayList<>();
         for (BatchResult result : batchResults) {
             int expectedSize = result.endIndex() - result.startIndex();
-            List<QuestionEvalDTO> current =
-                result.report() != null && result.report().questionEvaluations() != null
-                    ? result.report().questionEvaluations()
-                    : List.of();
-            for (int i = 0; i < expectedSize; i++) {
-                if (i < current.size() && current.get(i) != null) {
-                    merged.add(current.get(i));
-                } else {
+            if (result.failed() || result.report() == null
+                || result.report().questionEvaluations() == null) {
+                for (int i = 0; i < expectedSize; i++) {
+                    QaRecord question = qaRecords.get(result.startIndex() + i);
                     merged.add(new QuestionEvalDTO(
-                        result.startIndex() + i, 0,
-                        "该题未成功生成评估结果，系统按 0 分处理。", "", List.of()
-                    ));
+                        question.questionIndex(), null,
+                        EvaluationQuality.UNSCORED_FEEDBACK, "", List.of()));
+                }
+                continue;
+            }
+            List<QuestionEvalDTO> current = result.report().questionEvaluations();
+            for (int i = 0; i < expectedSize; i++) {
+                QaRecord question = qaRecords.get(result.startIndex() + i);
+                QuestionEvalDTO eval = i < current.size() ? current.get(i) : null;
+                if (eval == null || eval.score() == null) {
+                    merged.add(new QuestionEvalDTO(
+                        question.questionIndex(), null,
+                        EvaluationQuality.UNSCORED_FEEDBACK, "", List.of()));
+                } else {
+                    merged.add(eval);
                 }
             }
         }
@@ -216,21 +241,34 @@ public class UnifiedEvaluationService {
     }
 
     private String mergeOverallFeedback(List<BatchResult> batchResults) {
+        long failed = batchResults.stream().filter(BatchResult::failed).count();
         String feedback = batchResults.stream()
+            .filter(result -> !result.failed())
             .map(BatchResult::report)
             .filter(r -> r != null && r.overallFeedback() != null && !r.overallFeedback().isBlank())
             .map(BatchReportDTO::overallFeedback)
             .collect(Collectors.joining("\n\n"));
+        if (failed > 0) {
+            String prefix = String.format("%d/%d 个评估批次未成功。", failed, batchResults.size());
+            return feedback.isBlank() ? prefix : prefix + "\n" + feedback;
+        }
         return feedback.isBlank() ? "本次面试已完成分批评估，但未生成有效综合评语。" : feedback;
     }
 
     private List<String> mergeListItems(List<BatchResult> batchResults, boolean strengthsMode) {
         Set<String> merged = new LinkedHashSet<>();
         for (BatchResult result : batchResults) {
+            if (result.failed()) {
+                continue;
+            }
             BatchReportDTO report = result.report();
-            if (report == null) continue;
+            if (report == null) {
+                continue;
+            }
             List<String> items = strengthsMode ? report.strengths() : report.improvements();
-            if (items == null) continue;
+            if (items == null) {
+                continue;
+            }
             items.stream()
                 .filter(item -> item != null && !item.isBlank())
                 .map(String::trim)
@@ -256,9 +294,8 @@ public class UnifiedEvaluationService {
             vars.put("fallbackImprovements", String.join("\n", fallbackImprovements));
             String summaryUser = summaryUserPromptTemplate.render(vars);
 
-            String systemWithFormat = summarySystem;
             SummaryDTO dto = structuredOutputInvoker.invoke(
-                chatModel, systemWithFormat, summaryUser, SummaryDTO.class,
+                chatModel, summarySystem, summaryUser, SummaryDTO.class,
                 ErrorCode.INTERVIEW_EVALUATION_FAILED, "总结评估失败：", "总结评估", log
             );
 
@@ -276,7 +313,9 @@ public class UnifiedEvaluationService {
 
     private List<String> sanitizeItems(List<String> primary, List<String> fallback) {
         List<String> source = (primary != null && !primary.isEmpty()) ? primary : fallback;
-        if (source == null || source.isEmpty()) return List.of();
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
         return source.stream()
             .filter(item -> item != null && !item.isBlank())
             .map(String::trim).distinct().limit(8).toList();
@@ -295,15 +334,27 @@ public class UnifiedEvaluationService {
             .count();
 
         int evalSize = evaluations != null ? evaluations.size() : 0;
+        int scoredCount = 0;
 
         for (int i = 0; i < qaRecords.size(); i++) {
             QaRecord q = qaRecords.get(i);
             QuestionEvalDTO eval = i < evalSize ? evaluations.get(i) : null;
-
             boolean hasAnswer = q.userAnswer() != null && !q.userAnswer().isBlank();
-            int score = hasAnswer && eval != null ? eval.score() : 0;
-            String feedback = eval != null && eval.feedback() != null
-                ? eval.feedback() : "该题未成功生成评估反馈。";
+            Integer score;
+            String feedback;
+            if (!hasAnswer) {
+                score = 0;
+                feedback = eval != null && eval.feedback() != null
+                    ? eval.feedback() : "该题未作答。";
+            } else if (eval != null && eval.score() != null) {
+                score = eval.score();
+                feedback = eval.feedback() != null ? eval.feedback() : "";
+                scoredCount++;
+            } else {
+                score = null;
+                feedback = eval != null && eval.feedback() != null
+                    ? eval.feedback() : EvaluationQuality.UNSCORED_FEEDBACK;
+            }
             String refAnswer = eval != null && eval.referenceAnswer() != null
                 ? eval.referenceAnswer() : "";
             List<String> keyPoints = eval != null && eval.keyPoints() != null
@@ -315,7 +366,9 @@ public class UnifiedEvaluationService {
             referenceAnswers.add(new ReferenceAnswer(
                 q.questionIndex(), q.question(), refAnswer, keyPoints
             ));
-            categoryScoresMap.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(score);
+            if (score != null) {
+                categoryScoresMap.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(score);
+            }
         }
 
         List<CategoryScore> categoryScores = categoryScoresMap.entrySet().stream()
@@ -327,15 +380,30 @@ public class UnifiedEvaluationService {
             .collect(Collectors.toList());
 
         int totalQuestions = qaRecords.size();
-        // 总分按「全部已出题目」平均（未回答记 0 分），提前交卷跳过的题会拉低总分；
-        // 只平均已答题会出现「答 2 题得 82」这种与作答率脱节的高分
-        int overallScore = answeredCount == 0 ? 0
-            : (int) Math.round(questionDetails.stream()
-                .mapToInt(QuestionEvaluation::score)
-                .average().orElse(0));
+        int overallScore;
+        if (answeredCount == 0) {
+            overallScore = 0;
+        } else {
+            double weightedSum = 0;
+            double weightTotal = 0;
+            for (int i = 0; i < questionDetails.size(); i++) {
+                Integer score = questionDetails.get(i).score();
+                if (score == null) {
+                    continue;
+                }
+                QaRecord question = qaRecords.get(i);
+                double weight = Boolean.FALSE.equals(question.criticApproved()) ? 0.5 : 1.0;
+                weightedSum += score * weight;
+                weightTotal += weight;
+            }
+            overallScore = weightTotal == 0 ? 0 : (int) Math.round(weightedSum / weightTotal);
+        }
 
         String feedbackWithRate = overallFeedback;
-        if (answeredCount < totalQuestions) {
+        if (scoredCount < answeredCount) {
+            feedbackWithRate = String.format("已评 %d/%d 题。\n%s", scoredCount, answeredCount,
+                overallFeedback != null ? overallFeedback : "");
+        } else if (answeredCount < totalQuestions) {
             feedbackWithRate = String.format("作答率 %d/%d。\n%s", answeredCount, totalQuestions,
                 overallFeedback != null ? overallFeedback : "");
         }
@@ -354,11 +422,9 @@ public class UnifiedEvaluationService {
         for (int i = 0; i < qaRecords.size(); i++) {
             QaRecord q = qaRecords.get(i);
             QuestionEvalDTO eval = i < evaluations.size() ? evaluations.get(i) : null;
-            int score = 0;
-            if (eval != null && q.userAnswer() != null && !q.userAnswer().isBlank()) {
-                score = eval.score();
+            if (eval != null && eval.score() != null) {
+                categoryScores.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(eval.score());
             }
-            categoryScores.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(score);
         }
         return categoryScores.entrySet().stream()
             .map(entry -> {
@@ -374,11 +440,13 @@ public class UnifiedEvaluationService {
         for (int i = 0; i < qaRecords.size(); i++) {
             QaRecord q = qaRecords.get(i);
             QuestionEvalDTO eval = i < evaluations.size() ? evaluations.get(i) : null;
-            int score = eval != null ? eval.score() : 0;
+            String scoreText = eval != null && eval.score() != null
+                ? String.valueOf(eval.score()) : "未评";
             String feedback = eval != null && eval.feedback() != null ? eval.feedback() : "";
             String shortQ = q.question().length() > 50 ? q.question().substring(0, 50) + "..." : q.question();
             String shortF = feedback.length() > 80 ? feedback.substring(0, 80) + "..." : feedback;
-            highlights.add(String.format("- Q%d | %s | 分数:%d | 反馈:%s", q.questionIndex() + 1, shortQ, score, shortF));
+            highlights.add(String.format("- Q%d | %s | 分数:%s | 反馈:%s",
+                q.questionIndex() + 1, shortQ, scoreText, shortF));
         }
         return highlights.stream().limit(20).collect(Collectors.joining("\n"));
     }

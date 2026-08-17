@@ -11,10 +11,26 @@ public record AgentSpanRecord(
     String status,
     Long latencyMs,
     String metadataJson,
-    Integer stepOrder
+    Integer stepOrder,
+    Integer questionIndex
 ) {
   public AgentSpanRecord {
     status = status == null || status.isBlank() ? "COMPLETED" : status;
     stepOrder = stepOrder == null ? 0 : stepOrder;
+  }
+
+  public AgentSpanRecord(
+      String spanId,
+      String parentSpanId,
+      String role,
+      String action,
+      String actionInput,
+      String observation,
+      String status,
+      Long latencyMs,
+      String metadataJson,
+      Integer stepOrder) {
+    this(spanId, parentSpanId, role, action, actionInput, observation, status,
+        latencyMs, metadataJson, stepOrder, null);
   }
 }

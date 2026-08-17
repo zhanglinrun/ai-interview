@@ -71,6 +71,36 @@ class RagCardServiceTest {
     verifyNoInteractions(interviewPersistenceService);
   }
 
+  @Test
+  @DisplayName("追问已带面试安排 ID 时不再弹日程选择卡")
+  void shouldSkipScheduleCardWhenScheduleIdAlreadyPresent() {
+    IntentRecognitionResult intent = new IntentRecognitionResult(
+        "查询日程",
+        true,
+        InterviewIntent.SCHEDULE.name(),
+        new IntentRecognitionResult.Entities(null, null, null, null));
+
+    assertThat(service.maybeScheduleSelectionCards(
+        intent, "请查询面试安排 ID=9（字节 · 后端）"))
+        .isEmpty();
+    verifyNoInteractions(interviewScheduleService);
+  }
+
+  @Test
+  @DisplayName("实体已有会话 ID 时不再弹报告选择卡")
+  void shouldSkipSessionCardWhenSessionIdPresent() {
+    IntentRecognitionResult intent = new IntentRecognitionResult(
+        "查看报告",
+        true,
+        InterviewIntent.INTERVIEW_PREP.name(),
+        new IntentRecognitionResult.Entities(null, null, "abc123def456", null));
+
+    assertThat(service.maybeInterviewSessionSelectionCards(
+        intent, "请总结这场面试，会话 ID=abc123def456（java · 88分）"))
+        .isEmpty();
+    verifyNoInteractions(interviewPersistenceService);
+  }
+
   private IntentRecognitionResult interviewPrepIntent() {
     return new IntentRecognitionResult(
         "模拟面试相关",

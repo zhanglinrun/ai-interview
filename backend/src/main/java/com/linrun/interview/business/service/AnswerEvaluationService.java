@@ -42,7 +42,8 @@ public class AnswerEvaluationService implements InterviewEvaluationPort {
         try {
             // 转为通用问答记录
             List<QaRecord> qaRecords = questions.stream()
-                .map(q -> new QaRecord(q.questionIndex(), q.question(), q.category(), q.userAnswer()))
+                .map(q -> new QaRecord(q.questionIndex(), q.question(), q.category(),
+                    q.userAnswer(), q.criticApproved()))
                 .toList();
 
             // 旧文字面试不再注入未经审核的静态 Markdown 答案。岗位实战由版本化 Rubric

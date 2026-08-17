@@ -21,6 +21,7 @@ import com.linrun.interview.business.service.CandidateMemoryService;
 import com.linrun.interview.business.service.CandidateMemoryService.CandidateMemoryProfileDTO;
 import com.linrun.interview.business.vo.AgentPlanProgressDTO;
 import com.linrun.interview.business.vo.AgentTraceGroupDTO;
+import com.linrun.interview.business.vo.AskedTurnSummary;
 import com.linrun.interview.business.vo.CreateInterviewRequest;
 import com.linrun.interview.business.vo.HistoricalQuestion;
 import com.linrun.interview.business.entity.InterviewAnswerEntity;
@@ -43,6 +44,7 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,6 +86,7 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
     private final CandidateMemoryService candidateMemoryService;
     private final AgentTraceService agentTraceService;
     private final LegacyInterviewCommandService legacyCommandService;
+    private final InterviewTurnDecisionService turnDecisionService;
 
     /**
      * 校验知识库 ID 归属当前用户，返回去重后的合法列表；
@@ -153,8 +156,9 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
                 GeneratedQuestion first = orchestrator.nextQuestion(
                     new InterviewOrchestrator.NextQuestionRequest(
                         sessionId, userId, request.llmProvider(), topicId, difficulty,
-                        0, plannedTotal, plan, null, List.of(),
-                        request.resumeId(), knowledgeBaseIds, creationIdentity));
+                        0, plannedTotal, plan, null, List.of(), List.of(),
+                        request.resumeText(), request.resumeId(), knowledgeBaseIds,
+                        creationIdentity));
                 questions = new ArrayList<>();
                 questions.add(toAgentQuestion(first, 0, null));
             } catch (Exception e) {
@@ -184,26 +188,37 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             plannedTotal = questions.size();
         }
 
-        // 保存到 Redis 缓存
-        sessionCache.saveSession(
-            sessionId,
-            userId,
-            request.resumeText() != null ? request.resumeText() : "",
-            request.resumeId(),
-            questions,
-            0,
-            SessionStatus.CREATED,
-                plannedTotal,
-                agentMode
-        );
-
-        // 保存到数据库
+        // 先 DB 后 Redis：库是真相源。落库失败不能把“幽灵会话”交给前端，
+        // 否则第一题提交会在 command 预占时查不到会话。
+        LocalDateTime createdAt = LocalDateTime.now();
         try {
-            persistenceService.saveSession(sessionId, request.resumeId(),
+            InterviewSessionEntity saved = persistenceService.saveSession(sessionId, request.resumeId(),
                 plannedTotal, questions, request.llmProvider(), topicId, difficulty,
                 knowledgeBaseIds, planJson);
+            if (saved != null && saved.getCreatedAt() != null) {
+                createdAt = saved.getCreatedAt();
+            }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            log.warn("保存面试会话到数据库失败: {}", e.getMessage(), e);
+            log.error("保存面试会话到数据库失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "创建面试会话失败，请重试", e);
+        }
+
+        try {
+            sessionCache.saveSession(
+                sessionId,
+                userId,
+                request.resumeText() != null ? request.resumeText() : "",
+                request.resumeId(),
+                questions,
+                0,
+                SessionStatus.CREATED,
+                plannedTotal,
+                agentMode
+            );
+        } catch (Exception e) {
+            log.warn("缓存面试会话失败，将从数据库恢复: sessionId={}", sessionId, e);
         }
 
         return new InterviewSessionDTO(
@@ -212,7 +227,9 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             plannedTotal,
             0,
             questions,
-            SessionStatus.CREATED
+            SessionStatus.CREATED,
+            0L,
+            createdAt
         );
     }
 
@@ -222,7 +239,7 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             return topicCatalog.buildCustomTopic(request.customCategories(),
                 request.jdText() != null ? request.jdText() : "");
         }
-        return topicCatalog.getTopic(topicId);
+        return topicCatalog.getTopic(topicId).withSourceJd(request.jdText());
     }
 
     /** 编排产出转题目 DTO：追问挂到上一道主问题 */
@@ -236,7 +253,8 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
         return InterviewQuestionDTO.createAgent(index, generated.question(), type,
             generated.isFollowUp() ? category + "（追问）" : category,
             generated.topicName(), generated.isFollowUp(), parentIndex,
-            generated.capabilityAtomId(), generated.followUpAction(), generated.evidenceIds());
+            generated.capabilityAtomId(), generated.followUpAction(), generated.evidenceIds(),
+            generated.criticApproved());
     }
 
     /**
@@ -343,7 +361,7 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
                 entity.getSessionId(),
                 entity.getUserId(),
                 entity.getResume() != null ? entity.getResume().getResumeText() : "",
-                entity.getResume() != null ? entity.getResume().getId() : null,
+                entity.getResumeId(),
                 questions,
                 entity.getCurrentQuestionIndex(),
                 status,
@@ -457,10 +475,20 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             legacyCommandService.fail(command, failure);
             throw failure;
         }
+        if (index != session.getCurrentIndex()) {
+            BusinessException failure = new BusinessException(
+                ErrorCode.INTERVIEW_INVALID_STATE, "只能提交当前题目，请刷新后重试");
+            legacyCommandService.fail(command, failure);
+            throw failure;
+        }
 
-        // 更新问题答案
+        // 更新问题答案；主问题沉淀结构信号，供本场摘要列表使用（不依赖 ChatMemory）
         InterviewQuestionDTO question = questions.get(index);
         InterviewQuestionDTO answeredQuestion = question.withAnswer(request.answer());
+        if (!question.isFollowUp()) {
+            answeredQuestion = answeredQuestion.withAnswerSignals(
+                turnDecisionService.analyze(request.answer()));
+        }
         questions.set(index, answeredQuestion);
 
         // 移动到下一题
@@ -572,16 +600,16 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             }
             InterviewPlan plan = parsePlanQuietly(entity.getInterviewPlanJson());
             List<Long> knowledgeBaseIds = parseKnowledgeBaseIdsQuietly(entity.getKnowledgeBaseIdsJson());
-            List<String> askedQuestions = questions.stream()
-                .map(InterviewQuestionDTO::question)
-                .toList();
+            List<AskedTurnSummary> askedSummaries = AskedTurnSummary.fromAnsweredMains(questions);
             String provider = "default".equals(entity.getLlmProvider()) ? null : entity.getLlmProvider();
+            String resumeText = session.getResumeText();
 
             GeneratedQuestion generated = orchestrator.nextQuestion(
                 new InterviewOrchestrator.NextQuestionRequest(
                     sessionId, session.getUserId(), provider,
                     entity.getSkillId(), entity.getDifficulty(),
-                    newIndex, plannedTotal, plan, lastAnswer, askedQuestions,
+                    newIndex, plannedTotal, plan, lastAnswer, List.of(),
+                    askedSummaries, resumeText,
                     entity.getResumeId(), knowledgeBaseIds,
                     new ExecutionIdentity(session.getUserId(), sessionId, TraceContext.getTraceId(),
                         submitRequest.commandId(), "agent-" + UUID.randomUUID(), newIndex)));
@@ -643,10 +671,17 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
         if (index < 0 || index >= questions.size()) {
             throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND, "无效的问题索引: " + index);
         }
+        if (index != session.getCurrentIndex()) {
+            throw new BusinessException(ErrorCode.INTERVIEW_INVALID_STATE, "只能暂存当前题目");
+        }
 
-        // 更新问题答案
+        // 更新问题答案；主问题沉淀结构信号，供本场摘要列表使用（不依赖 ChatMemory）
         InterviewQuestionDTO question = questions.get(index);
         InterviewQuestionDTO answeredQuestion = question.withAnswer(request.answer());
+        if (!question.isFollowUp()) {
+            answeredQuestion = answeredQuestion.withAnswerSignals(
+                turnDecisionService.analyze(request.answer()));
+        }
         questions.set(index, answeredQuestion);
 
         // 更新 Redis 缓存
@@ -762,22 +797,75 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
         // 用户触发的报告评估走 BYOK：用会话所属用户的「我的模型」（会话已按当前用户校验归属）
         ChatModel chatModel = llmProviderRegistry.getUserChatModel(session.getUserId());
 
-        InterviewReportDTO report = evaluationService.evaluateInterview(
-            chatModel,
-            sessionId,
-            session.getResumeText(),
-            questions
-        );
+        InterviewReportDTO report;
+        long startedNanos = System.nanoTime();
+        try (var ignored = orchestrator.openEvaluatingUsage(sessionId, session.getUserId())) {
+            report = evaluationService.evaluateInterview(
+                chatModel,
+                sessionId,
+                session.getResumeText(),
+                questions
+            );
+        } catch (BusinessException e) {
+            persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, e.getMessage());
+            orchestrator.recordEvaluationFailed(sessionId, session.getUserId(),
+                (System.nanoTime() - startedNanos) / 1_000_000L, e.getMessage(), true);
+            throw e;
+        } catch (Exception e) {
+            persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, e.getMessage());
+            orchestrator.recordEvaluationFailed(sessionId, session.getUserId(),
+                (System.nanoTime() - startedNanos) / 1_000_000L, e.getMessage(), true);
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                "面试评估失败：" + e.getMessage(), e);
+        }
 
-        // 先落库（DB 是真相源），再更新 Redis 缓存状态，保持与异步评估一致
         try {
             persistenceService.saveReport(sessionId, report);
+            persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.COMPLETED, null);
+            orchestrator.recordEvaluationCompleted(sessionId, session.getUserId(),
+                (System.nanoTime() - startedNanos) / 1_000_000L,
+                "score=" + report.overallScore());
         } catch (Exception e) {
-            log.warn("保存报告到数据库失败: {}", e.getMessage(), e);
+            log.error("保存报告到数据库失败: sessionId={}", sessionId, e);
+            persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED,
+                e.getMessage());
+            orchestrator.recordEvaluationFailed(sessionId, session.getUserId(),
+                (System.nanoTime() - startedNanos) / 1_000_000L, e.getMessage(), true);
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                "保存面试报告失败", e);
         }
         sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
 
         return report;
+    }
+
+    /**
+     * Clears a degraded or failed report and re-enqueues async evaluation.
+     */
+    public void reevaluate(String sessionId) {
+        CachedSession session = getOrRestoreSession(sessionId);
+        if (session.getStatus() != SessionStatus.COMPLETED
+            && session.getStatus() != SessionStatus.EVALUATED) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "面试尚未完成，无法重新评估");
+        }
+        InterviewSessionEntity entity = persistenceService.findBySessionId(sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+        if (entity.getEvaluateStatus() == AsyncTaskStatus.PROCESSING) {
+            throw new BusinessException(ErrorCode.INTERVIEW_INVALID_STATE, "评估正在进行中，请稍后再试");
+        }
+        persistenceService.prepareReevaluation(sessionId, null);
+        sessionCache.updateSessionStatus(sessionId, SessionStatus.COMPLETED);
+        try {
+            evaluateStreamProducer.sendEvaluateTask(sessionId);
+            if (session.isAgentMode()) {
+                orchestrator.recordEvaluationEnqueued(sessionId, session.getUserId());
+            }
+            log.info("重新评估任务已入队: sessionId={}", sessionId);
+        } catch (Exception e) {
+            log.error("重新评估入队失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+                "重新评估入队失败，请稍后重试", e);
+        }
     }
 
     public void deleteSession(String sessionId) {
@@ -791,7 +879,7 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
      */
     public List<AgentTraceGroupDTO> getAgentTrace(String sessionId) {
         Long userId = UserContext.requireUserId();
-        List<AgentRunStepEntity> steps = agentTraceService.listBySession(sessionId, userId);
+        List<AgentRunStepEntity> steps = agentTraceService.listBySessionKeys(userId, List.of(sessionId));
         Map<Integer, List<AgentTraceGroupDTO.AgentTraceStepDTO>> grouped = new LinkedHashMap<>();
         for (AgentRunStepEntity step : steps) {
             grouped.computeIfAbsent(step.getQuestionIndex(), k -> new ArrayList<>())
@@ -821,7 +909,7 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
     }
 
     /**
-     * 获取当前用户的候选人画像（按 topic 聚合的历史薄弱点/掌握点），skillId 可空表示全方向。
+     * 跨场长期记忆（按能力原子聚合的历史薄弱点/掌握点），skillId 可空表示全方向。
      */
     public List<CandidateMemoryProfileDTO> getCandidateProfile(String skillId) {
         Long userId = UserContext.requireUserId();
@@ -842,7 +930,10 @@ public class InterviewSessionService implements InterviewSessionLifecycle, Inter
             session.getCurrentIndex(),
             questions,
             session.getStatus(),
-            session.getSessionVersion()
+            session.getSessionVersion(),
+            persistenceService.findBySessionId(session.getSessionId())
+                .map(InterviewSessionEntity::getCreatedAt)
+                .orElse(null)
         );
     }
 

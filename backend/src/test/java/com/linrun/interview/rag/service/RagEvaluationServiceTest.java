@@ -94,7 +94,7 @@ class RagEvaluationServiceTest {
         assertThat(item.ndcg()).isEqualTo(0.6309);
         assertThat(item.ndcg()).isLessThan(1.0);
         assertThat(item.retrievalRecall()).isEqualTo(1.0);
-        assertThat(item.retrievalPrecision()).isEqualTo(0.25);
+        assertThat(item.retrievalPrecision()).isEqualTo(0.75);
         assertThat(item.citationHitRate()).isEqualTo(item.retrievalRecall());
         assertThat(item.citationCoverage()).isEqualTo(item.retrievalPrecision());
     }
@@ -150,6 +150,74 @@ class RagEvaluationServiceTest {
 
         assertThat(response.ndcg()).isEqualTo(1.0);
         assertThat(response.retrievalPrecision()).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("同一片段命中多个新证据时 nDCG 应按证据数加分并封顶为 1")
+    void multipleKeywordsInFirstChunkGiveFullNdcg() {
+        KnowledgeBaseQueryService queryService = mock(KnowledgeBaseQueryService.class);
+        when(queryService.retrieveForEvaluation(any(), any())).thenReturn(List.of(
+            segment("c1", "查询在缓存中没有命中，因为数据压根不存在", 0.95d),
+            segment("c2", "无关内容", 0.80d)
+        ));
+        RagEvaluationService service = new RagEvaluationService(
+            queryService, successfulRunMapper(), new ObjectMapper());
+
+        RagEvalResponse response = evaluate(service, new RagEvalRequest.Item(
+            "什么是缓存穿透，如何防止",
+            List.of("不存在", "没有命中"),
+            List.of()));
+
+        assertThat(response.retrievalRecall()).isEqualTo(1.0);
+        assertThat(response.ndcg()).isEqualTo(1.0);
+        assertThat(response.items().getFirst().firstHitRank()).isEqualTo(1);
+        assertThat(response.retrievalPrecision()).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("后续片段即使没有新词，只要仍含期望词就计入精确率")
+    void laterChunksWithSeenKeywordsStillCountForPrecision() {
+        KnowledgeBaseQueryService queryService = mock(KnowledgeBaseQueryService.class);
+        when(queryService.retrieveForEvaluation(any(), any())).thenReturn(List.of(
+            segment("c1", "查询在缓存中没有命中，因为数据压根不存在", 0.95d),
+            segment("c2", "这种查询不存在的数据会打到数据库", 0.90d)
+        ));
+        RagEvaluationService service = new RagEvaluationService(
+            queryService, successfulRunMapper(), new ObjectMapper());
+
+        RagEvalResponse response = evaluate(service, new RagEvalRequest.Item(
+            "什么是缓存穿透，如何防止",
+            List.of("不存在", "没有命中"),
+            List.of()));
+
+        assertThat(response.retrievalRecall()).isEqualTo(1.0);
+        assertThat(response.ndcg()).isEqualTo(1.0);
+        assertThat(response.retrievalPrecision()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("关键词别名用 | 连接时命中任一写法即可")
+    void keywordAliasesMatchAnyVariant() {
+        KnowledgeBaseQueryService queryService = mock(KnowledgeBaseQueryService.class);
+        when(queryService.retrieveForEvaluation(any(), any())).thenReturn(List.of(
+            segment("c1", "缓存穿透后可以对不存在的 key 做缓存空值", 0.95d),
+            segment("c2", "无关内容", 0.80d)
+        ));
+        RagEvaluationService service = new RagEvaluationService(
+            queryService, successfulRunMapper(), new ObjectMapper());
+
+        RagEvalResponse response = evaluate(service, new RagEvalRequest.Item(
+            "什么是缓存穿透，如何防止",
+            List.of("空值缓存|缓存空值|空对象", "布隆过滤器|bloom"),
+            List.of()));
+
+        RagEvalResponse.ItemResult item = response.items().getFirst();
+        assertThat(item.hit()).isTrue();
+        assertThat(item.firstHitRank()).isEqualTo(1);
+        assertThat(item.retrievalRecall()).isEqualTo(0.5);
+        assertThat(item.matchedKeywords()).containsExactly("空值缓存|缓存空值|空对象");
+        assertThat(item.missingKeywords()).containsExactly("布隆过滤器|bloom");
+        assertThat(item.expectedEvidenceCount()).isEqualTo(2);
     }
 
     @Test

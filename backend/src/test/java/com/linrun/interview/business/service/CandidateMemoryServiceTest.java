@@ -24,7 +24,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@DisplayName("候选人能力画像测试")
+@DisplayName("跨场长期记忆测试")
 @SuppressWarnings("unchecked")
 class CandidateMemoryServiceTest {
 

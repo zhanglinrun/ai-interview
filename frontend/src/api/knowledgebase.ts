@@ -171,6 +171,8 @@ export interface KnowledgeBaseSegment {
   parentChunkId: string | null;
   brotherChunkId: string | null;
   brotherChunkIndex: number | null;
+  skipEmbedding?: number | null;
+  textLength?: number | null;
 }
 
 export interface KnowledgeBaseSegmentPage {

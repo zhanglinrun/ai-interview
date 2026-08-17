@@ -115,13 +115,8 @@ $keyV1Tables = @(
   'evidence_snapshots',
   'github_repository_bindings',
   'github_code_evidence',
-  'algorithm_content_imports',
-  'coding_problems',
-  'coding_problem_versions',
-  'judge_submissions',
   'interview_evidence_reports',
   'capability_profiles',
-  'training_tasks',
   'llm_usage_records'
 )
 

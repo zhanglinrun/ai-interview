@@ -1,24 +1,61 @@
-import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { EmptyState, LoadingState } from '../components/PageState';
 import { getErrorMessage } from '../api/request';
 import { ragTraceApi, type RagTraceDetail, type RagTraceRun } from '../api/ragTrace';
-import { unifiedTraceApi, type UnifiedTrace } from '../api/unifiedTrace';
+import { formatDate } from '../utils/date';
+import {
+  allObservations,
+  buildRagTraceTree,
+  formatLatency,
+  labelRunStatus,
+  observationTypeLabel,
+  waterfallShare,
+  type ObservationType,
+  type RagTraceTree,
+  type TraceDocument,
+  type TraceField,
+  type TraceObservation,
+} from './ragTraceFlow';
 
-function short(value: string | null | undefined, length = 220) {
-  if (!value) return '—';
+type DetailTab = 'fields' | 'input' | 'output' | 'documents';
+
+function short(value: string | null | undefined, length = 56) {
+  if (!value) return '（无问题）';
   return value.length > length ? `${value.slice(0, length)}…` : value;
+}
+
+function typeBadge(type: ObservationType): string {
+  if (type === 'retriever') return 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200';
+  if (type === 'generation') return 'bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200';
+  if (type === 'chain') return 'bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900';
+  return 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300';
+}
+
+function statusDot(status: TraceObservation['status']): string {
+  if (status === 'fail') return 'bg-rose-500';
+  if (status === 'warn') return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
+
+function defaultTab(observation: TraceObservation): DetailTab {
+  if (observation.fields.length > 0) return 'fields';
+  if (observation.type === 'retriever' && observation.documents.length > 0) return 'documents';
+  return 'output';
 }
 
 export default function RagTracePage() {
   const [runs, setRuns] = useState<RagTraceRun[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<RagTraceDetail | null>(null);
-  const [unified, setUnified] = useState<UnifiedTrace | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState('');
+  const [activeId, setActiveId] = useState('root');
+  const [tab, setTab] = useState<DetailTab>('fields');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     setLoading(true);
@@ -28,7 +65,7 @@ export default function RagTracePage() {
       setRuns(next);
       setSelectedId(prev => prev && next.some(item => item.traceId === prev) ? prev : (next[0]?.traceId ?? ''));
     } catch (err) {
-      setError(getErrorMessage(err, '加载 RAG Trace 失败'));
+      setError(getErrorMessage(err, '加载提问记录失败'));
     } finally {
       setLoading(false);
     }
@@ -39,82 +76,368 @@ export default function RagTracePage() {
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
-      setUnified(null);
       return;
     }
     setLoadingDetail(true);
-    Promise.all([
-      ragTraceApi.get(selectedId),
-      unifiedTraceApi.get(selectedId).catch(() => null),
-    ])
-      .then(([nextDetail, nextUnified]) => {
-        setDetail(nextDetail);
-        setUnified(nextUnified);
+    ragTraceApi.get(selectedId)
+      .then(next => {
+        setDetail(next);
+        setActiveId('root');
+        setCollapsed({});
+        setTab('fields');
       })
-      .catch(err => setError(getErrorMessage(err, '加载 Trace 详情失败')))
+      .catch(err => setError(getErrorMessage(err, '加载提问记录失败')))
       .finally(() => setLoadingDetail(false));
   }, [selectedId]);
 
+  const tree = useMemo(() => detail ? buildRagTraceTree(detail) : null, [detail]);
+  const current = tree
+    ? allObservations(tree).find(item => item.id === activeId) ?? tree.root
+    : null;
+
+  useEffect(() => {
+    if (!current) return;
+    setTab(defaultTab(current));
+  }, [current?.id]);
+
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="mx-auto max-w-[88rem] space-y-4">
       <PageHeader
-        eyebrow="RAG Observability"
-        title="RAG 阶段 Trace"
-        description="按权限隔离回放意图、改写、数据源路由、候选检索、重排、引用和最终回答，便于定位降级与回归。"
+        eyebrow="知识库问答"
+        title="问答过程回放"
+        description="一次提问是一条 Trace。中间是执行树，右边是当前步骤的字段、输入和输出。检索下的多路是同一次问答里的多次召回，不是缺步骤。"
       />
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-[300px] flex-1 space-y-1 text-sm text-stone-600 dark:text-stone-300">
-          <span>选择 Trace</span>
-          <select className="dark-input w-full px-3 py-2 text-sm" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
-            {runs.length === 0 && <option value="">暂无 Trace</option>}
-            {runs.map(run => <option key={run.traceId} value={run.traceId}>{run.traceId.slice(0, 12)} · {short(run.question, 70)}</option>)}
-          </select>
-        </label>
-        <button type="button" onClick={() => void load()} className="btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm">
-          <RefreshCw className="h-4 w-4" />刷新
-        </button>
-      </div>
-      {error && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{error}</div>}
-      {loading ? <LoadingState className="flex min-h-[30vh] items-center justify-center" /> : !detail ? (
-        <EmptyState title="暂无 RAG Trace" description="先在知识库问答发送一个问题，回答完成后 Trace 会出现在这里。" />
-      ) : loadingDetail ? <LoadingState className="flex min-h-[30vh] items-center justify-center" /> : (
-        <div className="space-y-4">
-          <section className="surface-card grid gap-3 p-4 sm:grid-cols-4">
-            <div><p className="text-xs text-stone-500">问题</p><p className="mt-1 text-sm text-stone-900 dark:text-white">{detail.run.question}</p></div>
-            <div><p className="text-xs text-stone-500">路由</p><p className="mt-1 text-sm text-stone-900 dark:text-white">{detail.run.routeSource ?? '—'} · {detail.run.routeIntent ?? '—'}</p></div>
-            <div><p className="text-xs text-stone-500">耗时</p><p className="mt-1 text-sm text-stone-900 dark:text-white">{detail.run.latencyMs ?? 0} ms</p></div>
-            <div><p className="text-xs text-stone-500">状态</p><p className="mt-1 text-sm text-emerald-600">{detail.run.status}</p></div>
-          </section>
-          {unified && <section className="surface-card space-y-3 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-stone-900 dark:text-white">统一 Trace 关联</h2>
-              <span className="text-xs text-stone-500">Agent {unified.agentRuns.length} · RAG {unified.ragRuns.length} · Tool {unified.toolRuns.length} · LLM {unified.llmUsage.length}</span>
+
+      {error && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <LoadingState className="flex min-h-[40vh] items-center justify-center" />
+      ) : runs.length === 0 ? (
+        <EmptyState title="还没有提问记录" description="先在知识库问答问完一题。回答保存后，这里会出现整次问答的执行树。" />
+      ) : (
+        <div className="grid min-h-[38rem] gap-3 lg:grid-cols-[220px_minmax(360px,440px)_minmax(0,1fr)]">
+          <TraceList
+            runs={runs}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onRefresh={() => void load()}
+          />
+          {loadingDetail || !tree || !current ? (
+            <div className="surface-card flex min-h-[20rem] items-center justify-center lg:col-span-2">
+              <LoadingState />
             </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              {unified.agentRuns.map(run => <div key={run.agentRunId} className="rounded-lg border border-stone-100 p-3 text-xs dark:border-stone-800"><div className="flex justify-between"><span>Agent · {run.operation ?? 'interview'}</span><span>{run.status} · {run.latencyMs ?? 0} ms</span></div><p className="mt-1 text-stone-500">runId: {run.agentRunId}{run.degradedReason ? ` · ${run.degradedReason}` : ''}</p></div>)}
-              {unified.ragRuns.map(run => <div key={run.ragRunId} className="rounded-lg border border-stone-100 p-3 text-xs dark:border-stone-800"><div className="flex justify-between"><span>RAG · {run.ragRunId}</span><span>{run.status} · {run.latencyMs ?? 0} ms</span></div>{run.degradedReason && <p className="mt-1 text-amber-600">降级：{run.degradedReason}</p>}</div>)}
-              {unified.toolRuns.map(tool => <div key={tool.toolRunId} className="rounded-lg border border-stone-100 p-3 text-xs dark:border-stone-800"><div className="flex justify-between"><span>Tool · {tool.toolName}</span><span>{tool.status} · {tool.latencyMs ?? 0} ms</span></div><p className="mt-1 text-stone-500">{tool.ragRunId ? `ragRunId: ${tool.ragRunId}` : '未关联 RAG Run'}{tool.cacheHit ? ' · cache hit' : ''}</p></div>)}
-            </div>
-          </section>}
-          <section className="surface-card space-y-3 p-4">
-            <h2 className="text-sm font-semibold text-stone-900 dark:text-white">阶段时间线</h2>
-            <ol className="space-y-2">
-              {detail.stages.map((stage, index) => <li key={stage.id ?? index} className="rounded-lg border border-stone-100 p-3 dark:border-stone-800">
-                <div className="flex flex-wrap items-center gap-2"><span className="rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-950/40 dark:text-primary-200">{stage.stage}</span><span className="text-xs text-stone-400">{stage.status} · {stage.latencyMs ?? 0} ms</span>{stage.dataSource && <span className="text-xs text-indigo-500">{stage.dataSource}</span>} {stage.provider && <span className="text-xs text-stone-500">{stage.provider}/{stage.modelName ?? 'default'}</span>}</div>
-                <p className="mt-1 text-xs text-stone-500">输入：{short(stage.inputSummary)}</p><p className="mt-1 text-xs text-stone-600 dark:text-stone-300">输出：{short(stage.outputSummary)}</p>
-                {(stage.filterJson || stage.fallbackReason) && <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">{stage.fallbackReason ? `降级：${stage.fallbackReason}` : `过滤：${short(stage.filterJson, 160)}`}</p>}
-              </li>)}
-            </ol>
-          </section>
-          <section className="surface-card space-y-3 p-4">
-            <h2 className="text-sm font-semibold text-stone-900 dark:text-white">候选与引用</h2>
-            <p className="text-xs text-stone-500">候选 {detail.candidates.length} 条 · 引用 {detail.citations.length} 条</p>
-            <div className="grid gap-2 md:grid-cols-2">{detail.candidates.slice(0, 12).map(item => <div key={item.id} className="rounded-lg border border-stone-100 p-3 text-xs dark:border-stone-800"><div className="flex justify-between gap-2"><span>{item.stage} · #{item.rankNo ?? '—'}</span><span>原始 {item.score?.toFixed(3) ?? '—'} / 重排 {item.rerankScore?.toFixed(3) ?? '—'}</span></div><p className="mt-1 text-stone-500">{short(item.snippet, 180)}</p></div>)}</div>
-            <div className="flex flex-wrap gap-2">{detail.citations.map(item => <span key={item.id} className={`rounded-full px-2 py-1 text-xs ${item.valid && item.cited ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'}`}>[{item.citationIndex}] {item.valid ? '有效' : '无效'} · {item.sourceLocator ?? '—'}</span>)}</div>
-          </section>
-          {detail.answer && <section className="surface-card space-y-2 p-4"><h2 className="text-sm font-semibold text-stone-900 dark:text-white">回答快照</h2><div className="flex gap-3 text-xs text-stone-500"><span>grounded: {detail.answer.groundedStatus ?? '—'}</span><span>置信度: {detail.answer.confidence == null ? '—' : `${(detail.answer.confidence * 100).toFixed(0)}%`}</span><span>tokens: {detail.answer.tokenCount ?? 0}</span></div><p className="whitespace-pre-wrap text-sm text-stone-700 dark:text-stone-200">{detail.answer.answer}</p></section>}
+          ) : (
+            <>
+              <RunTree
+                tree={tree}
+                activeId={current.id}
+                collapsed={collapsed}
+                onSelect={setActiveId}
+                onToggle={id => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }))}
+              />
+              <ObservationPane observation={current} tab={tab} onTab={setTab} />
+            </>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+function TraceList({
+  runs,
+  selectedId,
+  onSelect,
+  onRefresh,
+}: {
+  runs: RagTraceRun[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="surface-card flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2 dark:border-stone-800">
+        <h2 className="text-xs font-semibold tracking-wide text-stone-500">Traces</h2>
+        <button type="button" onClick={onRefresh} className="text-stone-400 hover:text-stone-700 dark:hover:text-stone-200" aria-label="刷新">
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <ul className="max-h-[36rem] flex-1 overflow-y-auto">
+        {runs.map(run => {
+          const selected = run.traceId === selectedId;
+          return (
+            <li key={run.traceId}>
+              <button
+                type="button"
+                onClick={() => onSelect(run.traceId)}
+                className={`w-full border-b border-stone-100 px-3 py-2.5 text-left dark:border-stone-800 ${
+                  selected ? 'bg-primary-50 dark:bg-primary-950/30' : 'hover:bg-stone-50 dark:hover:bg-stone-800/60'
+                }`}
+              >
+                <p className="line-clamp-2 text-sm text-stone-900 dark:text-stone-100">{short(run.question, 72)}</p>
+                <p className="mt-1 text-[11px] text-stone-400">
+                  {formatLatency(run.latencyMs)}
+                  {' · '}
+                  {labelRunStatus(run.status)}
+                  {' · '}
+                  {formatDate(run.createdAt)}
+                </p>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function RunTree({
+  tree,
+  activeId,
+  collapsed,
+  onSelect,
+  onToggle,
+}: {
+  tree: RagTraceTree;
+  activeId: string;
+  collapsed: Record<string, boolean>;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <section className="surface-card flex flex-col overflow-hidden">
+      <div className="border-b border-stone-100 px-3 py-2 dark:border-stone-800">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold tracking-wide text-stone-500">Run tree</h2>
+          <Link to="/knowledgebase/chat" className="text-[11px] text-primary-700 underline underline-offset-2 dark:text-primary-300">
+            去问一题
+          </Link>
+        </div>
+        <p className="mt-1 text-[11px] leading-4 text-stone-400">{tree.note}</p>
+      </div>
+      <ol className="flex-1 space-y-0.5 overflow-y-auto p-2">
+        <TreeRow
+          observation={tree.root}
+          activeId={activeId}
+          depth={0}
+          totalMs={tree.totalMs}
+          collapsed={collapsed}
+          onSelect={onSelect}
+          onToggle={onToggle}
+        />
+        {tree.children.map(child => (
+          <TreeRow
+            key={child.id}
+            observation={child}
+            activeId={activeId}
+            depth={1}
+            totalMs={tree.totalMs}
+            collapsed={collapsed}
+            onSelect={onSelect}
+            onToggle={onToggle}
+          />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function TreeRow({
+  observation,
+  activeId,
+  depth,
+  totalMs,
+  collapsed,
+  onSelect,
+  onToggle,
+}: {
+  observation: TraceObservation;
+  activeId: string;
+  depth: number;
+  totalMs: number;
+  collapsed: Record<string, boolean>;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
+}) {
+  const active = activeId === observation.id;
+  const hasChildren = observation.children.length > 0;
+  const open = !collapsed[observation.id];
+  const bar = waterfallShare(observation.offsetMs, observation.latencyMs, totalMs);
+
+  return (
+    <li>
+      <div className="flex items-center gap-1">
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onToggle(observation.id)}
+            className="shrink-0 rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800"
+            aria-label={open ? '收起' : '展开'}
+            style={{ marginLeft: depth * 12 }}
+          >
+            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" style={{ marginLeft: depth * 12 }} />
+        )}
+        <button
+          type="button"
+          onClick={() => onSelect(observation.id)}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
+            active ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900' : 'hover:bg-stone-50 dark:hover:bg-stone-800/70'
+          }`}
+        >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(observation.status)}`} />
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${active ? 'bg-white/15' : typeBadge(observation.type)}`}>
+            {observationTypeLabel(observation.type)}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-xs">{observation.title}</span>
+          <span className="relative hidden h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700 sm:block">
+            <span
+              className={`absolute top-0 h-full rounded-full ${
+                observation.type === 'generation' ? 'bg-violet-400' : observation.type === 'retriever' ? 'bg-sky-400' : 'bg-stone-400'
+              }`}
+              style={{ left: `${bar.left * 100}%`, width: `${bar.width * 100}%` }}
+            />
+          </span>
+          <span className={`w-14 shrink-0 text-right text-[11px] tabular-nums ${active ? 'opacity-70' : 'text-stone-400'}`}>
+            {observation.latencyLabel}
+          </span>
+        </button>
+      </div>
+      {hasChildren && open && (
+        <ol className="mt-0.5 space-y-0.5">
+          {observation.children.map(child => (
+            <TreeRow
+              key={child.id}
+              observation={child}
+              activeId={activeId}
+              depth={depth + 1}
+              totalMs={totalMs}
+              collapsed={collapsed}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+function ObservationPane({
+  observation,
+  tab,
+  onTab,
+}: {
+  observation: TraceObservation;
+  tab: DetailTab;
+  onTab: (tab: DetailTab) => void;
+}) {
+  const tabs: { id: DetailTab; label: string; hidden?: boolean }[] = [
+    { id: 'fields', label: '字段', hidden: observation.fields.length === 0 },
+    { id: 'input', label: '输入' },
+    { id: 'output', label: '输出' },
+    { id: 'documents', label: `文档（${observation.documents.length}）`, hidden: observation.documents.length === 0 },
+  ];
+
+  return (
+    <section className="surface-card flex min-h-[20rem] flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2 dark:border-stone-800">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeBadge(observation.type)}`}>
+              {observationTypeLabel(observation.type)}
+            </span>
+            <h2 className="truncate text-sm text-stone-900 dark:text-white">{observation.title}</h2>
+          </div>
+          <p className="mt-1 text-[11px] text-stone-400">
+            {observation.latencyLabel}
+            {observation.summary ? ` · ${observation.summary}` : ''}
+          </p>
+        </div>
+        <div className="flex gap-1">
+          {tabs.filter(item => !item.hidden).map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onTab(item.id)}
+              className={`rounded px-2 py-1 text-xs ${
+                tab === item.id
+                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                  : 'text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3">
+        {tab === 'documents' ? (
+          <DocumentList documents={observation.documents} />
+        ) : tab === 'fields' ? (
+          <FieldList fields={observation.fields} />
+        ) : (
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-stone-700 dark:text-stone-200">
+            {tab === 'input' ? observation.input : observation.output}
+          </pre>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FieldList({ fields }: { fields: TraceField[] }) {
+  if (fields.length === 0) {
+    return <p className="text-sm text-stone-400">这一步没有结构化字段，看输入 / 输出。</p>;
+  }
+  return (
+    <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-2.5">
+      {fields.map(field => (
+        <div key={`${field.label}-${field.value}`} className="contents">
+          <dt className="pt-0.5 text-xs text-stone-400">{field.label}</dt>
+          <dd className="whitespace-pre-wrap break-words text-sm leading-6 text-stone-800 dark:text-stone-100">
+            {field.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function DocumentList({ documents }: { documents: TraceDocument[] }) {
+  if (documents.length === 0) {
+    return <p className="text-sm text-stone-400">这一步没有文档输出。</p>;
+  }
+  return (
+    <ol className="space-y-2">
+      {documents.map(doc => (
+        <li key={`${doc.rank}-${doc.content.slice(0, 24)}`} className="rounded-lg border border-stone-100 p-3 dark:border-stone-800">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-500">
+            <span className="font-mono">#{doc.rank}</span>
+            {doc.score != null && <span>检索分 {doc.score.toFixed(2)}</span>}
+            {doc.rerankScore != null && <span>精排分 {doc.rerankScore.toFixed(2)}</span>}
+            {doc.source && <span className="truncate">{doc.source}</span>}
+            <span className={`ml-auto rounded-full px-2 py-0.5 ${
+              !doc.valid ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200'
+                : doc.cited ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
+                  : 'bg-stone-100 text-stone-500 dark:bg-stone-800'
+            }`}>
+              {!doc.valid ? '无效' : doc.cited ? '已引用' : '未引用'}
+            </span>
+            {doc.junk && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">目录噪声</span>}
+          </div>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-700 dark:text-stone-200">
+            {doc.content || '（空片段）'}
+          </p>
+        </li>
+      ))}
+    </ol>
   );
 }

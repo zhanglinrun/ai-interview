@@ -121,6 +121,37 @@ public class InterviewPersistenceService {
   }
 
   /**
+   * Clears a previous report so evaluation can run again. Keeps answers.
+   */
+  @Transactional(rollbackFor = Exception.class)
+  public void prepareReevaluation(String sessionId, String evaluateError) {
+    InterviewSessionEntity session = findSessionEntityBySessionId(sessionId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+    session.setOverallScore(null);
+    session.setOverallFeedback(null);
+    session.setStrengthsJson(null);
+    session.setImprovementsJson(null);
+    session.setReferenceAnswersJson(null);
+    session.setStatus(InterviewSessionEntity.SessionStatus.COMPLETED);
+    session.setEvaluateStatus(AsyncTaskStatus.PENDING);
+    if (evaluateError != null && evaluateError.length() > 500) {
+      session.setEvaluateError(evaluateError.substring(0, 500));
+    } else {
+      session.setEvaluateError(evaluateError);
+    }
+    MapperUtils.save(interviewSessionMapper, session);
+
+    for (InterviewAnswerEntity answer : findAnswersBySessionId(sessionId)) {
+      answer.setScore(null);
+      answer.setFeedback(null);
+      answer.setReferenceAnswer(null);
+      answer.setKeyPointsJson(null);
+      MapperUtils.save(interviewAnswerMapper, answer);
+    }
+    log.info("已清空评估报告，等待重评: sessionId={}", sessionId);
+  }
+
+  /**
    * 更新会话题目列表（Agent 编排模式动态出题后追加新题）。
    */
   @Transactional(rollbackFor = Exception.class)
@@ -371,8 +402,17 @@ public class InterviewPersistenceService {
         questionDetails.add(new InterviewReportDTO.QuestionEvaluation(
             q.questionIndex(), q.question(), category,
             ans != null ? ans.getUserAnswer() : null,
-            ans != null && ans.getScore() != null ? ans.getScore() : 0,
+            ans != null ? ans.getScore() : null,
             ans != null ? ans.getFeedback() : null));
+      }
+      boolean anyAnswered = questionDetails.stream()
+          .anyMatch(detail -> detail.userAnswer() != null && !detail.userAnswer().isBlank());
+      List<String> questionFeedbacks = questionDetails.stream()
+          .map(InterviewReportDTO.QuestionEvaluation::feedback)
+          .toList();
+      if (!EvaluationQuality.isValidStoredReport(
+          session.getOverallFeedback(), anyAnswered, questionFeedbacks)) {
+        return Optional.empty();
       }
 
       return Optional.of(new InterviewReportDTO(
@@ -426,6 +466,9 @@ public class InterviewPersistenceService {
       List<InterviewReportDTO.QuestionEvaluation> details) {
     Map<String, int[]> agg = new LinkedHashMap<>();
     for (InterviewReportDTO.QuestionEvaluation d : details) {
+      if (d.score() == null) {
+        continue;
+      }
       String category = d.category() == null || d.category().isBlank() ? "综合" : d.category();
       int[] sumCount = agg.computeIfAbsent(category, k -> new int[2]);
       sumCount[0] += d.score();
@@ -441,7 +484,8 @@ public class InterviewPersistenceService {
   }
 
   public Optional<InterviewSessionEntity> findBySessionId(String sessionId) {
-    return findSessionByUserAndSessionId(UserContext.requireUserId(), sessionId);
+    return findSessionByUserAndSessionId(UserContext.requireUserId(), sessionId)
+      .map(this::attachResumeIfPresent);
   }
 
   public Optional<InterviewSessionEntity> findBySessionIdInternal(String sessionId) {
@@ -486,11 +530,18 @@ public class InterviewPersistenceService {
     Long userId = UserContext.requireUserId();
     InterviewSessionEntity session = findSessionByUserAndSessionId(userId, sessionId)
       .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
-    jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
-        userId, session.getId(), session.getSessionId());
-    interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
-        .eq(InterviewSessionEntity::getId, session.getId())
-        .eq(InterviewSessionEntity::getUserId, userId));
+    try {
+      jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
+          userId, session.getId(), session.getSessionId());
+      interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
+          .eq(InterviewSessionEntity::getId, session.getId())
+          .eq(InterviewSessionEntity::getUserId, userId));
+    } catch (BusinessException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+          "删除面试记录失败：" + JobInterviewSessionDeletionService.rootMessage(e), e);
+    }
     log.info("已删除面试会话: sessionId={}", sessionId);
   }
 
@@ -505,7 +556,8 @@ public class InterviewPersistenceService {
         .eq(InterviewSessionEntity::getResumeId, resumeId)
         .in(InterviewSessionEntity::getStatus, unfinishedStatuses)
         .orderByDesc(InterviewSessionEntity::getCreatedAt)
-        .last("LIMIT 1"));
+        .last("LIMIT 1"))
+      .map(this::attachResumeIfPresent);
   }
 
   public void ensureResumeAccessible(Long resumeId) {
@@ -598,8 +650,11 @@ public class InterviewPersistenceService {
 
   private InterviewSessionEntity attachResumeIfPresent(InterviewSessionEntity session) {
     if (session.getResumeId() != null) {
-      ResumeEntity resume = resumeEntityMapper.selectById(session.getResumeId());
-      session.setResume(resume);
+      // 只挂当前会话所属用户的简历；找不到时保留 resumeId，避免 setResume(null) 清掉外键。
+      EntityQueries.byUserAndId(
+          resumeEntityMapper, session.getUserId(), session.getResumeId(),
+          ResumeEntity::getUserId, ResumeEntity::getId)
+        .ifPresent(session::setResume);
     }
     return session;
   }

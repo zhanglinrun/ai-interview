@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.interview.evaluation")
 public class InterviewEvaluationProperties {
 
-    private int batchSize = 8;
+    private int batchSize = 3;
     private String systemPromptPath = "classpath:prompts/interview/evaluation/system.txt";
     private String userPromptPath = "classpath:prompts/interview/evaluation/user.txt";
     private String summarySystemPromptPath = "classpath:prompts/interview/evaluation/summary-system.txt";

@@ -45,8 +45,8 @@ public class Text2SqlContentRetriever implements Text2SqlRetrieverPort {
   private static final Set<String> USER_SCOPED_TABLES = Set.of(
       "users", "documents", "document_versions", "document_segments",
       "resumes", "resume_analyses", "interview_sessions", "interview_answers",
-      "chat_sessions", "chat_messages", "chat_memories", "rag_query_traces", "coding_attempts",
-      "judge_submissions", "training_tasks", "capability_profiles");
+      "chat_sessions", "chat_messages", "chat_memories", "rag_query_traces",
+      "capability_profiles");
 
   private final ChatModel chatModel;
   private final JdbcTemplate jdbcTemplate;
@@ -186,13 +186,13 @@ public class Text2SqlContentRetriever implements Text2SqlRetrieverPort {
   private Content markStructured(String text) {
     Map<String, Object> values = new HashMap<>();
     values.put(MetadataKeyConstant.RETRIEVAL_SOURCE, "RELATIONAL_DB");
-    values.put(MetadataKeyConstant.SKIP_RERANK, "1");
     values.put("dataUserId", String.valueOf(dataUserId));
     values.put("fileName", "MySQL 结构化查询");
     values.put("category", "RELATIONAL_DB");
     // 结构化查询已经通过只读、白名单和用户隔离校验，作为一等证据参与 grounded 计算。
-    return Content.from(TextSegment.from(text, Metadata.from(values)), Map.of(
+    Content content = Content.from(TextSegment.from(text, Metadata.from(values)), Map.of(
         ContentMetadata.SCORE, 1.0d,
         ContentMetadata.RERANKED_SCORE, 1.0d));
+    return RagContentUtil.markAsSkipRerank(content);
   }
 }

@@ -23,6 +23,15 @@ public record InterviewTopic(
     categories = categories == null ? List.of() : List.copyOf(categories);
   }
 
+  /** 把本场粘贴的 JD 挂到主题上，供 Planner / 批量出题读取。 */
+  public InterviewTopic withSourceJd(String jdText) {
+    if (jdText == null || jdText.isBlank()) {
+      return this;
+    }
+    return new InterviewTopic(
+        id, name, description, categories, preset, jdText, templateCode, templateVersion);
+  }
+
   /** 能力模板中的一个可分配考察分类。 */
   public record Category(
       String key,

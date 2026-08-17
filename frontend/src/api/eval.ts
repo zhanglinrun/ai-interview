@@ -56,6 +56,14 @@ export interface IntentEvaluationResult {
   items: IntentItemResult[];
 }
 
+export interface RetrievedSegment {
+  rank: number;
+  chunkId?: string;
+  docId?: number;
+  snippet: string;
+  score?: number;
+}
+
 export interface RagItemResult {
   question: string;
   hit: boolean;
@@ -64,6 +72,11 @@ export interface RagItemResult {
   ndcg: number;
   retrievalRecall: number;
   retrievalPrecision: number;
+  retrievedChunkIds?: string[];
+  retrievedSegments?: RetrievedSegment[];
+  expectedEvidenceCount?: number;
+  matchedKeywords?: string[];
+  missingKeywords?: string[];
 }
 
 export interface RagEvalResponse {

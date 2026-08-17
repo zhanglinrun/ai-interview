@@ -15,6 +15,9 @@ import java.util.List;
  *
  * <p>Spring 注入所有 {@link FileProcessService} 实现，按 {@link FileType} 选第一个
  * {@link FileProcessService#supports(FileType)} 为 true 的实现。无匹配时抛业务异常。
+ *
+ * <p>DOCUMENT_SEARCH 的 Excel/CSV 不在工厂路由：{@code DocumentProcessServiceImpl}
+ * 在 convert 阶段直接将 {@code convertedDocUrl} 设为原文件 URL。
  */
 @Slf4j
 @Service

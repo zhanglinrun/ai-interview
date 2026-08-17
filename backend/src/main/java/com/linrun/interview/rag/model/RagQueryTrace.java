@@ -7,11 +7,29 @@ import com.linrun.interview.rag.model.EvidenceStatus;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.ContentMetadata;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class RagQueryTrace {
 
+    public static final String SPAN_INTENT = "INTENT";
+    public static final String SPAN_REWRITE = "REWRITE";
+    public static final String SPAN_ROUTE = "ROUTE";
+    public static final String SPAN_RETRIEVAL = "RETRIEVAL";
+    public static final String SPAN_RERANK = "RERANK";
+    public static final String SPAN_GENERATE = "GENERATE";
+    public static final String SPAN_CITATION = "CITATION";
+
+    public static final String TYPE_SPAN = "span";
+    public static final String TYPE_RETRIEVER = "retriever";
+    public static final String TYPE_GENERATION = "generation";
+
+    private final List<Span> spans = new CopyOnWriteArrayList<>();
     private String rewrittenQuestion;
     private final List<String> decomposedQueries = new ArrayList<>();
     private String cragGrade;
@@ -26,6 +44,20 @@ public class RagQueryTrace {
     private EvidenceStatus evidenceStatus;
     private List<EvidenceRef> evidenceRefs = List.of();
     private List<String> degradedReasons = List.of();
+
+    public static Span start(RagQueryTrace trace, String name, String type) {
+        return trace == null ? null : trace.startSpan(name, type);
+    }
+
+    public Span startSpan(String name, String type) {
+        Span span = new Span(name, type);
+        spans.add(span);
+        return span;
+    }
+
+    public List<Span> spans() {
+        return List.copyOf(spans);
+    }
 
     public String rewrittenQuestion() {
         return rewrittenQuestion;
@@ -176,6 +208,122 @@ public class RagQueryTrace {
         }
         String normalized = text.replaceAll("\\s+", " ").trim();
         return normalized.length() <= 180 ? normalized : normalized.substring(0, 180) + "...";
+    }
+
+    public static final class Span {
+        private final String name;
+        private final String type;
+        private final Instant startedAt;
+        private volatile Instant completedAt;
+        private volatile String input;
+        private volatile String output;
+        private volatile String status;
+        private volatile String errorMessage;
+        private volatile String dataSource;
+        private volatile String provider;
+        private volatile String modelName;
+        private volatile Double confidence;
+
+        Span(String name, String type) {
+            this.name = name;
+            this.type = type == null ? TYPE_SPAN : type;
+            this.startedAt = Instant.now();
+        }
+
+        public Span input(String input) {
+            this.input = input;
+            return this;
+        }
+
+        public Span dataSource(String dataSource) {
+            this.dataSource = dataSource;
+            return this;
+        }
+
+        public Span confidence(Double confidence) {
+            this.confidence = confidence;
+            return this;
+        }
+
+        public void complete(String output) {
+            complete(output, "COMPLETED");
+        }
+
+        public void complete(String output, String status) {
+            if (closed()) {
+                return;
+            }
+            this.output = output;
+            this.status = status == null ? "COMPLETED" : status;
+            this.completedAt = Instant.now();
+        }
+
+        public void fail(String error) {
+            if (closed()) {
+                return;
+            }
+            this.errorMessage = error;
+            this.status = "FAILED";
+            this.completedAt = Instant.now();
+        }
+
+        public boolean closed() {
+            return completedAt != null;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public String type() {
+            return type;
+        }
+
+        public String input() {
+            return input;
+        }
+
+        public String output() {
+            return output;
+        }
+
+        public String status() {
+            return status;
+        }
+
+        public String errorMessage() {
+            return errorMessage;
+        }
+
+        public String dataSource() {
+            return dataSource;
+        }
+
+        public String provider() {
+            return provider;
+        }
+
+        public String modelName() {
+            return modelName;
+        }
+
+        public Double confidence() {
+            return confidence;
+        }
+
+        public long latencyMs() {
+            Instant end = completedAt != null ? completedAt : Instant.now();
+            return Math.max(0L, Duration.between(startedAt, end).toMillis());
+        }
+
+        public LocalDateTime startedAtLocal() {
+            return LocalDateTime.ofInstant(startedAt, ZoneId.systemDefault());
+        }
+
+        public LocalDateTime completedAtLocal() {
+            Instant end = completedAt != null ? completedAt : Instant.now();
+            return LocalDateTime.ofInstant(end, ZoneId.systemDefault());
+        }
     }
 
     public record TraceContent(

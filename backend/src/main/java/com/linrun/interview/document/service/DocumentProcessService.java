@@ -48,6 +48,26 @@ public interface DocumentProcessService {
                 KnowledgeBaseType knowledgeBaseType);
 
     /**
+     * 只做接收：校验、去重、原件进 MinIO、落库 UPLOADED，然后发异步解析事件。
+     *
+     * <p>批量上传必须走这条路径。同步 {@link #upload} 会在请求内跑完 MinerU，
+     * 多文件串行时客户端一离开或超时，后面的文件还没建档。
+     *
+     * @return 新建知识库 ID，此时状态为 {@code UPLOADED}
+     */
+    Long acceptAndEnqueueConvert(MultipartFile file, String title, String category,
+                                 DocumentAccessScope accessScope, LocalDate expireDate,
+                                 KnowledgeBaseType knowledgeBaseType, boolean splitAfter);
+
+    /**
+     * 解析已落库文档（UPLOADED/CONVERTING → CONVERTED/STORED），必要时再 split。
+     *
+     * <p>从文档行读取 userId，不依赖调用线程的 {@code UserContext}。
+     * 已是 CONVERTED 且 {@code splitAfter=true} 时只补切块。
+     */
+    void processAcceptedDocument(Long docId, boolean splitAfter);
+
+    /**
      * 上传新版本（版本号自动递增，旧版本即时失效）。
      *
      * @param docId      知识库 ID

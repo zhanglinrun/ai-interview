@@ -6,6 +6,7 @@ import com.linrun.interview.business.entity.AgentRunStepEntity;
 import com.linrun.interview.business.vo.AgentTraceStep;
 import com.linrun.interview.business.mapper.AgentRunMapper;
 import com.linrun.interview.business.mapper.AgentRunStepMapper;
+import com.linrun.interview.infra.observability.TraceContext;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,7 +66,8 @@ public class AgentTraceService extends ServiceImpl<AgentRunStepMapper, AgentRunS
     for (AgentTraceStep step : steps) {
       append(run, new AgentSpanRecord(
           "span-" + UUID.randomUUID(), null, step.role(), step.action(),
-          step.actionInput(), step.observation(), "COMPLETED", null, null, step.step()));
+          step.actionInput(), step.observation(), "COMPLETED", null, null, step.step(),
+          questionIndex));
     }
     finish(run, AgentRunStatus.COMPLETED, 0L, null, "steps=" + steps.size());
   }
@@ -144,6 +146,29 @@ public class AgentTraceService extends ServiceImpl<AgentRunStepMapper, AgentRunS
     return toHandle(entity);
   }
 
+  /**
+   * Reuses the latest RUNNING run for this session+operation, or starts a new one.
+   * Used by the evaluating phase so enqueue / LLM / complete share one AgentRun.
+   */
+  public AgentRunHandle startOrResumeSessionOperation(Long userId, String sessionId, String operation) {
+    String safeOperation = operation == null || operation.isBlank() ? "interview" : operation;
+    if (agentRunMapper != null && userId != null && sessionId != null && !sessionId.isBlank()) {
+      AgentRunEntity existing = agentRunMapper.selectOne(Wrappers.<AgentRunEntity>lambdaQuery()
+          .eq(AgentRunEntity::getSessionId, sessionId)
+          .eq(AgentRunEntity::getUserId, userId)
+          .eq(AgentRunEntity::getOperation, safeOperation)
+          .eq(AgentRunEntity::getStatus, AgentRunStatus.RUNNING.name())
+          .orderByDesc(AgentRunEntity::getCreatedAt)
+          .last("LIMIT 1"));
+      if (existing != null) {
+        return toHandle(existing);
+      }
+    }
+    return startOrGetQuietly(new ExecutionIdentity(
+        userId, sessionId, TraceContext.getTraceId(),
+        safeOperation + ":" + sessionId + ":" + UUID.randomUUID(), null, null), safeOperation);
+  }
+
   public AgentRunHandle startOrGetQuietly(ExecutionIdentity identity, String operation) {
     try {
       return startOrGet(identity, operation);
@@ -180,6 +205,7 @@ public class AgentTraceService extends ServiceImpl<AgentRunStepMapper, AgentRunS
         .status(span.status())
         .latencyMs(span.latencyMs())
         .metadataJson(truncate(span.metadataJson()))
+        .questionIndex(span.questionIndex())
         .createdAt(LocalDateTime.now())
         .build();
     agentRunStepMapper.insert(entity);
@@ -251,8 +277,28 @@ public class AgentTraceService extends ServiceImpl<AgentRunStepMapper, AgentRunS
   }
 
   public List<AgentRunStepEntity> listBySession(String sessionId, Long userId) {
+    return listBySessionKeys(userId, sessionId == null ? List.of() : List.of(sessionId));
+  }
+
+  public List<AgentRunStepEntity> listBySessionKeys(Long userId, List<String> sessionIds) {
+    List<String> keys = sessionIds == null ? List.of() : sessionIds.stream()
+        .filter(id -> id != null && !id.isBlank())
+        .distinct()
+        .toList();
+    if (userId == null || keys.isEmpty()) {
+      return List.of();
+    }
     return agentRunStepMapper.selectList(Wrappers.<AgentRunStepEntity>lambdaQuery()
-        .eq(AgentRunStepEntity::getSessionId, sessionId)
+        .eq(AgentRunStepEntity::getUserId, userId)
+        .in(AgentRunStepEntity::getSessionId, keys)
+        .orderByAsc(AgentRunStepEntity::getId));
+  }
+
+  public List<AgentRunStepEntity> listByUser(Long userId) {
+    if (userId == null) {
+      return List.of();
+    }
+    return agentRunStepMapper.selectList(Wrappers.<AgentRunStepEntity>lambdaQuery()
         .eq(AgentRunStepEntity::getUserId, userId)
         .orderByAsc(AgentRunStepEntity::getId));
   }

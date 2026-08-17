@@ -1,11 +1,13 @@
 package com.linrun.interview.rag.service;
 
 import com.linrun.interview.rag.constant.MetadataKeyConstant;
+import com.linrun.interview.rag.model.RagQueryTrace;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.scoring.ScoringModel;
 import dev.langchain4j.rag.content.Content;
+import dev.langchain4j.rag.content.ContentMetadata;
 import dev.langchain4j.rag.content.DefaultContent;
 import dev.langchain4j.rag.query.Query;
 import java.util.Collection;
@@ -41,6 +43,30 @@ class InterviewReRankingContentAggregatorTest {
   }
 
   @Test
+  @DisplayName("传入 trace 时应写入 RERANK span")
+  void recordsRerankSpan() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(0.9, 0.2)));
+    RagQueryTrace trace = new RagQueryTrace();
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .maxResults(2)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .trace(trace)
+        .build();
+
+    aggregator.aggregate(Map.of(
+        Query.from("RAG"), List.<List<Content>>of(List.of(content("a", "A"), content("b", "B")))));
+
+    assertThat(trace.spans()).hasSize(1);
+    RagQueryTrace.Span span = trace.spans().getFirst();
+    assertThat(span.name()).isEqualTo(RagQueryTrace.SPAN_RERANK);
+    assertThat(span.closed()).isTrue();
+    assertThat(span.output()).isEqualTo("2 docs");
+  }
+
+  @Test
   @DisplayName("Rerank 返回全等非零分时也应保留 RRF 顺序")
   void equalScoresKeepRrfOrder() {
     ScoringModel scoringModel = mock(ScoringModel.class);
@@ -52,6 +78,121 @@ class InterviewReRankingContentAggregatorTest {
 
     assertThat(result).extracting(value -> value.textSegment().text())
         .containsExactly("A", "B");
+  }
+
+  @Test
+  @DisplayName("Rerank 全员低于 minScore 且无标题重合时应保持 RRF 顺序")
+  void belowMinScoreKeepsRrfOrder() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(0.2, 0.1)));
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .minScore(0.6)
+        .maxResults(2)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .build();
+    Query query = Query.from("事务的隔离级别有哪些?");
+
+    List<Content> result = aggregator.aggregate(Map.of(
+        query, List.<List<Content>>of(List.of(content("a", "A"), content("b", "B")))));
+
+    assertThat(result).extracting(value -> value.textSegment().text())
+        .containsExactly("A", "B");
+  }
+
+  @Test
+  @DisplayName("Rerank 全员低于 minScore 时应把标题重合的块提前")
+  void belowMinScorePromotesMatchingHeading() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(0.2, 0.2, 0.2)));
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .minScore(0.6)
+        .maxResults(2)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .build();
+    Query query = Query.from("事务的隔离级别有哪些?");
+
+    List<Content> result = aggregator.aggregate(Map.of(
+        query, List.<List<Content>>of(List.of(
+            content("gap", "## 间隙锁了解吗？\n仅在可重复读"),
+            content("iso", "## 事务的隔离级别有哪些?\nMySQL 支持四种隔离级别"),
+            content("cmd", "## 说说事务控制的命令？\nSTART TRANSACTION")))));
+
+    assertThat(result.getFirst().textSegment().text()).contains("事务的隔离级别有哪些");
+  }
+
+  @Test
+  @DisplayName("BGE logit 先 sigmoid 再按 0~1 阈值过滤，并写入归一化 RERANKED_SCORE")
+  void normalizesLogitsThenDropsNearMisses() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(5.07, 4.15, 1.77)));
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .minScore(0.88)
+        .maxResults(6)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .build();
+
+    List<Content> result = aggregator.aggregate(Map.of(
+        Query.from("缓存穿透"), List.<List<Content>>of(List.of(
+            content("code", "布隆过滤器拦截不存在的 key"),
+            content("def", "缓存和数据库都没有该数据"),
+            content("break", "缓存击穿是热点 key 过期")))));
+
+    assertThat(result).extracting(value -> value.textSegment().text())
+        .containsExactly("布隆过滤器拦截不存在的 key", "缓存和数据库都没有该数据");
+    assertThat((Double) result.getFirst().metadata().get(ContentMetadata.RERANKED_SCORE))
+        .isGreaterThan(0.99)
+        .isLessThanOrEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("问缓存穿透时，标题是击穿的块应被丢掉而不是只往后排")
+  void penetrationQueryDropsBreakdownHeading() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(0.97, 0.91)));
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .minScore(0.80)
+        .maxResults(6)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .build();
+
+    List<Content> result = aggregator.aggregate(Map.of(
+        Query.from("什么是缓存穿透，如何防止"), List.<List<Content>>of(List.of(
+            content("break", "## 29. 什么是缓存击穿？\n大量请求就会穿透缓存直接访问数据库"),
+            content("pen", "## 什么是缓存穿透？\n数据压根不存在，请求落到数据库")))));
+
+    assertThat(result).hasSize(1);
+    assertThat(result.getFirst().textSegment().text()).contains("什么是缓存穿透");
+  }
+
+  @Test
+  @DisplayName("对比题同时问穿透和击穿时不应丢掉任何一侧")
+  void contrastQueryKeepsBothHeadings() {
+    ScoringModel scoringModel = mock(ScoringModel.class);
+    when(scoringModel.scoreAll(any(), any())).thenReturn(Response.from(List.of(0.97, 0.91)));
+    InterviewReRankingContentAggregator aggregator = InterviewReRankingContentAggregator.builder()
+        .scoringModel(scoringModel)
+        .minScore(0.80)
+        .maxResults(6)
+        .hybridRrfK(60)
+        .fusionRrfK(60)
+        .build();
+
+    List<Content> result = aggregator.aggregate(Map.of(
+        Query.from("缓存穿透和缓存击穿有什么区别"), List.<List<Content>>of(List.of(
+            content("break", "## 29. 什么是缓存击穿？\n热点 key 过期"),
+            content("pen", "## 什么是缓存穿透？\n数据压根不存在")))));
+
+    assertThat(result).extracting(value -> value.textSegment().text())
+        .anyMatch(text -> text.contains("什么是缓存击穿"))
+        .anyMatch(text -> text.contains("什么是缓存穿透"));
   }
 
   @Test

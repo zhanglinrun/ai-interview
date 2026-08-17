@@ -153,7 +153,16 @@ public class RagTraceRecorder {
                 .completedAt(now)
                 .build());
 
-            if (trace != null) {
+            if (trace != null && !trace.spans().isEmpty()) {
+                for (RagQueryTrace.Span span : trace.spans()) {
+                    if (!span.closed()) {
+                        span.complete(span.output(), "DEGRADED");
+                    }
+                    recordTimedStage(ragRunId, span);
+                }
+                recordCandidates(ragRunId, "RETRIEVAL", trace.retrieved());
+                recordCandidates(ragRunId, "RERANK", trace.reranked());
+            } else if (trace != null) {
                 recordStage(ragRunId, "INTENT", "route", trace.routeIntent(),
                     trace.routeSource(), trace.routeReasoning(), trace.routeConfidence(), now);
                 recordStage(ragRunId, "REWRITE", "rewritten", trace.rewrittenQuestion(),
@@ -216,6 +225,30 @@ public class RagTraceRecorder {
             .eq(RagTraceRunEntity::getUserId, userId)
             .orderByDesc(RagTraceRunEntity::getCreatedAt)
             .last("LIMIT " + safeLimit));
+    }
+
+    private void recordTimedStage(String ragRunId, RagQueryTrace.Span span) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (span.confidence() != null) {
+            metadata.put("confidence", span.confidence());
+        }
+        metadata.put("observationType", span.type());
+        stageMapper.insert(RagTraceStageEntity.builder()
+            .ragRunId(ragRunId)
+            .stage(span.name())
+            .status(span.status() == null ? "COMPLETED" : span.status())
+            .dataSource(span.dataSource())
+            .inputSummary(limit(span.input(), SUMMARY_LIMIT))
+            .outputSummary(limit(span.output(), SUMMARY_LIMIT))
+            .metadataJson(json(metadata))
+            .provider(span.provider())
+            .modelName(span.modelName())
+            .fallbackReason(limit(span.errorMessage(), 1000))
+            .errorMessage(limit(span.errorMessage(), 1000))
+            .startedAt(span.startedAtLocal())
+            .completedAt(span.completedAtLocal())
+            .latencyMs(span.latencyMs())
+            .build());
     }
 
     private void recordStage(String ragRunId, String stage, String status, String input,

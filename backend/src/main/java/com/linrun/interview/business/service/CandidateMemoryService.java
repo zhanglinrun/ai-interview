@@ -26,9 +26,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 跨会话候选人能力画像。
+ * 跨场长期记忆：评估分的确定性投影，不是对话摘要，也不是通用项目事实库。
  *
- * <p>评估结果已经包含逐题分数和反馈，因此这里直接把每道已回答问题沉淀为能力观测，
+ * <p>评估结果已经包含逐题分数和反馈，因此这里直接把每道已回答问题沉淀为观测，
  * 不再额外调用一次 LLM 从报告中二次抽取自由文本。版本化能力模板的原子 ID 跨会话稳定，
  * Agent 动态题沿用题目上的 capabilityAtomId；旧会话按历史主题字段 + type 兼容映射。
  */
@@ -90,7 +90,7 @@ public class CandidateMemoryService
       }
       QuestionEvaluation evaluation = evaluationByIndex.get(question.questionIndex());
       if (evaluation == null || evaluation.userAnswer() == null
-          || evaluation.userAnswer().isBlank()) {
+          || evaluation.userAnswer().isBlank() || evaluation.score() == null) {
         continue;
       }
       int score = Math.max(0, Math.min(100, evaluation.score()));
@@ -134,7 +134,7 @@ public class CandidateMemoryService
   }
 
   /**
-   * 组装 Planner 使用的跨会话画像。只有跨会话、足量观测的优势才标为“已验证”，
+   * 组装 Planner 使用的跨场长期记忆。只有跨会话、足量观测的优势才标为“已验证”，
    * 避免一次高分就让 Planner 永久跳过该能力。
    */
   public String buildMemorySection(Long userId, String skillId) {
@@ -148,7 +148,7 @@ public class CandidateMemoryService
         return "";
       }
       StringBuilder sb = new StringBuilder(
-          "候选人历史能力画像（只有‘已验证·掌握’可降低题量，待复测项仍需抽样验证）：\n");
+          "长期记忆（跨场能力观测。只有‘已验证·掌握’可降低题量，待复测项仍需抽样验证）：\n");
       profiles.stream().limit(maxEntries).forEach(profile -> {
         sb.append("- [").append(displayMastery(profile.masteryLevel()))
             .append(" · ").append(displayVerification(profile.verificationState()))
@@ -165,7 +165,7 @@ public class CandidateMemoryService
       });
       return sb.toString();
     } catch (Exception e) {
-      log.warn("加载候选人画像失败，跳过注入: userId={}", userId, e);
+      log.warn("加载长期记忆失败，跳过注入: userId={}", userId, e);
       return "";
     }
   }

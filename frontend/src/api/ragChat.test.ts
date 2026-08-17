@@ -85,6 +85,33 @@ data:route:${JSON.stringify(route)}
     expect(routes).toEqual([route]);
   });
 
+  it('将 v1 progress envelope 更新阶段文案', async () => {
+    const envelope = JSON.stringify({
+      traceId: 'trace-1',
+      sequence: 1,
+      stage: 'pipeline',
+      event: 'progress',
+      timestamp: '2026-08-16T00:00:00Z',
+      payload: '正在改写问题...',
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      `event: progress\ndata: ${envelope}\n\n`,
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )));
+    const progress: string[] = [];
+
+    await ragChatApi.sendMessageStream(
+      1,
+      '问题',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      text => progress.push(text),
+    );
+
+    expect(progress).toEqual(['正在改写问题...']);
+  });
+
   it('解析 v1 structured envelope，并在 done + EOF 时只完成一次', async () => {
     const envelope = (sequence: number, event: string, payload: unknown) => JSON.stringify({
       traceId: 'trace-1',

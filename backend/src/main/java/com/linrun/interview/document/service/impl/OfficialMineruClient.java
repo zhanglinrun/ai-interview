@@ -21,10 +21,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** MinerU {@code /api/v1/v4/extract/task} 官方异步 API 适配器。 */
+/** MinerU 官方 v4 适配器：本地文件走 file-urls/batch，URL 任务仍兼容 extract/task。 */
 @Component
 public class OfficialMineruClient implements MineruClient {
 
@@ -38,6 +40,7 @@ public class OfficialMineruClient implements MineruClient {
         properties,
         objectMapper,
         HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofMillis(Math.max(properties.getConnectTimeoutMs(), 1)))
             // 禁止自动重定向，避免只校验初始 result URL 后被 30x 引向内网。
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -83,6 +86,56 @@ public class OfficialMineruClient implements MineruClient {
   }
 
   @Override
+  public String submitLocalFile(
+      byte[] content,
+      String fileName,
+      String modelVersion,
+      String pageRanges
+  ) throws MineruClientException {
+    requireConfigured();
+    if (content == null || content.length == 0) {
+      throw new MineruClientException(MineruFailureCode.SOURCE_UPLOAD_FAILED, "待上传文件为空");
+    }
+    if (content.length > properties.getMaxSourceBytes()) {
+      throw new MineruClientException(
+          MineruFailureCode.SOURCE_UPLOAD_FAILED, "文件超过 MinerU 200MB 限制");
+    }
+    try {
+      String safeName = sanitizeUploadName(fileName);
+      Map<String, Object> file = new LinkedHashMap<>();
+      file.put("name", safeName);
+      file.put("data_id", dataIdFor(pageRanges));
+      if (pageRanges != null && !pageRanges.isBlank()) {
+        file.put("page_ranges", pageRanges);
+      }
+      String body = objectMapper.writeValueAsString(Map.of(
+          "files", List.of(file),
+          "model_version", modelVersion == null || modelVersion.isBlank()
+              ? properties.getModelVersion() : modelVersion));
+      HttpRequest request = authorizedRequest(resolve(properties.getBatchUploadPath()))
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+          .build();
+      JsonNode data = parseSuccessBody(sendJson(request)).path("data");
+      String batchId = firstText(data, "batch_id", "batchId");
+      String uploadUrl = firstArrayText(data.path("file_urls"));
+      if (batchId == null || batchId.isBlank() || uploadUrl == null || uploadUrl.isBlank()) {
+        throw new MineruClientException(
+            MineruFailureCode.INVALID_RESPONSE, "MinerU 响应缺少 batch_id 或 file_urls");
+      }
+      putSourceFile(URI.create(uploadUrl), content);
+      return batchId;
+    } catch (MineruClientException e) {
+      throw e;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new MineruClientException(MineruFailureCode.INTERRUPTED, "MinerU 文件上传被中断", e);
+    } catch (Exception e) {
+      throw new MineruClientException(MineruFailureCode.SOURCE_UPLOAD_FAILED, "MinerU 文件上传失败", e);
+    }
+  }
+
+  @Override
   public MineruTaskResult getTask(String providerTaskId) throws MineruClientException {
     requireConfigured();
     if (providerTaskId == null || providerTaskId.isBlank()) {
@@ -104,7 +157,7 @@ public class OfficialMineruClient implements MineruClient {
         throw new MineruClientException(
             MineruFailureCode.INVALID_RESPONSE, "MinerU 完成响应缺少结果 ZIP");
       }
-      return new MineruTaskResult(status, resultUrl, failure);
+      return new MineruTaskResult(status, resultUrl, failure, readTotalPages(data));
     } catch (MineruClientException e) {
       throw e;
     } catch (InterruptedException e) {
@@ -112,6 +165,40 @@ public class OfficialMineruClient implements MineruClient {
       throw new MineruClientException(MineruFailureCode.INTERRUPTED, "MinerU 查询被中断", e);
     } catch (Exception e) {
       throw new MineruClientException(MineruFailureCode.INVALID_RESPONSE, "MinerU 状态查询失败", e);
+    }
+  }
+
+  @Override
+  public MineruTaskResult getBatchResult(String batchId) throws MineruClientException {
+    requireConfigured();
+    if (batchId == null || batchId.isBlank()) {
+      throw new MineruClientException(MineruFailureCode.INVALID_RESPONSE, "batchId 不能为空");
+    }
+    try {
+      String encoded = URLEncoder.encode(batchId, StandardCharsets.UTF_8).replace("+", "%20");
+      String path = properties.getBatchStatusPath().replace("{batchId}", encoded);
+      HttpRequest request = authorizedRequest(resolve(path)).GET().build();
+      JsonNode data = parseSuccessBody(sendJson(request)).path("data");
+      JsonNode item = firstExtractResult(data);
+      if (item == null || item.isMissingNode()) {
+        return new MineruTaskResult(MineruTaskStatus.PENDING, null, null, null);
+      }
+      MineruTaskStatus status = parseStatus(firstText(item, "state", "status"));
+      String failure = truncate(firstText(item, "err_msg", "error", "message"));
+      String zipUrl = firstText(item, "full_zip_url", "zip_url", "download_url");
+      URI resultUrl = zipUrl == null || zipUrl.isBlank() ? null : URI.create(zipUrl);
+      if (status == MineruTaskStatus.SUCCEEDED && resultUrl == null) {
+        throw new MineruClientException(
+            MineruFailureCode.INVALID_RESPONSE, "MinerU 完成响应缺少结果 ZIP");
+      }
+      return new MineruTaskResult(status, resultUrl, failure, readTotalPages(item));
+    } catch (MineruClientException e) {
+      throw e;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new MineruClientException(MineruFailureCode.INTERRUPTED, "MinerU 批量查询被中断", e);
+    } catch (Exception e) {
+      throw new MineruClientException(MineruFailureCode.INVALID_RESPONSE, "MinerU 批量状态查询失败", e);
     }
   }
 
@@ -166,8 +253,12 @@ public class OfficialMineruClient implements MineruClient {
       JsonNode root = objectMapper.readTree(body);
       int providerCode = root.path("code").asInt(0);
       if (providerCode != 0) {
+        String msg = truncate(firstText(root, "msg", "message", "error"));
         throw new MineruClientException(
-            MineruFailureCode.PROVIDER_REJECTED, "MinerU 拒绝请求，providerCode=" + providerCode);
+            MineruFailureCode.PROVIDER_REJECTED,
+            msg == null || msg.isBlank()
+                ? "MinerU 拒绝请求，providerCode=" + providerCode
+                : "MinerU 拒绝请求，providerCode=" + providerCode + ": " + msg);
       }
       return root;
     } catch (MineruClientException e) {
@@ -214,7 +305,7 @@ public class OfficialMineruClient implements MineruClient {
   private MineruTaskStatus parseStatus(String raw) throws MineruClientException {
     String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
     return switch (normalized) {
-      case "pending", "queued", "waiting" -> MineruTaskStatus.PENDING;
+      case "pending", "queued", "waiting", "waiting-file", "waiting_file" -> MineruTaskStatus.PENDING;
       case "running", "processing", "converting" -> MineruTaskStatus.RUNNING;
       case "done", "success", "succeeded", "completed" -> MineruTaskStatus.SUCCEEDED;
       case "failed", "error", "cancelled", "canceled" -> MineruTaskStatus.FAILED;
@@ -267,6 +358,63 @@ public class OfficialMineruClient implements MineruClient {
       output.write(buffer, 0, read);
     }
     return output.toByteArray();
+  }
+
+  private void putSourceFile(URI uploadUrl, byte[] content) throws Exception {
+    HttpRequest request = HttpRequest.newBuilder(uploadUrl)
+        .timeout(Duration.ofMillis(Math.max(properties.getUploadTimeoutMs(), 1)))
+        .PUT(HttpRequest.BodyPublishers.ofByteArray(content))
+        .build();
+    HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      throw new MineruClientException(
+          MineruFailureCode.SOURCE_UPLOAD_FAILED,
+          "MinerU OSS 上传失败: HTTP " + response.statusCode());
+    }
+  }
+
+  private String sanitizeUploadName(String fileName) {
+    String name = fileName == null || fileName.isBlank() ? "document.pdf" : fileName.trim();
+    int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+    if (slash >= 0) {
+      name = name.substring(slash + 1);
+    }
+    return name.isBlank() ? "document.pdf" : name;
+  }
+
+  private String dataIdFor(String pageRanges) {
+    if (pageRanges == null || pageRanges.isBlank()) {
+      return "p1";
+    }
+    String compact = pageRanges.replaceAll("[^A-Za-z0-9._-]", "_");
+    return compact.length() <= 128 ? compact : compact.substring(0, 128);
+  }
+
+  private String firstArrayText(JsonNode node) {
+    if (node != null && node.isArray() && node.size() > 0 && node.get(0).isTextual()) {
+      String value = node.get(0).asText();
+      return value == null || value.isBlank() ? null : value;
+    }
+    return firstText(node, "url", "file_url");
+  }
+
+  private JsonNode firstExtractResult(JsonNode data) {
+    JsonNode results = data.path("extract_result");
+    if (results.isArray() && results.size() > 0) {
+      return results.get(0);
+    }
+    return results.isObject() ? results : null;
+  }
+
+  private Integer readTotalPages(JsonNode node) {
+    JsonNode progress = node.path("extract_progress");
+    if (progress.path("total_pages").canConvertToInt()) {
+      return progress.path("total_pages").asInt();
+    }
+    if (node.path("total_pages").canConvertToInt()) {
+      return node.path("total_pages").asInt();
+    }
+    return null;
   }
 
   private String firstText(JsonNode node, String... fields) {

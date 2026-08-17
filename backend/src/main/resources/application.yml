@@ -15,7 +15,8 @@ server:
       enabled: true
       force: true
   tomcat:
-    # Tomcat 11 默认单个 multipart 请求最多 10 个文件部分，批量上传需放宽；-1 表示不限制
+    # Tomcat 默认单个 multipart 请求最多 10~50 个 part（含表单字段）。
+    # 批量上传一次最多 50 个文件 + category/accessibleBy，256 留余量。
     max-part-count: ${APP_TOMCAT_MAX_PART_COUNT:256}
 
 # Actuator / Micrometer 监控端点
@@ -180,12 +181,17 @@ file:
       api-token: ${MINERU_API_TOKEN:}
       submit-path: ${MINERU_SUBMIT_PATH:/api/v4/extract/task}
       status-path: ${MINERU_STATUS_PATH:/api/v4/extract/task/{taskId}}
+      batch-upload-path: ${MINERU_BATCH_UPLOAD_PATH:/api/v4/file-urls/batch}
+      batch-status-path: ${MINERU_BATCH_STATUS_PATH:/api/v4/extract-results/batch/{batchId}}
+      upload-timeout-ms: ${MINERU_UPLOAD_TIMEOUT_MS:180000}
+      max-pages-per-request: ${MINERU_MAX_PAGES_PER_REQUEST:200}
+      max-source-bytes: ${MINERU_MAX_SOURCE_BYTES:209715200}
       model-version: ${MINERU_MODEL_VERSION:vlm}
       html-model-version: ${MINERU_HTML_MODEL_VERSION:MinerU-HTML}
       connect-timeout-ms: ${MINERU_CONNECT_TIMEOUT_MS:10000}
       request-timeout-ms: ${MINERU_REQUEST_TIMEOUT_MS:30000}
       poll-interval-ms: ${MINERU_POLL_INTERVAL_MS:2000}
-      task-timeout-seconds: ${MINERU_TASK_TIMEOUT_SECONDS:300}
+      task-timeout-seconds: ${MINERU_TASK_TIMEOUT_SECONDS:900}
       presigned-url-ttl-seconds: ${MINERU_PRESIGNED_URL_TTL_SECONDS:600}
       max-zip-bytes: ${MINERU_MAX_ZIP_BYTES:104857600}
       max-json-response-bytes: ${MINERU_MAX_JSON_RESPONSE_BYTES:1048576}
@@ -204,18 +210,6 @@ file:
 
 # Application custom configuration
 app:
-  dingtalk:
-    enabled: ${APP_DINGTALK_ENABLED:false}
-    app-key: ${DINGTALK_APP_KEY:}
-    app-secret: ${DINGTALK_APP_SECRET:}
-    verification-token: ${DINGTALK_VERIFICATION_TOKEN:${APP_AI_RAG_DINGTALK_TOKEN:}}
-    aes-key: ${DINGTALK_AES_KEY:}
-    robot-webhook: ${DINGTALK_ROBOT_WEBHOOK:}
-    robot-secret: ${DINGTALK_ROBOT_SECRET:}
-    replay-window-seconds: ${DINGTALK_REPLAY_WINDOW_SECONDS:300}
-    max-question-chars: ${DINGTALK_MAX_QUESTION_CHARS:2000}
-    fallback-user-id: ${DINGTALK_FALLBACK_USER_ID:1}
-    default-knowledge-base-ids: ${DINGTALK_DEFAULT_KNOWLEDGE_BASE_IDS:}
   rag-evaluation:
     intent-accuracy: ${RAG_EVAL_INTENT_ACCURACY:0.90}
     intent-macro-f1: ${RAG_EVAL_INTENT_MACRO_F1:0.85}
@@ -247,39 +241,11 @@ app:
     compensation:
       neo4j-delay-ms: ${APP_KB_NEO4J_COMPENSATION_DELAY_MS:900000}
       neo4j-initial-delay-ms: ${APP_KB_NEO4J_COMPENSATION_INITIAL_DELAY_MS:20000}
-  job-interview:
-    prompt-version: ${JOB_INTERVIEW_PROMPT_VERSION:job-interview-v2}
-    follow-up-limit-per-main-question: ${JOB_INTERVIEW_FOLLOW_UP_LIMIT:1}
-    reflection-limit-per-session: ${JOB_INTERVIEW_REFLECTION_LIMIT:1}
-    natural-close-minutes: ${JOB_INTERVIEW_NATURAL_CLOSE_MINUTES:5}
-    reconnect-event-limit: ${JOB_INTERVIEW_RECONNECT_EVENT_LIMIT:100}
-    # 覆盖模型评价与 Judge0 的正常耗时；进程宕机后由请求/分钟级补偿回收执行槽。
-    command-lease-seconds: ${JOB_INTERVIEW_COMMAND_LEASE_SECONDS:300}
-    idle-pause-minutes: ${JOB_INTERVIEW_IDLE_PAUSE_MINUTES:30}
-    resume-hours: ${JOB_INTERVIEW_RESUME_HOURS:24}
+      convert-delay-ms: ${APP_KB_CONVERT_COMPENSATION_DELAY_MS:60000}
+      convert-initial-delay-ms: ${APP_KB_CONVERT_COMPENSATION_INITIAL_DELAY_MS:45000}
   capability-content:
     # fresh schema 启动时幂等导入仓库内版本化能力目录；测试环境关闭。
     auto-import: ${APP_CAPABILITY_CONTENT_AUTO_IMPORT:true}
-  algorithm-content:
-    # 完整 Hot 100 映射与 20 道平台自述首发题，按 contentVersion 幂等导入。
-    auto-import: ${APP_ALGORITHM_CONTENT_AUTO_IMPORT:true}
-  algorithm:
-    # 只连接外部 Judge0，本应用不会在 4C6G 服务器执行用户源码。
-    judge0:
-      enabled: ${JUDGE0_ENABLED:false}
-      base-url: ${JUDGE0_BASE_URL:}
-      api-key: ${JUDGE0_API_KEY:}
-      api-host: ${JUDGE0_API_HOST:}
-      api-key-header: ${JUDGE0_API_KEY_HEADER:X-RapidAPI-Key}
-      # 内部协议值保留 JAVA21 以兼容既有题库和作答数据；运行时版本由 Judge 服务决定。
-      java21-language-id: ${JUDGE0_JAVA_LANGUAGE_ID:${JUDGE0_JAVA21_LANGUAGE_ID:}}
-      python3-language-id: ${JUDGE0_PYTHON3_LANGUAGE_ID:}
-      connect-timeout-ms: ${JUDGE0_CONNECT_TIMEOUT_MS:5000}
-      request-timeout-ms: ${JUDGE0_REQUEST_TIMEOUT_MS:10000}
-      poll-interval-ms: ${JUDGE0_POLL_INTERVAL_MS:1000}
-      timeout-seconds: ${JUDGE0_TIMEOUT_SECONDS:30}
-      cpu-time-limit-seconds: ${JUDGE0_CPU_TIME_LIMIT_SECONDS:3}
-      memory-limit-kb: ${JUDGE0_MEMORY_LIMIT_KB:262144}
   # GitHub 公共仓库固定 SHA 代码证据。Token 可空，仅提高公共只读 API 限额。
   github:
     enabled: ${GITHUB_ENABLED:true}
@@ -314,6 +280,8 @@ app:
     # 推理时设 APP_AI_THINKING_ENABLED=true 开启（非 reasoning 模型会忽略 enable_thinking）。
     thinking:
       enabled: ${APP_AI_THINKING_ENABLED:false}
+    # Interviewer/Critic 带证据时经常超过 12s；过短会表现为「提交没反应」后出兜底题。
+    chat-read-timeout-seconds: ${APP_AI_CHAT_READ_TIMEOUT_SECONDS:45}
     # 运行时可写的 Provider 配置落点（与 classpath 主 application.yml 隔离）。
     # 开发环境默认写到用户主目录下，避免污染源码目录或 jar 内 classpath 资源。
     config-yaml-path: ${APP_AI_CONFIG_YAML_PATH:${user.home}/.ai-interview/llm-providers.yml}
@@ -326,16 +294,20 @@ app:
       critic-enabled: ${APP_AI_AGENT_CRITIC_ENABLED:true}
       tools:
         enabled: ${APP_AI_AGENT_TOOLS_ENABLED:true}
-      # Reflexion 反思重生成上限（Critic 连续打回的最大重出次数）
-      max-reflexion: ${APP_AI_AGENT_MAX_REFLEXION:2}
-      # 会话内 ChatMemory 窗口大小（消息条数，Redis 持久化）
-      memory-window: ${APP_AI_AGENT_MEMORY_WINDOW:20}
+      # Reflexion 额外重试次数；总尝试 = maxReflexion + 1
+      max-reflexion: ${APP_AI_AGENT_MAX_REFLEXION:1}
+      # 会话内 ChatMemory 窗口：仅最近 1～2 轮原文；本场早期事实靠已问主问题摘要落库
+      memory-window: ${APP_AI_AGENT_MEMORY_WINDOW:4}
       # 编排指标上报（agent.critic.verdicts / reflexion.rounds / question.latency）
       metrics-enabled: ${APP_AI_AGENT_METRICS_ENABLED:true}
-      # 跨会话能力画像：逐题评估结果确定性沉淀为能力观测，Planner 下次面试注入
+      # 跨场长期记忆：逐题评估结果确定性沉淀为观测，Planner 下次面试注入
       candidate-memory:
         enabled: ${APP_AI_AGENT_CANDIDATE_MEMORY_ENABLED:true}
         max-entries: ${APP_AI_AGENT_CANDIDATE_MEMORY_MAX_ENTRIES:8}
+      # 本机 /agent-trace：chat span 是否落截断后的 prompt/completion（简历工具仍脱敏）
+      trace:
+        capture-content: ${APP_AI_AGENT_TRACE_CAPTURE_CONTENT:true}
+        max-content-chars: ${APP_AI_AGENT_TRACE_MAX_CONTENT_CHARS:2000}
     trace:
       enabled: ${APP_AI_TRACE_ENABLED:true}
     providers:
@@ -394,6 +366,8 @@ app:
     # 是否开启结构化输出调用指标（invocations/attempts/latency）
     structured-metrics-enabled: ${APP_AI_STRUCTURED_METRICS_ENABLED:true}
     rag:
+      # 决策阶段快模型；生成仍用 generation.streaming-model / 用户 BYOK
+      decision-model: ${APP_AI_RAG_DECISION_MODEL:qwen3.5-flash}
       rewrite:
         enabled: ${APP_AI_RAG_REWRITE_ENABLED:true}
         model: ${APP_AI_RAG_REWRITE_MODEL:}
@@ -413,14 +387,13 @@ app:
         keyword-min-similarity: ${APP_AI_RAG_HYBRID_KEYWORD_MIN_SIM:0.1}
         rrf-k: ${APP_AI_RAG_HYBRID_RRF_K:60}
         fusion-top-k: ${APP_AI_RAG_HYBRID_FUSION_TOPK:12}
-      # 重排：默认本地 ONNX BGE-RERANKER（对齐业界实践）
+      # 重排：仅本地 ONNX BGE-RERANKER
       rerank:
         enabled: ${APP_AI_RAG_RERANK_ENABLED:true}
-        provider: ${APP_AI_RAG_RERANK_PROVIDER:local}
-        model: ${APP_AI_RAG_RERANK_MODEL:gte-rerank-v2}
+        # 0~1，BGE logit 会先 sigmoid；0.88 ≈ logit 2.0，避免近义词弱相关进上下文
+        min-score: ${APP_AI_RAG_RERANK_MIN_SCORE:0.88}
         top-n: ${APP_AI_RAG_RERANK_TOPN:6}
-        timeout-ms: ${APP_AI_RAG_RERANK_TIMEOUT_MS:3000}
-        # 本地 ONNX reranker 模型文件配置（provider=local 时生效）
+        fail-fast-on-missing-model: ${APP_AI_RAG_RERANK_FAIL_FAST:false}
         # 模型文件不入 git，需手动下载放到 backend/src/main/resources/model/bge-reranker-model/
         # 详见 backend/src/main/resources/model/bge-reranker-model/README.md
         local:
@@ -433,14 +406,14 @@ app:
       parent-expand:
         enabled: ${APP_AI_RAG_PARENT_EXPAND_ENABLED:true}
         # 扩展策略：replace = 命中子块后用父块全文替换（small-to-big）
-        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:replace}
+        strategy: ${APP_AI_RAG_PARENT_EXPAND_STRATEGY:keep}
         # replace 时以父块为主；适当放宽避免过早截断整章上下文
-        max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:8000}
+        max-chars: ${APP_AI_RAG_PARENT_EXPAND_MAX_CHARS:4000}
         max-siblings: ${APP_AI_RAG_PARENT_EXPAND_MAX_SIBLINGS:5}
         cache-ttl-seconds: ${APP_AI_RAG_PARENT_EXPAND_CACHE_TTL:30}
       # 最终上下文总预算：按 RRF/rerank 顺序保留完整片段，保证 [n] 与 sources 索引一致。
       context:
-        max-total-chars: ${APP_AI_RAG_CONTEXT_MAX_TOTAL_CHARS:6000}
+        max-total-chars: ${APP_AI_RAG_CONTEXT_MAX_TOTAL_CHARS:18000}
       # 多 Query（原问题/rewrite/HyDE/分解子查询）之间的 RRF 参数。
       fusion:
         rrf-k: ${APP_AI_RAG_FUSION_RRF_K:60}
@@ -450,8 +423,19 @@ app:
         enabled: ${APP_AI_RAG_DECOMPOSE_ENABLED:true}
         max-sub-queries: ${APP_AI_RAG_DECOMPOSE_MAX_SUB_QUERIES:4}
         model: ${APP_AI_RAG_DECOMPOSE_MODEL:}
+      # HyDE：假设文档向量召回，提升问题/答案语义鸿沟场景
+      hyde:
+        enabled: ${APP_AI_RAG_HYDE_ENABLED:true}
+        max-chars: ${APP_AI_RAG_HYDE_MAX_CHARS:300}
+        timeout-ms: ${APP_AI_RAG_HYDE_TIMEOUT_MS:4000}
+      # 引用溯源与编号
+      citation:
+        enabled: ${APP_AI_RAG_CITATION_ENABLED:true}
+      history:
+        enabled: ${APP_AI_RAG_HISTORY_ENABLED:true}
+        max-messages: ${APP_AI_RAG_HISTORY_MAX_MESSAGES:10}
       # CRAG 纠正式检索（P2）：rerank 后小模型打分 correct/ambiguous/incorrect，
-      # ambiguous 重写重检索一次，incorrect 走通用对话兜底（默认关闭，评测/演示按需开启）
+      # ambiguous 重写重检索一次，incorrect 判「知识库无据」防幻觉
       crag:
         enabled: ${APP_AI_RAG_CRAG_ENABLED:false}
         grade-top-n: ${APP_AI_RAG_CRAG_GRADE_TOPN:3}
@@ -488,10 +472,6 @@ app:
           max-rows: ${APP_AI_RAG_NEO4J_MAX_ROWS:100}
           max-retries: ${APP_AI_RAG_NEO4J_MAX_RETRIES:1}
           prompt-path: ${APP_AI_RAG_NEO4J_PROMPT_PATH:classpath:prompts/rag/text-to-cypher.txt}
-        dingtalk:
-          enabled: ${APP_AI_RAG_DINGTALK_ENABLED:false}
-          token: ${APP_AI_RAG_DINGTALK_TOKEN:}
-          max-question-chars: ${APP_AI_RAG_DINGTALK_MAX_QUESTION_CHARS:2000}
       # RAG 流式生成专用模型（对齐业界实践 qwen3.6-plus）
       generation:
         streaming-model: ${APP_AI_RAG_GENERATION_MODEL:qwen3.6-plus}
@@ -515,7 +495,7 @@ app:
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     evaluation:
-      batch-size: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:8}
+      batch-size: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:3}
   resume:
     upload-dir: ${java.io.tmpdir}/ai-interview/resumes
     allowed-types:

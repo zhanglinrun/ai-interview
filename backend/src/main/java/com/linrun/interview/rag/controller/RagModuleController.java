@@ -5,8 +5,11 @@ import com.linrun.interview.common.annotation.RateLimit;
 import com.linrun.interview.common.result.Result;
 import com.linrun.interview.auth.security.UserContext;
 import com.linrun.interview.rag.model.IntentRecognitionResult;
+import com.linrun.interview.rag.model.QueryRequest;
+import com.linrun.interview.rag.model.RagSourceDTO;
 import com.linrun.interview.rag.service.IntentRecognitionService;
 import com.linrun.interview.rag.service.InterviewQueryTransformer;
+import com.linrun.interview.rag.service.KnowledgeBaseQueryService;
 import com.linrun.interview.rag.constant.InterviewIntent;
 import com.linrun.interview.ai.service.RagPromptService;
 import com.linrun.interview.rag.service.RerankService;
@@ -23,9 +26,10 @@ import com.linrun.interview.ai.service.PromptTemplate;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * RAG 模块调试端点（对齐业界实践 RagModuleController，面试域简化版）。
+ * RAG 模块调试端点。
  */
 @RestController
 @RequestMapping("/api/v1/rag/module")
@@ -36,6 +40,7 @@ public class RagModuleController {
   private final RagPromptService ragPromptService;
   private final RerankService rerankService;
   private final LlmProviderRegistry llmProviderRegistry;
+  private final KnowledgeBaseQueryService knowledgeBaseQueryService;
 
   @GetMapping("/intent")
   @RateLimit(dimension = RateLimit.Dimension.USER, count = 20)
@@ -67,7 +72,7 @@ public class RagModuleController {
   @RateLimit(dimension = RateLimit.Dimension.USER, count = 10)
   public Result<String> testRerank(@RequestParam(defaultValue = "什么是 Java 虚拟机？") String question) {
     if (!rerankService.isEnabled()) {
-      return Result.error("Rerank 未启用或模型不可用");
+      return Result.error("Rerank 未启用或本地模型不可用");
     }
     List<TextSegment> docs = List.of(
         TextSegment.from("Java 是面向对象语言，JVM 提供跨平台能力。"),
@@ -79,6 +84,46 @@ public class RagModuleController {
       sb.append(String.format(Locale.ROOT, "[score=%.4f] %s%n", scores.get(i), docs.get(i).text()));
     }
     return Result.success(sb.toString().trim());
+  }
+
+  /**
+   * 端到端检索调试：走评测 augment（ES-only，关改写/HyDE/分解，保留混合检索/RRF/BGE/父扩展）。
+   */
+  @GetMapping("/retrieve")
+  @RateLimit(dimension = RateLimit.Dimension.USER, count = 10)
+  public Result<Map<String, Object>> testRetrieve(
+      @RequestParam String question,
+      @RequestParam List<Long> knowledgeBaseIds) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+      return Result.error("knowledgeBaseIds 不能为空");
+    }
+    List<TextSegment> segments = knowledgeBaseQueryService.retrieveForEvaluation(
+        knowledgeBaseIds, question);
+    List<String> snippets = segments.stream().map(TextSegment::text).toList();
+    return Result.success(Map.of(
+        "count", snippets.size(),
+        "snippets", snippets));
+  }
+
+  /**
+   * 同步问答调试：返回 answer + sources，便于对照引用与检索片段。
+   */
+  @GetMapping("/query")
+  @RateLimit(dimension = RateLimit.Dimension.USER, count = 5)
+  public Result<Map<String, Object>> testQuery(
+      @RequestParam String question,
+      @RequestParam List<Long> knowledgeBaseIds) {
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+      return Result.error("knowledgeBaseIds 不能为空");
+    }
+    var response = knowledgeBaseQueryService.queryKnowledgeBase(
+        new QueryRequest(knowledgeBaseIds, question));
+    List<String> sourceSnippets = response.sources() == null ? List.of()
+        : response.sources().stream().map(RagSourceDTO::snippet).toList();
+    return Result.success(Map.of(
+        "answer", response.answer(),
+        "sourceCount", sourceSnippets.size(),
+        "sources", sourceSnippets));
   }
 
   private String loadClasspathPrompt(String location) {

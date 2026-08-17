@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveOrchestrationState } from './AgentTracePage';
-import type { AgentTraceStep } from '../types/interview';
+import { eventToneClass, resolveOrchestrationState, stateBadgeClass } from '../utils/agentTrace';
+import type { AgentTraceEvent, AgentTraceStep } from '../types/interview';
 
 function step(partial: Partial<AgentTraceStep>): AgentTraceStep {
   return {
@@ -9,6 +9,26 @@ function step(partial: Partial<AgentTraceStep>): AgentTraceStep {
     action: 'turn_decision',
     actionInput: '',
     observation: '',
+    ...partial,
+  };
+}
+
+function event(partial: Partial<AgentTraceEvent>): AgentTraceEvent {
+  return {
+    step: 1,
+    questionIndex: 0,
+    role: 'critic',
+    action: 'critique',
+    state: 'CRITIQUING',
+    headline: 'Critic 打回',
+    body: '题面太宽',
+    approved: false,
+    score: 40,
+    retryHint: '收窄',
+    followUpAction: null,
+    capability: null,
+    evidenceIds: [],
+    reflexion: true,
     ...partial,
   };
 }
@@ -34,5 +54,13 @@ describe('resolveOrchestrationState', () => {
       action: 'state',
       actionInput: 'ASKING',
     }))).toBe('ASKING');
+  });
+});
+
+describe('agent trace display', () => {
+  it('marks reflexion events', () => {
+    expect(eventToneClass(event({}))).toContain('rose');
+    expect(eventToneClass(event({ reflexion: false, approved: true, state: 'CRITIQUING' }))).toContain('emerald');
+    expect(stateBadgeClass('REFLEXION')).toContain('rose');
   });
 });

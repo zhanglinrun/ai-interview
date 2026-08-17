@@ -63,6 +63,8 @@ import java.util.Map;
 @Tag(name = "知识库管理", description = "知识库上传、下载、查询、分类与向量化")
 public class KnowledgeBaseController {
 
+    static final int MAX_BATCH_FILES = 50;
+
     private final DocumentProcessService documentProcessService;
     private final KnowledgeDocumentService knowledgeDocumentService;
     private final KnowledgeDocumentVersionService versionService;
@@ -218,12 +220,14 @@ public class KnowledgeBaseController {
 
     /**
      * 批量上传知识库文件
-     * <p>逐个复用单文件上传逻辑，单个文件失败不影响其余，最后汇总。
-     * DOCUMENT_SEARCH 上传成功后自动 split；DATA_QUERY 仅导入动态表，不 split。
+     * <p>逐个只做接收（MinIO + 建档 UPLOADED），解析和切块在请求返回后异步执行。
+     * 单个文件失败不影响其余。DOCUMENT_SEARCH 异步 split；DATA_QUERY 只导入动态表。
      */
     @PostMapping(value = "/api/v1/knowledge-bases/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
-    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.USER, count = 30, interval = 1,
+        timeUnit = RateLimit.TimeUnit.MINUTES)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 60, interval = 1,
+        timeUnit = RateLimit.TimeUnit.MINUTES)
     public Result<Map<String, Object>> uploadKnowledgeBaseBatch(
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "category", required = false) String category,
@@ -231,6 +235,10 @@ public class KnowledgeBaseController {
             @RequestParam(value = "accessibleBy", required = false, defaultValue = "PRIVATE") String accessibleBy) {
         if (files == null || files.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少选择一个文件");
+        }
+        if (files.size() > MAX_BATCH_FILES) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "单次最多上传 " + MAX_BATCH_FILES + " 个文件，请分批后重试");
         }
         DocumentAccessScope scope = DocumentAccessScope.from(accessibleBy);
         KnowledgeBaseType kbType = parseKnowledgeBaseType(knowledgeBaseType);
@@ -245,14 +253,10 @@ public class KnowledgeBaseController {
         for (MultipartFile file : files) {
             String fileName = file != null ? file.getOriginalFilename() : null;
             try {
-                Map<String, Object> result = uploadSingle(file, null, category, scope, null, kbType);
-                Object kbObj = result.get("knowledgeBase");
-                if (kbObj instanceof Map<?, ?> kbMap) {
-                    Object idObj = kbMap.get("id");
-                    if (idObj instanceof Number idNum) {
-                        maybeSplitAfterUpload(idNum.longValue(), kbType);
-                    }
-                }
+                boolean splitAfter = kbType != KnowledgeBaseType.DATA_QUERY;
+                Long docId = documentProcessService.acceptAndEnqueueConvert(
+                    file, null, category, scope, null, kbType, splitAfter);
+                Map<String, Object> result = snapshotAccepted(file, docId);
                 success++;
                 items.add(Map.of(
                     "filename", fileName != null ? fileName : "",
@@ -284,11 +288,28 @@ public class KnowledgeBaseController {
         ));
     }
 
-    private void maybeSplitAfterUpload(Long docId, KnowledgeBaseType kbType) {
-        if (kbType == KnowledgeBaseType.DATA_QUERY) {
-            return;
+    private Map<String, Object> snapshotAccepted(MultipartFile file, Long docId) {
+        KnowledgeBaseEntity entity;
+        try {
+            entity = accessService.requireOwner(docId);
+        } catch (BusinessException ex) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "上传后知识库记录丢失", ex);
         }
-        documentProcessService.split(docId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("knowledgeBase", Map.of(
+            "id", docId,
+            "name", entity.getName() != null ? entity.getName() : "",
+            "category", entity.getCategory() != null ? entity.getCategory() : "",
+            "fileSize", file != null ? file.getSize() : 0L,
+            "contentLength", 0,
+            "docStatus", entity.getDocStatus() != null ? entity.getDocStatus().name() : "UPLOADED"
+        ));
+        result.put("storage", Map.of(
+            "fileKey", entity.getStorageKey() != null ? entity.getStorageKey() : "",
+            "fileUrl", entity.getStorageUrl() != null ? entity.getStorageUrl() : ""
+        ));
+        result.put("duplicate", false);
+        return result;
     }
 
     @GetMapping("/api/v1/knowledge-bases/dataset/generate")
@@ -415,7 +436,7 @@ public class KnowledgeBaseController {
     }
 
     /**
-     * 按策略重新切块（可选参数，默认 PARENT_CHILD）。
+     * 按策略重新切块（可选参数，默认 TITLE / titleLevel=3，与 know-engine 对齐）。
      */
     @PostMapping("/api/v1/knowledge-bases/{id}/split")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3)

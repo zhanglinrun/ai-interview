@@ -93,18 +93,6 @@ public final class AsyncTaskStreamConstants {
      */
     public static final String FIELD_SESSION_ID = "sessionId";
 
-    // ========== 岗位实战准备 ==========
-
-    public static final String JOB_INTERVIEW_PREPARE_STREAM_KEY = "job-interview:prepare:stream";
-    public static final String JOB_INTERVIEW_PREPARE_GROUP_NAME = "job-interview-prepare-group";
-    public static final String FIELD_PREPARATION_RUN_ID = "preparationRunId";
-
-    // ========== 证据化复盘生成 ==========
-
-    public static final String INTERVIEW_REPORT_STREAM_KEY = "interview:report:stream";
-    public static final String INTERVIEW_REPORT_GROUP_NAME = "interview-report-group";
-    public static final String FIELD_REPORT_ID = "reportId";
-
     // ========== RabbitMQ 拓扑 ==========
     // direct exchange，每条管道一个业务队列 + 一个死信队列（DLQ）；业务队列声明
     // x-dead-letter-exchange 指向 DLX，消费重试耗尽后由容器拒绝、经 DLX 路由进 DLQ。
@@ -127,17 +115,5 @@ public final class AsyncTaskStreamConstants {
     public static final String RABBIT_INTERVIEW_EVALUATE_ROUTING = "interview.evaluate";
     public static final String RABBIT_INTERVIEW_EVALUATE_DLQ = "interview.evaluate.dlq";
     public static final String RABBIT_INTERVIEW_EVALUATE_DLQ_ROUTING = "interview.evaluate.dlq";
-
-    /** 岗位实战准备：队列 / routing key / 死信队列 / 死信 routing key。 */
-    public static final String RABBIT_JOB_INTERVIEW_PREPARE_QUEUE = "job.interview.prepare.queue";
-    public static final String RABBIT_JOB_INTERVIEW_PREPARE_ROUTING = "job.interview.prepare";
-    public static final String RABBIT_JOB_INTERVIEW_PREPARE_DLQ = "job.interview.prepare.dlq";
-    public static final String RABBIT_JOB_INTERVIEW_PREPARE_DLQ_ROUTING = "job.interview.prepare.dlq";
-
-    /** 证据化复盘：队列 / routing key / 死信队列 / 死信 routing key。 */
-    public static final String RABBIT_INTERVIEW_REPORT_QUEUE = "interview.report.queue";
-    public static final String RABBIT_INTERVIEW_REPORT_ROUTING = "interview.report";
-    public static final String RABBIT_INTERVIEW_REPORT_DLQ = "interview.report.dlq";
-    public static final String RABBIT_INTERVIEW_REPORT_DLQ_ROUTING = "interview.report.dlq";
 
 }

@@ -36,7 +36,7 @@ public record SseEventEnvelope(
         if (value.startsWith("progress:")) {
             String progress = value.substring("progress:".length());
             stage = classifyProgressStage(progress);
-            event = "rerank".equals(stage) ? "rerank" : "retrieval";
+            event = "progress";
             prefix = "progress:";
         } else if (value.startsWith("intent:")) {
             event = "intent";

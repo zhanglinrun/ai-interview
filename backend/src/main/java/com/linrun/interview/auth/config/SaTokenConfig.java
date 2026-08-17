@@ -26,7 +26,6 @@ public class SaTokenConfig implements WebMvcConfigurer {
 
     private static final String[] PUBLIC_PATHS = {
         "/api/v1/auth/**",
-        "/api/v1/dingtalk/callback/**",
         "/api/v1/health/**",
         "/actuator/**",
         "/swagger-ui/**",

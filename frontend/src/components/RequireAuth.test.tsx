@@ -22,7 +22,7 @@ function renderGuard(initialEntry: string) {
       <Routes>
         <Route path="/login" element={<LoginLocation />} />
         <Route element={<RequireAuth />}>
-          <Route path="/job-practice" element={<div>岗位实战内容</div>} />
+          <Route path="/interview" element={<div>模拟面试内容</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -35,20 +35,20 @@ describe('RequireAuth', () => {
   });
 
   it('未登录时在业务页渲染前跳转登录并保留站内回跳地址', async () => {
-    renderGuard('/job-practice?stage=github#evidence');
+    renderGuard('/interview?skill=java#start');
 
     expect(await screen.findByTestId('login-location')).toHaveTextContent(
-      '/login|/job-practice?stage=github#evidence',
+      '/login|/interview?skill=java#start',
     );
-    expect(screen.queryByText('岗位实战内容')).not.toBeInTheDocument();
+    expect(screen.queryByText('模拟面试内容')).not.toBeInTheDocument();
   });
 
   it('存在非空本地 access token 时放行业务路由', () => {
     window.localStorage.setItem(ACCESS_TOKEN_KEY, 'local-access-token');
 
-    renderGuard('/job-practice');
+    renderGuard('/interview');
 
-    expect(screen.getByText('岗位实战内容')).toBeInTheDocument();
+    expect(screen.getByText('模拟面试内容')).toBeInTheDocument();
     expect(screen.queryByTestId('login-location')).not.toBeInTheDocument();
   });
 

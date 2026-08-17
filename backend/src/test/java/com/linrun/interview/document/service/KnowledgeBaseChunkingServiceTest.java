@@ -18,11 +18,12 @@ class KnowledgeBaseChunkingServiceTest {
   private final KnowledgeBaseChunkingService service = new KnowledgeBaseChunkingService(new KnowledgeBaseQueryProperties());
 
   @Test
-  @DisplayName("空 splitType 应回落默认 PARENT_CHILD")
+  @DisplayName("空 splitType 应回落默认 TITLE 且 titleLevel=3")
   void resolveSplitParamUsesDefaultWhenSplitTypeMissing() {
     DocumentSplitParam resolved = service.resolveSplitParam(new DocumentSplitParam(null, null, null, null, null, null));
 
-    assertThat(resolved.splitType()).isEqualTo(SplitType.PARENT_CHILD.name());
+    assertThat(resolved.splitType()).isEqualTo(SplitType.TITLE.name());
+    assertThat(resolved.titleLevel()).isEqualTo(DocumentSplitterFactory.DEFAULT_TITLE_LEVEL);
     assertThat(resolved.chunkSize()).isGreaterThan(0);
   }
 
@@ -32,8 +33,9 @@ class KnowledgeBaseChunkingServiceTest {
     DocumentSplitParam resolved = service.resolveSplitParam(
         new DocumentSplitParam(null, 512, null, null, null, null));
 
-    assertThat(resolved.splitType()).isEqualTo(SplitType.PARENT_CHILD.name());
+    assertThat(resolved.splitType()).isEqualTo(SplitType.TITLE.name());
     assertThat(resolved.chunkSize()).isEqualTo(512);
+    assertThat(resolved.titleLevel()).isEqualTo(DocumentSplitterFactory.DEFAULT_TITLE_LEVEL);
   }
 
   @Test
@@ -59,5 +61,15 @@ class KnowledgeBaseChunkingServiceTest {
         assertThat(chunk.metadata().getInteger("skipEmbedding")).isEqualTo(1));
     assertThat(chunks).anySatisfy(chunk ->
         assertThat(chunk.metadata().getString("parentChunkId")).isNotBlank());
+  }
+
+  @Test
+  @DisplayName("只有标题没有正文的空壳段不应进入检索集")
+  void headingOnlyStubIsFiltered() {
+    List<dev.langchain4j.data.segment.TextSegment> chunks = service.split(
+        "# RocketMQ\n## 概览\n",
+        new DocumentSplitParam(SplitType.TITLE.name(), 800, 80, 3, null, null));
+
+    assertThat(chunks).isEmpty();
   }
 }

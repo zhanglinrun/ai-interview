@@ -2,11 +2,11 @@ import {useCallback, useEffect, useState} from 'react';
 import {historyApi, type EvaluateStatus} from '../api/history';
 import {getErrorMessage} from '../api/request';
 import {interviewApi, type TextSessionMeta} from '../api/interview';
-import {jobTargetApi} from '../api/jobTarget';
-import {compareDateDesc, formatDate} from '../utils/date';
+import {compareDateDesc, formatDate, getDurationSeconds} from '../utils/date';
 import {downloadBlob} from '../utils/download';
-import {formatShortId} from '../utils/format';
+import {formatDurationText, formatShortId} from '../utils/format';
 import {
+  hasReliableEvaluationScore,
   isCompletedInterviewStatus,
   isEvaluationCompleted,
   isEvaluationFailed,
@@ -14,9 +14,9 @@ import {
 } from '../utils/interviewStatus';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import LoadingButtonContent from '../components/LoadingButtonContent';
-import {EmptyState, LoadingState} from '../components/PageState';
+import {ErrorState, EmptyState, LoadingState} from '../components/PageState';
+import {getSkillLabel} from '../utils/displayLabels';
 import InterviewStatusBadge from '../components/InterviewStatusBadge';
-import InterviewTypeBadge from '../components/InterviewTypeBadge';
 import SearchInput from '../components/SearchInput';
 import ScoreProgress from '../components/ScoreProgress';
 import StatCard from '../components/StatCard';
@@ -27,13 +27,14 @@ import {
   Download,
   FileText,
   PlayCircle,
+  RefreshCw,
   RotateCcw,
   Trash2,
   TrendingUp,
   Users,
 } from 'lucide-react';
 
-interface UnifiedInterviewItem {
+export interface UnifiedInterviewItem {
   id: string;
   title: string;
   sessionId: string;
@@ -41,11 +42,11 @@ interface UnifiedInterviewItem {
   evaluateStatus?: EvaluateStatus;
   evaluateError?: string;
   overallScore: number | null;
+  evaluationDegraded?: boolean;
   totalQuestions?: number;
   createdAt: string;
+  completedAt?: string | null;
   resumeId?: number;
-  jobInterview: boolean;
-  currentStage?: string;
 }
 
 interface InterviewStats {
@@ -53,13 +54,6 @@ interface InterviewStats {
   completedCount: number;
   averageScore: number | null;
 }
-
-const JOB_INTERVIEW_STAGE_LABELS: Record<string, string> = {
-  PROJECT_DEEP_DIVE: '项目深挖',
-  POSITION_TECH: '岗位技术',
-  ALGORITHM: '算法题',
-  ENGINEERING_SCENARIO: '工程场景',
-};
 
 function hasEvaluationCompleted(item: UnifiedInterviewItem): boolean {
   return isEvaluationCompleted(item.evaluateStatus, item.status);
@@ -74,14 +68,42 @@ function canContinueInterview(item: UnifiedInterviewItem): boolean {
     && !hasEvaluationCompleted(item);
 }
 
-function getJobInterviewStageLabel(stage: string): string {
-  return JOB_INTERVIEW_STAGE_LABELS[stage] ?? '其他阶段';
+export function toInterviewHistoryItem(session: TextSessionMeta): UnifiedInterviewItem {
+  return {
+    id: session.sessionId,
+    title: getSkillLabel(session.skillId),
+    sessionId: session.sessionId,
+    status: session.status,
+    evaluateStatus: session.evaluateStatus ?? undefined,
+    evaluateError: session.evaluateError ?? undefined,
+    overallScore: session.overallScore,
+    evaluationDegraded: session.evaluationDegraded,
+    totalQuestions: session.totalQuestions,
+    createdAt: session.createdAt,
+    completedAt: session.completedAt,
+    resumeId: session.resumeId ?? undefined,
+  };
+}
+
+export function matchesInterviewSearch(
+  item: Pick<UnifiedInterviewItem, 'title' | 'sessionId'>,
+  searchTerm: string,
+): boolean {
+  const query = searchTerm.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+  return item.title.toLowerCase().includes(query)
+    || item.sessionId.toLowerCase().includes(query);
 }
 
 function calculateStats(items: UnifiedInterviewItem[]): InterviewStats {
-  const evaluated = items.filter(i => (
-    !i.jobInterview && hasEvaluationCompleted(i) && i.overallScore !== null
-  ));
+  const evaluated = items.filter(i => hasReliableEvaluationScore({
+    evaluateStatus: i.evaluateStatus,
+    status: i.status,
+    overallScore: i.overallScore,
+    evaluationDegraded: i.evaluationDegraded,
+  }));
   const completed = items.filter(i => isCompletedInterviewStatus(i.status) || hasEvaluationCompleted(i));
   const totalScore = evaluated.reduce((sum, i) => sum + (i.overallScore || 0), 0);
 
@@ -102,9 +124,9 @@ function statsEqual(a: InterviewStats | null, b: InterviewStats): boolean {
 
 interface InterviewHistoryPageProps {
   onBack: () => void;
-  onViewInterview: (sessionId: string, resumeId?: number, jobInterview?: boolean, status?: string) => void;
+  onViewInterview: (sessionId: string, resumeId?: number) => void;
   onRestartInterview?: (resumeId: number) => void;
-  onContinueInterview?: (sessionId: string, jobInterview?: boolean) => void;
+  onContinueInterview?: (sessionId: string) => void;
 }
 
 /** Shallow comparison for polling change-detection */
@@ -113,7 +135,8 @@ function itemsEqual(a: UnifiedInterviewItem[], b: UnifiedInterviewItem[]): boole
   for (let i = 0; i < a.length; i++) {
     const ai = a[i], bi = b[i];
     if (ai.id !== bi.id || ai.status !== bi.status ||
-        ai.evaluateStatus !== bi.evaluateStatus || ai.overallScore !== bi.overallScore) return false;
+        ai.evaluateStatus !== bi.evaluateStatus || ai.overallScore !== bi.overallScore
+        || ai.evaluationDegraded !== bi.evaluationDegraded) return false;
   }
   return true;
 }
@@ -125,14 +148,21 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
   const [searchTerm, setSearchTerm] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteItem, setDeleteItem] = useState<UnifiedInterviewItem | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [exporting, setExporting] = useState<string | null>(null);
+  const [reevaluating, setReevaluating] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
   const loadAll = useCallback(async (isPolling = false) => {
-    if (!isPolling) setLoading(true);
+    if (!isPolling) {
+      setLoading(true);
+      setError('');
+    }
 
     try {
-      const all = await loadTextInterviews();
-      all.sort((a, b) => compareDateDesc(a.createdAt, b.createdAt));
+      const sessions = await interviewApi.listSessions();
+      const all = sessions.map(toInterviewHistoryItem)
+        .sort((a, b) => compareDateDesc(a.createdAt, b.createdAt));
 
       setItems(prev => {
         if (isPolling && itemsEqual(prev, all)) return prev;
@@ -146,42 +176,15 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
       });
     } catch (err) {
       console.error('加载面试记录失败', err);
+      if (!isPolling) {
+        setError(getErrorMessage(err, '加载面试记录失败'));
+        setItems([]);
+        setStats(null);
+      }
     } finally {
       if (!isPolling) setLoading(false);
     }
   }, []);
-
-  // Load text interviews from dedicated API
-  async function loadTextInterviews(): Promise<UnifiedInterviewItem[]> {
-    try {
-      const [sessions, targets] = await Promise.all([
-        interviewApi.listSessions(),
-        jobTargetApi.list().catch(() => []),
-      ]);
-      const targetTitles = new Map(targets.map((target) => [
-        target.id,
-        [target.company?.trim(), target.title.trim()].filter(Boolean).join(' · '),
-      ]));
-      return sessions.map((session: TextSessionMeta) => ({
-        id: session.sessionId,
-        title: session.jobInterview
-          ? targetTitles.get(session.jobDescriptionId ?? -1) || '岗位实战'
-          : '文字面试',
-        sessionId: session.sessionId,
-        status: session.status,
-        evaluateStatus: session.evaluateStatus ?? undefined,
-        evaluateError: session.evaluateError ?? undefined,
-        overallScore: session.overallScore,
-        totalQuestions: session.totalQuestions,
-        createdAt: session.createdAt,
-        resumeId: session.resumeId ?? undefined,
-        jobInterview: session.jobInterview,
-        currentStage: session.currentStage ?? undefined,
-      }));
-    } catch {
-      return [];
-    }
-  }
 
   useEffect(() => {
     loadAll();
@@ -191,25 +194,46 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
   useConditionalPolling(hasEvaluating, () => loadAll(true), FAST_POLLING_INTERVAL_MS);
 
   const handleRowClick = (item: UnifiedInterviewItem) => {
-    onViewInterview(item.sessionId, item.resumeId, item.jobInterview, item.status);
+    onViewInterview(item.sessionId, item.resumeId);
   };
 
   const handleDeleteClick = (item: UnifiedInterviewItem, e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    setDeleteError('');
     setDeleteItem(item);
   };
 
   const handleDeleteConfirm = async () => {
     if (!deleteItem) return;
-    setDeletingSessionId(deleteItem.sessionId);
+    const sessionId = deleteItem.sessionId;
+    setDeletingSessionId(sessionId);
+    setDeleteError('');
     try {
-      await historyApi.deleteInterview(deleteItem.sessionId);
-      await loadAll();
+      await historyApi.deleteInterview(sessionId);
+      setItems(prev => prev.filter(item => item.sessionId !== sessionId));
       setDeleteItem(null);
+      await loadAll();
     } catch (err) {
-      alert(getErrorMessage(err, '删除失败，请稍后重试'));
+      setDeleteError(getErrorMessage(err, '删除失败，请稍后重试'));
     } finally {
       setDeletingSessionId(null);
+    }
+  };
+
+  const canReevaluate = (item: UnifiedInterviewItem) =>
+    isEvaluationFailed(item.evaluateStatus) || item.evaluationDegraded === true;
+
+  const handleReevaluate = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setReevaluating(sessionId);
+    try {
+      await interviewApi.reevaluateInterview(sessionId);
+      await loadAll();
+    } catch (err) {
+      alert(getErrorMessage(err, '重新评估失败，请稍后重试'));
+    } finally {
+      setReevaluating(null);
     }
   };
 
@@ -227,17 +251,14 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
   };
 
   // Filter + search
-  const filtered = items.filter(item => {
-    if (searchTerm && !item.title.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = items.filter(item => matchesInterviewSearch(item, searchTerm));
 
   return (
     <div className="mx-auto w-full max-w-7xl">
       <PageHeader
         title="面试记录"
         description="查看已完成的报告，或继续尚未结束的面试。"
-        action={<SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="搜索面试" />}
+        action={<SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="搜索方向或会话" />}
       />
 
       {/* Stats */}
@@ -260,22 +281,38 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
         <LoadingState />
       )}
 
-      {/* Empty */}
-      {!loading && filtered.length === 0 && (
-        <EmptyState
-          icon={Users}
-          title="暂无面试记录"
-          description="开始一次模拟面试后，记录将显示在这里"
+      {!loading && error && (
+        <ErrorState
+          title={error}
+          description="请检查网络后重试，不要把加载失败当成没有面试记录。"
+          className="surface-card px-5 py-12 text-center"
+          action={
+            <button
+              type="button"
+              onClick={() => loadAll()}
+              className="btn-primary mt-4 px-4 py-2 text-sm"
+            >
+              重新加载
+            </button>
+          }
         />
       )}
 
-      {/* Table */}
-      {!loading && filtered.length > 0 && (
+      {!loading && !error && filtered.length === 0 && (
+        <EmptyState
+          icon={Users}
+          title={items.length === 0 ? '暂无面试记录' : '没有匹配的面试'}
+          description={items.length === 0
+            ? '开始一次模拟面试后，记录将显示在这里'
+            : '试试方向名（如 Java）或会话 ID'}
+        />
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
         <div className="surface-card overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-100 dark:border-slate-600">
               <tr>
-                <th className="text-left px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-300">类型</th>
                 <th className="text-left px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-300">名称</th>
                 <th className="text-left px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-300">状态</th>
                 <th className="text-left px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-300">得分</th>
@@ -290,9 +327,6 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                     key={item.id}
                     className="border-b border-slate-50 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50"
                   >
-                    <td className="px-6 py-4">
-                      <InterviewTypeBadge jobInterview={item.jobInterview} />
-                    </td>
                     <td className="px-6 py-4">
                       <button
                         type="button"
@@ -310,24 +344,23 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                       />
                     </td>
                     <td className="px-6 py-4">
-                      {item.jobInterview ? (
-                        <span className="text-primary-600 dark:text-primary-400 text-sm">不设总分</span>
-                      ) : hasEvaluationCompleted(item) && item.overallScore !== null ? (
-                        <ScoreProgress score={item.overallScore} />
+                      {hasReliableEvaluationScore({
+                        evaluateStatus: item.evaluateStatus,
+                        status: item.status,
+                        overallScore: item.overallScore,
+                        evaluationDegraded: item.evaluationDegraded,
+                      }) ? (
+                        <ScoreProgress score={item.overallScore ?? 0} />
                       ) : hasEvaluationProcessing(item) ? (
                         <span className="text-blue-500 dark:text-blue-400 text-sm">生成中...</span>
-                      ) : isEvaluationFailed(item.evaluateStatus) ? (
+                      ) : isEvaluationFailed(item.evaluateStatus) || item.evaluationDegraded ? (
                         <span className="text-red-500 dark:text-red-400 text-sm" title={item.evaluateError}>失败</span>
                       ) : (
                         <span className="text-slate-400 dark:text-slate-500">-</span>
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      {item.jobInterview && item.currentStage ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-primary-50 dark:bg-primary-950/30 text-primary-700 dark:text-primary-300 rounded-lg text-xs">
-                          {getJobInterviewStageLabel(item.currentStage)}
-                        </span>
-                      ) : item.totalQuestions != null ? (
+                      {item.totalQuestions != null ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-sm">
                           {item.totalQuestions} 题
                         </span>
@@ -336,13 +369,18 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                       )}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
-                      {formatDate(item.createdAt)}
+                      <div>{formatDate(item.createdAt)}</div>
+                      {item.completedAt && (
+                        <div className="mt-0.5 text-xs text-slate-400">
+                          用时 {formatDurationText(getDurationSeconds(item.createdAt, item.completedAt))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         {canContinueInterview(item) && onContinueInterview && (
                           <button
-                            onClick={(e) => { e.stopPropagation(); onContinueInterview(item.sessionId, item.jobInterview); }}
+                            onClick={(e) => { e.stopPropagation(); onContinueInterview(item.sessionId); }}
                             aria-label={`继续面试 ${item.title}`}
                             className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                             title="继续面试"
@@ -350,7 +388,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                             <PlayCircle className="w-4 h-4" />
                           </button>
                         )}
-                        {!item.jobInterview && hasEvaluationCompleted(item) && (
+                        {hasEvaluationCompleted(item) && (
                           <button
                             onClick={(e) => handleExport(item.sessionId, e)}
                             disabled={exporting === item.sessionId}
@@ -364,6 +402,23 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                               iconOnly
                             >
                               <Download className="w-4 h-4" />
+                            </LoadingButtonContent>
+                          </button>
+                        )}
+                        {canReevaluate(item) && (
+                          <button
+                            onClick={(e) => handleReevaluate(item.sessionId, e)}
+                            disabled={reevaluating === item.sessionId}
+                            aria-label={`重新评估 ${item.title}`}
+                            className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors disabled:opacity-50"
+                            title="重新评估"
+                          >
+                            <LoadingButtonContent
+                              loading={reevaluating === item.sessionId}
+                              loadingText="重评中"
+                              iconOnly
+                            >
+                              <RefreshCw className="w-4 h-4" />
                             </LoadingButtonContent>
                           </button>
                         )}
@@ -405,8 +460,13 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
         item={deleteItem ? { title: deleteItem.title } : null}
         itemType="面试记录"
         loading={deletingSessionId !== null}
+        error={deleteError}
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteItem(null)}
+        onCancel={() => {
+          if (deletingSessionId) return;
+          setDeleteError('');
+          setDeleteItem(null);
+        }}
       />
     </div>
   );

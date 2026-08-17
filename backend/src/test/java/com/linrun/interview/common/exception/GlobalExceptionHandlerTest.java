@@ -1,6 +1,7 @@
 package com.linrun.interview.common.exception;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import cn.dev33.satoken.exception.NotLoginException;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.multipart.MultipartException;
 
 @DisplayName("全局异常处理器")
 class GlobalExceptionHandlerTest {
@@ -100,6 +102,31 @@ class GlobalExceptionHandlerTest {
     assertThat(handler.handleHttpMessageNotWritableException(
         new HttpMessageNotWritableException("real serialization failure"), jsonResponse)
         .getCode()).isEqualTo(ErrorCode.INTERNAL_ERROR.getCode());
+  }
+
+  @Test
+  @DisplayName("未登录返回 401 而不是系统繁忙")
+  void shouldMapNotLoginToUnauthorized() {
+    NotLoginException expired = NotLoginException.newInstance("login", "-3", "token-1", null);
+    var result = handler.handleNotLoginException(expired);
+    assertThat(result.getCode()).isEqualTo(ErrorCode.UNAUTHORIZED.getCode());
+    assertThat(result.getMessage()).contains("token");
+  }
+
+  @Test
+  @DisplayName("multipart 文件数超限返回明确错误而不是系统繁忙")
+  void shouldMapPartCountExceededToBadRequest() {
+    MultipartException exceeded = new MultipartException(
+        "Failed to parse multipart",
+        new IllegalStateException("The number of parts in this request exceeded the limit of 10"));
+
+    assertThat(handler.handleMultipartException(exceeded).getCode())
+        .isEqualTo(ErrorCode.BAD_REQUEST.getCode());
+    assertThat(handler.handleMultipartException(exceeded).getMessage())
+        .contains("文件过多");
+    assertThat(GlobalExceptionHandler.isPartCountExceeded(exceeded)).isTrue();
+    assertThat(GlobalExceptionHandler.isPartCountExceeded(
+        new MultipartException("malformed boundary"))).isFalse();
   }
 
   @Test

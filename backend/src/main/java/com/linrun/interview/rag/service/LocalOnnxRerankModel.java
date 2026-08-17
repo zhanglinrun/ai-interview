@@ -20,7 +20,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
- * 本地 ONNX BGE-RERANKER 评分模型（参考业界实现 的 BgeScoringModel，取精华弃糟粕）。
+ * 本地 ONNX BGE-RERANKER 评分模型。
  *
  * <p>在 Java 进程内通过 ONNX Runtime 跑 BGE-RERANKER 做 RAG 重排，省去云端调用网络延迟与计费。
  * 实现 LC4j {@link ScoringModel}，委托单例 {@link OnnxScoringModel}，供
@@ -29,13 +29,13 @@ import java.util.List;
  * <p>与早期实现的差异（弃糟粕）：
  * <ul>
  *   <li><b>路径/maxSequenceLength 不硬编码</b>：走 {@link KnowledgeBaseQueryProperties.Rerank.LocalOnnx} 配置</li>
- *   <li><b>加载失败不抛异常中断</b>：{@code getInstance} 抛错时记 warn，由 {@code RerankService} 路由层降级云端</li>
+ *   <li><b>加载失败不抛异常中断</b>：{@code getInstance} 失败时记 warn，由 {@link RerankService} 退回 RRF 顺序</li>
  *   <li>保留 {@code resolveClasspathToFilePath} 的 JAR 内复制临时文件逻辑（生产 jar 部署需要）</li>
  *   <li>模型文件不入 git（~400MB），放 {@code src/main/resources/model/bge-reranker-model/}，
  *       由 README 说明从 {@code onnx-community/bge-reranker-v2-m3-ONNX} 下载</li>
  * </ul>
  *
- * <p>本类非 Spring bean（无模型文件时不应让容器启动失败），由 {@code RerankService} 懒加载并兜底降级。
+ * <p>本类非 Spring bean（无模型文件时不应让容器启动失败），由 {@link RerankService} 懒加载。
  */
 @Slf4j
 public class LocalOnnxRerankModel implements ScoringModel {
@@ -83,7 +83,7 @@ public class LocalOnnxRerankModel implements ScoringModel {
             } catch (Throwable e) {
                 // 模型文件缺失/加载失败：标记并降级云端，不抛异常中断 RAG
                 initFailed = true;
-                log.warn("本地 ONNX BGE-RERANKER 加载失败，将降级云端 rerank: {}", e.getMessage());
+                log.warn("本地 ONNX BGE-RERANKER 加载失败: {}", e.getMessage());
                 return null;
             }
         }

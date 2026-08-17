@@ -34,13 +34,20 @@ import java.util.regex.Pattern;
 public class FusionIntentRecognitionService implements IntentRecognitionService {
 
   private static final Pattern RESUME_ID_PATTERN = Pattern.compile(
-      "(?:简历|resume)\\s*(?:id|ID)?\\s*[:：#-]?\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
+      "(?:简历|resume)\\s*(?:id|ID)?\\s*[=:：#-]?\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
+  /** 捕获业务 sessionId（短 UUID / 数字串），对齐卡片追问「会话 ID=xxx」。 */
   private static final Pattern SESSION_ID_PATTERN = Pattern.compile(
-      "(?:会话|面试|session)\\s*(?:id|ID)?\\s*[:：#-]?\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
+      "(?:会话|session)\\s*(?:id|ID)?\\s*[=:：#-]?\\s*([A-Za-z0-9_-]{4,64})", Pattern.CASE_INSENSITIVE);
+  /** 捕获岗位方向 ID，对齐卡片追问「jobTrack=java-backend」。 */
+  private static final Pattern JOB_TRACK_ID_PATTERN = Pattern.compile(
+      "(?:jobTrack|岗位方向|方向)\\s*(?:id|ID)?\\s*[=:：#-]?\\s*([A-Za-z0-9_-]{2,64})",
+      Pattern.CASE_INSENSITIVE);
 
   private static final Map<InterviewIntent, List<String>> INTENT_EXAMPLES = Map.of(
       InterviewIntent.TECH_KB, List.of(
-          "讲讲 JVM 垃圾回收原理", "Spring 事务为什么会失效", "解释 Redis 缓存穿透和雪崩", "系统设计如何做限流"),
+          "讲讲 JVM 垃圾回收原理", "Spring 事务为什么会失效", "解释 Redis 缓存穿透和雪崩",
+          "系统设计如何做限流", "微服务是什么", "微服务和单体架构有什么区别",
+          "RAG 的召回和重排怎么设计", "Agent 怎么做工具调用"),
       InterviewIntent.CODE_REVIEW, List.of(
           "帮我分析这段代码的复杂度", "这道 LeetCode 怎么优化", "代码为什么空指针", "帮我做代码审查"),
       InterviewIntent.RESUME_STATS, List.of(
@@ -54,25 +61,49 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
       InterviewIntent.OFF_TOPIC, List.of(
           "今天天气怎么样", "讲个笑话", "帮我写旅游攻略", "推荐一部电影"));
 
+  /**
+   * 规则路只做廉价子串命中，词条必须够具体，避免「后端 / 开发」把求职规划题抢走。
+   * 短英文词至少 3 个字符，防止 {@code contains} 误伤。
+   */
   private static final Map<InterviewIntent, List<String>> INTENT_KEYWORDS = Map.of(
       InterviewIntent.TECH_KB, List.of(
-          "原理", "知识点", "八股", "jvm", "spring", "redis", "mysql", "mq", "系统设计", "分布式"),
+          "原理", "知识点", "八股", "jvm", "spring", "redis", "mysql", "mq", "缓存", "系统设计", "分布式",
+          "微服务", "microservice", "服务治理", "服务网格", "服务发现", "注册中心", "配置中心",
+          "nacos", "eureka", "zookeeper", "dubbo", "feign", "gateway", "网关", "负载均衡",
+          "sentinel", "hystrix", "熔断", "限流", "降级", "雪崩", "击穿", "穿透",
+          "分布式事务", "分布式锁", "seata", "saga", "tcc", "幂等", "最终一致性",
+          "消息队列", "kafka", "rocketmq", "rabbitmq", "死信",
+          "分库分表", "sharding", "innodb", "事务隔离", "索引",
+          "springboot", "springcloud", "mybatis", "netty", "nio",
+          "线程池", "并发", "synchronized", "volatile", "aqs", "jmm",
+          "垃圾回收", "类加载", "docker", "k8s", "kubernetes", "云原生",
+          "grpc", "protobuf", "链路追踪", "skywalking",
+          "agent", "multi-agent", "多agent", "rag", "langchain", "langgraph",
+          "mcp", "embedding", "向量库", "向量检索", "召回", "重排", "rerank",
+          "hyde", "crag", "bm25", "text2sql", "text2cypher", "neo4j",
+          "function calling", "tool calling", "工具调用", "提示词", "prompt",
+          "幻觉", "grounded", "知识库", "检索增强", "编排", "orchestrat",
+          "reflexion", "planner", "critic", "onnx", "bge"),
       InterviewIntent.CODE_REVIEW, List.of(
-          "代码", "bug", "报错", "复杂度", "leetcode", "算法", "优化", "空指针", "审查"),
+          "代码", "bug", "报错", "复杂度", "leetcode", "算法", "优化", "空指针", "审查",
+          "debug", "调试", "堆栈", "时间复杂度", "动态规划", "链表", "二叉树"),
       InterviewIntent.RESUME_STATS, List.of(
           "简历", "项目经历", "匹配度", "技能匹配", "经历", "亮点", "短板"),
       InterviewIntent.INTERVIEW_PREP, List.of(
-          "模拟面试", "面试题", "追问", "评估", "回答", "准备", "考察", "面试官"),
+          "模拟面试", "面试题", "追问", "评估", "回答", "准备", "考察", "面试官",
+          "面经", "自我介绍"),
       InterviewIntent.SCHEDULE, List.of(
           "日程", "提醒", "安排", "面试邀请", "时间", "明天", "下周", "calendar"),
       InterviewIntent.CAREER, List.of(
-          "职业", "offer", "校招", "跳槽", "成长", "规划", "方向", "求职"),
+          "职业", "offer", "校招", "秋招", "春招", "社招", "实习", "跳槽", "成长", "规划", "方向", "求职"),
       InterviewIntent.OFF_TOPIC, List.of(
           "天气", "旅游", "电影", "音乐", "笑话", "菜谱", "星座", "游戏"));
 
-  private static final List<String> KNOWN_SKILLS = List.of(
+  private static final List<String> KNOWN_JOB_TRACK_KEYWORDS = List.of(
       "java", "spring", "spring boot", "redis", "mysql", "jvm", "mq", "rabbitmq",
-      "elasticsearch", "react", "vue", "前端", "后端", "算法", "go", "python");
+      "elasticsearch", "react", "vue", "前端", "后端", "算法", "go", "python",
+      "微服务", "dubbo", "nacos", "kafka", "rocketmq", "netty", "k8s", "kubernetes",
+      "agent", "rag");
 
   private static final List<String> KNOWN_COMPANIES = List.of(
       "字节", "阿里", "腾讯", "美团", "百度", "快手", "小米", "华为", "京东", "拼多多",
@@ -217,7 +248,7 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
         .orElse(null);
     IntentRecognitionResult.Entities ruleEntities = extractEntities(question);
     return new IntentRecognitionResult.Entities(
-        firstNonBlank(llmEntities != null ? llmEntities.skill() : null, ruleEntities.skill()),
+        firstNonBlank(llmEntities != null ? llmEntities.jobTrack() : null, ruleEntities.jobTrack()),
         firstNonNull(llmEntities != null ? llmEntities.resumeId() : null, ruleEntities.resumeId()),
         firstNonNull(llmEntities != null ? llmEntities.sessionId() : null, ruleEntities.sessionId()),
         firstNonBlank(llmEntities != null ? llmEntities.company() : null, ruleEntities.company()));
@@ -225,28 +256,39 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
 
   private IntentRecognitionResult.Entities extractEntities(String question) {
     String normalized = normalize(question);
-    String skill = KNOWN_SKILLS.stream()
-        .filter(normalized::contains)
-        .findFirst()
-        .orElse(null);
+    String jobTrack = firstNonBlank(
+        extractToken(JOB_TRACK_ID_PATTERN, question),
+        KNOWN_JOB_TRACK_KEYWORDS.stream()
+            .filter(normalized::contains)
+            .findFirst()
+            .orElse(null));
     String company = KNOWN_COMPANIES.stream()
         .filter(normalized::contains)
         .findFirst()
         .orElse(null);
-    return new IntentRecognitionResult.Entities(skill, extractLong(RESUME_ID_PATTERN, question),
-        extractLong(SESSION_ID_PATTERN, question), company);
+    return new IntentRecognitionResult.Entities(jobTrack, extractLong(RESUME_ID_PATTERN, question),
+        extractToken(SESSION_ID_PATTERN, question), company);
   }
 
   private Long extractLong(Pattern pattern, String text) {
+    String token = extractToken(pattern, text);
+    if (token == null) {
+      return null;
+    }
+    try {
+      return Long.parseLong(token);
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  private String extractToken(Pattern pattern, String text) {
     Matcher matcher = pattern.matcher(text == null ? "" : text);
     if (!matcher.find()) {
       return null;
     }
-    try {
-      return Long.parseLong(matcher.group(1));
-    } catch (NumberFormatException e) {
-      return null;
-    }
+    String value = matcher.group(1);
+    return value == null || value.isBlank() ? null : value.trim();
   }
 
   private String buildLlmInput(String question, String historySummary) {

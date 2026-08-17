@@ -4,225 +4,67 @@ import com.linrun.interview.rag.config.KnowledgeBaseQueryProperties;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.scoring.ScoringModel;
-import com.linrun.interview.config.LlmProviderProperties;
-import com.linrun.interview.config.LlmProviderProperties.ProviderConfig;
-import com.linrun.interview.rag.service.LocalOnnxRerankModel;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 文档重排服务（LangChain4j {@link ScoringModel} 实现的路由层）。
+ * 本地 BGE-RERANKER 重排服务。
  *
- * <p>对齐业界实践 的 rerank 思路（ScoringModel 供 ReRankingContentAggregator 调用），但做成
- * <b>本地/云端可配置 + 自动降级</b>（亮点3）：
- * <ul>
- *   <li>{@code provider=local}：委托 {@link LocalOnnxRerankModel} 进程内跑 BGE-RERANKER，
- *       模型缺失/加载失败时 log.warn 后降级云端，不抛异常中断 RAG</li>
- *   <li>{@code provider=cloud}：调 DashScope gte-rerank 远程（非 OpenAI 兼容格式，RestClient 直连）</li>
- *   <li>云端不可用（无 API Key）时退回等分（0.0）让上层退回原序</li>
- * </ul>
- *
- * <p>实现 {@link ScoringModel#scoreAll(List, String)} 返回每个 segment 与 query 的相关性分列表
- * （顺序与输入一致），由 {@code ReRankingContentAggregator} 负责按分排序与截断。
+ * <p>仅使用进程内 ONNX {@link LocalOnnxRerankModel}，不走云端 rerank。
+ * 模型不可用时 {@link #isEnabled()} 为 false，上层退回 RRF 融合顺序。</p>
  */
 @Slf4j
 @Service
 public class RerankService implements ScoringModel {
 
-    private static final int DEFAULT_TIMEOUT_MS = 3000;
-    private static final String RERANK_PATH =
-        "/api/v1/services/rerank/text-rerank/text-rerank";
-    private static final String PROVIDER_LOCAL = "local";
-    private static final String PROVIDER_CLOUD = "cloud";
+  private static final String PROVIDER_LOCAL = "local";
 
-    private final KnowledgeBaseQueryProperties.Rerank rerankProps;
-    private final RestClient restClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final String apiKey;
-    private final boolean cloudAvailable;
-    private final LocalOnnxRerankModel localRerankModel;
-    /** 实际生效的 provider：local 不可用时自动切 cloud。 */
-    private volatile String effectiveProvider;
+  private final KnowledgeBaseQueryProperties.Rerank rerankProps;
+  private final LocalOnnxRerankModel localRerankModel;
 
-    public RerankService(KnowledgeBaseQueryProperties queryProperties,
-                         LlmProviderProperties llmProviderProperties) {
-        this.rerankProps = queryProperties.getRerank();
+  public RerankService(KnowledgeBaseQueryProperties queryProperties) {
+    this.rerankProps = queryProperties.getRerank();
+    this.localRerankModel = new LocalOnnxRerankModel(rerankProps.getLocal());
+    log.info("[RerankService] 本地 ONNX BGE rerank 已配置，模型可用={}", localRerankModel.isAvailable());
+  }
 
-        ProviderConfig dashscope = llmProviderProperties.getProviders() != null
-            ? llmProviderProperties.getProviders().get("dashscope")
-            : null;
-        this.apiKey = dashscope != null ? dashscope.getApiKey() : null;
+  public boolean isEnabled() {
+    return rerankProps.isEnabled() && localRerankModel.isAvailable();
+  }
 
-        String baseUrl = rerankProps.getBaseUrl();
-        if (baseUrl == null || baseUrl.isBlank()) {
-            baseUrl = "https://dashscope.aliyuncs.com";
-        }
-        int timeoutMs = resolveTimeoutMs(rerankProps.getTimeoutMs());
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(timeoutMs);
-        requestFactory.setReadTimeout(timeoutMs);
-        this.restClient = RestClient.builder()
-            .baseUrl(baseUrl)
-            .requestFactory(requestFactory)
-            .build();
+  /** 固定为 local，保留给健康检查与评测报告。 */
+  public String getEffectiveProvider() {
+    return PROVIDER_LOCAL;
+  }
 
-        this.cloudAvailable = apiKey != null && !apiKey.isBlank();
-        String configuredProvider = rerankProps.getProvider();
-        // 始终初始化本地模型，供 local 优先或 cloud 降级使用
-        this.localRerankModel = new LocalOnnxRerankModel(rerankProps.getLocal());
-        this.effectiveProvider = resolveEffectiveProvider(configuredProvider);
-        if (!cloudAvailable) {
-            log.warn("[RerankService] 未找到 dashscope API Key，云端 rerank 不可用");
-        }
-        log.info("[RerankService] 生效 rerank provider: {} (configured={})",
-            effectiveProvider, rerankProps.getProvider());
+  public boolean warmupLocalModel() {
+    return localRerankModel.isAvailable();
+  }
+
+  @Override
+  public Response<List<Double>> scoreAll(List<TextSegment> segments, String query) {
+    if (segments == null || segments.isEmpty()) {
+      return Response.from(List.of());
     }
-
-    /**
-     * 解析实际生效的 provider：配置 local 但本地模型不可用时降级 cloud（cloud 不可用则保持 local，
-     * 由 scoreAll 内部走等分降级）。
-     */
-    private String resolveEffectiveProvider(String configured) {
-        if (PROVIDER_CLOUD.equalsIgnoreCase(configured)) {
-            return PROVIDER_CLOUD;
-        }
-        // local：先试本地，不可用降级 cloud
-        if (localRerankModel != null && localRerankModel.isAvailable()) {
-            return PROVIDER_LOCAL;
-        }
-        if (cloudAvailable) {
-            log.warn("[RerankService] 本地 ONNX rerank 不可用，降级云端 DashScope rerank");
-            return PROVIDER_CLOUD;
-        }
-        // 两路都不可用，仍标 local，scoreAll 会走等分
-        return PROVIDER_LOCAL;
+    if (query == null || query.isBlank() || !localRerankModel.isAvailable()) {
+      return Response.from(zeroScores(segments.size()));
     }
-
-    /**
-     * 是否可用（开关开启且至少一路 rerank 可用）。
-     */
-    public boolean isEnabled() {
-        if (!rerankProps.isEnabled()) {
-            return false;
-        }
-        boolean localAvailable = localRerankModel != null && localRerankModel.isAvailable();
-        return localAvailable || cloudAvailable;
+    try {
+      return localRerankModel.scoreAll(segments, query);
+    } catch (Exception e) {
+      log.warn("[RerankService] 本地 BGE rerank 失败，保留 RRF 顺序: {}", e.getMessage(), e);
+      return Response.from(zeroScores(segments.size()));
     }
+  }
 
-    /** 当前实际生效的 rerank 实现（local / cloud）。 */
-    public String getEffectiveProvider() {
-        return effectiveProvider;
+  private List<Double> zeroScores(int size) {
+    List<Double> zeros = new ArrayList<>(size);
+    for (int i = 0; i < size; i++) {
+      zeros.add(0.0);
     }
-
-    /** 启动预热本地 ONNX 模型。 */
-    public boolean warmupLocalModel() {
-        if (localRerankModel == null) {
-            return false;
-        }
-        boolean available = localRerankModel.isAvailable();
-        if (available) {
-            effectiveProvider = PROVIDER_LOCAL;
-        }
-        return available;
-    }
-
-    @Override
-    public Response<List<Double>> scoreAll(List<TextSegment> segments, String query) {
-        if (segments == null || segments.isEmpty()) {
-            return Response.from(List.of());
-        }
-        if (query == null || query.isBlank()) {
-            return Response.from(zeroScores(segments.size()));
-        }
-        try {
-            if (PROVIDER_LOCAL.equals(effectiveProvider)
-                && localRerankModel != null
-                && localRerankModel.isAvailable()) {
-                return localRerankModel.scoreAll(segments, query);
-            }
-            if (cloudAvailable) {
-                return Response.from(scoreAllInternal(query, segments));
-            }
-            return Response.from(zeroScores(segments.size()));
-        } catch (Exception e) {
-            log.warn("[RerankService] scoreAll 失败，返回等分降级: {}", e.getMessage(), e);
-            return Response.from(zeroScores(segments.size()));
-        }
-    }
-
-    private List<Double> scoreAllInternal(String query, List<TextSegment> segments) {
-        List<String> texts = segments.stream().map(TextSegment::text).toList();
-        Map<String, Object> input = Map.of("query", query, "documents", texts);
-        Map<String, Object> parameters = Map.of(
-            "return_documents", false,
-            "top_n", texts.size()
-        );
-        Map<String, Object> body = Map.of(
-            "model", rerankProps.getModel(),
-            "input", input,
-            "parameters", parameters
-        );
-
-        String responseText = restClient.post()
-            .uri(RERANK_PATH)
-            .header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .retrieve()
-            .body(String.class);
-
-        return parseScores(responseText, segments.size());
-    }
-
-    /**
-     * DashScope rerank 返回的 results 按 relevance 降序，每项含 index（对应输入位置）和 relevance_score。
-     * 这里还原成与输入 segments 顺序一致的分列表。
-     */
-    private List<Double> parseScores(String responseText, int size) {
-        List<Double> scores = new ArrayList<>(zeroScores(size));
-        if (responseText == null || responseText.isBlank()) {
-            return scores;
-        }
-        try {
-            JsonNode response = objectMapper.readTree(responseText);
-            JsonNode results = response.path("output").path("results");
-            if (!results.isArray() || results.isEmpty()) {
-                return scores;
-            }
-            for (JsonNode result : results) {
-                int index = result.path("index").asInt(-1);
-                if (index < 0 || index >= size) {
-                    continue;
-                }
-                double relevance = result.path("relevance_score").asDouble(0.0);
-                scores.set(index, relevance);
-            }
-        } catch (Exception e) {
-            log.warn("[RerankService] 解析 rerank 响应失败，退回等分: {}", e.getMessage());
-        }
-        return scores;
-    }
-
-    private List<Double> zeroScores(int size) {
-        List<Double> zeros = new ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            zeros.add(0.0);
-        }
-        return zeros;
-    }
-
-    private static int resolveTimeoutMs(long configuredTimeoutMs) {
-        if (configuredTimeoutMs <= 0) {
-            return DEFAULT_TIMEOUT_MS;
-        }
-        return (int) Math.min(configuredTimeoutMs, Integer.MAX_VALUE);
-    }
+    return zeros;
+  }
 }

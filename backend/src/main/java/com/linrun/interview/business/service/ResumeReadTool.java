@@ -69,9 +69,7 @@ public class ResumeReadTool {
             if (promptSanitizer != null) {
                 text = promptSanitizer.sanitize(text);
             }
-            if (text.length() > MAX_RESUME_CHARS) {
-                text = text.substring(0, MAX_RESUME_CHARS) + "...(简历较长，已截断)";
-            }
+            text = PromptTextUtil.headTailTruncate(text, MAX_RESUME_CHARS);
             String bounded = "候选人简历正文：\n" + text;
             if (promptSanitizer != null) {
                 bounded = promptSanitizer.wrapWithDelimiters("resume.read", bounded);
@@ -109,7 +107,7 @@ public class ResumeReadTool {
             }
             String text = resume.get().getResumeText().trim();
             if (text.length() > MAX_RESUME_CHARS) {
-                text = text.substring(0, MAX_RESUME_CHARS) + "...(简历较长，已截断)";
+                text = PromptTextUtil.headTailTruncate(text, MAX_RESUME_CHARS);
             }
             return "候选人简历正文：\n" + text;
         } catch (Exception e) {

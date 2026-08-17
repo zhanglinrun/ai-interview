@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Validate capability and Hot 100 content
+      - name: Validate capability content
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -84,12 +84,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           ./dev-ops/ci/Test-FreshSchema.ps1
-      - name: Validate release scripts and deployment assets
+      - name: Validate release scripts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           ./dev-ops/ci/Test-PowerShellSyntax.ps1
-          ./dev-ops/ci/Test-DeploymentAssets.ps1
 
   security:
     name: Secret and dependency review

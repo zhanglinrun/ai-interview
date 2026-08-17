@@ -16,6 +16,7 @@ export interface DeleteConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   customMessage?: React.ReactNode; // 可选的自定义消息内容
+  error?: string;
 }
 
 /**
@@ -30,6 +31,7 @@ export default function DeleteConfirmDialog({
   onConfirm,
   onCancel,
   customMessage,
+  error,
 }: DeleteConfirmDialogProps) {
   // 获取项目名称（支持 name、title、filename、sessionId 等字段）
   const getItemName = () => {
@@ -54,6 +56,7 @@ export default function DeleteConfirmDialog({
       loading={loading}
       onConfirm={onConfirm}
       onCancel={onCancel}
+      error={error}
     />
   );
 }

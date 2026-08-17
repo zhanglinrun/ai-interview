@@ -1,6 +1,9 @@
 package com.linrun.interview.rag.service;
 
 import com.linrun.interview.auth.security.UserContext;
+import com.linrun.interview.common.exception.BusinessException;
+import com.linrun.interview.common.exception.ErrorCode;
+import com.linrun.interview.rag.model.DatasetGenerateResult;
 import com.linrun.interview.rag.model.QueryRequest;
 import com.linrun.interview.rag.model.QueryResponse;
 import com.linrun.interview.rag.model.RagDatasetResult;
@@ -22,6 +25,32 @@ import java.util.List;
 public class RagDatasetService {
 
   private final KnowledgeBaseQueryService queryService;
+
+  /**
+   * 正式 RAG 评测入口：同一次 augment 产出 answer 与完整 chunk 文本。
+   *
+   * <p>不要用 {@link #generate}：它走同步查询 DTO，sources 只有截断 snippet。
+   */
+  public DatasetGenerateResult generateForRagas(List<Long> knowledgeBaseIds, String question) {
+    UserContext.requireUserId();
+    if (question == null || question.isBlank()) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "question 不能为空");
+    }
+    if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "knowledgeBaseIds 不能为空");
+    }
+    KnowledgeBaseQueryService.EvaluationQueryResult execution =
+        queryService.queryForEvaluation(knowledgeBaseIds, question);
+    List<String> references = execution.contexts() == null ? List.of()
+        : execution.contexts().stream()
+            .map(segment -> segment == null ? null : segment.text())
+            .filter(text -> text != null && !text.isBlank())
+            .toList();
+    String answer = execution.answer() == null ? "" : execution.answer();
+    log.info("[RagDatasetService] generateForRagas: kbIds={}, refs={}, noEvidence={}, latencyMs={}",
+        knowledgeBaseIds, references.size(), execution.noEvidence(), execution.latencyMs());
+    return new DatasetGenerateResult(question, answer, references);
+  }
 
   public RagDatasetResult generate(List<Long> knowledgeBaseIds, String question) {
     UserContext.requireUserId();

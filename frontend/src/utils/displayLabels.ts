@@ -1,37 +1,3 @@
-const ALGORITHM_TAG_LABELS: Record<string, string> = {
-  ARRAY: '数组',
-  BACKTRACKING: '回溯',
-  BFS: '广度优先',
-  BINARY_SEARCH: '二分查找',
-  BIT_MANIPULATION: '位运算',
-  BST: '二叉搜索树',
-  COMBINATORICS: '组合数学',
-  DESIGN: '设计',
-  DFS: '深度优先',
-  DIVIDE_AND_CONQUER: '分治',
-  DYNAMIC_PROGRAMMING: '动态规划',
-  GRAPH: '图',
-  GREEDY: '贪心',
-  HASH_TABLE: '哈希表',
-  HEAP: '堆',
-  LINKED_LIST: '链表',
-  MATH: '数学',
-  MATRIX: '矩阵',
-  MONOTONIC_STACK: '单调栈',
-  PREFIX_SUM: '前缀和',
-  QUEUE: '队列',
-  RECURSION: '递归',
-  SIMULATION: '模拟',
-  SLIDING_WINDOW: '滑动窗口',
-  SORTING: '排序',
-  STACK: '栈',
-  STRING: '字符串',
-  TOPOLOGICAL_SORT: '拓扑排序',
-  TREE: '树',
-  TRIE: '字典树',
-  TWO_POINTERS: '双指针',
-};
-
 const CAPABILITY_ATOM_LABELS: Record<string, string> = {
   JAVA_LANGUAGE_FOUNDATION: 'Java 语言与并发基础',
   SPRING_APPLICATION: 'Spring 应用开发',
@@ -49,8 +15,16 @@ const CAPABILITY_ATOM_LABELS: Record<string, string> = {
   ALGORITHM_PROBLEM_SOLVING: '算法与问题求解',
 };
 
-export function getAlgorithmTagLabel(tag: string): string {
-  return ALGORITHM_TAG_LABELS[tag] ?? tag;
+const SKILL_LABELS: Record<string, string> = {
+  'java-backend': 'Java 后端',
+  'ai-rag-agent': 'AI / RAG / Agent',
+  custom: '自定义方向',
+};
+
+export function getSkillLabel(skillId: string | null | undefined): string {
+  const normalized = skillId?.trim();
+  if (!normalized) return '文字面试';
+  return SKILL_LABELS[normalized] ?? normalized;
 }
 
 export function getCapabilityDisplayName(atomId: string, capabilityName?: string | null): string {

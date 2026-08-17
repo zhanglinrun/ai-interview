@@ -60,7 +60,7 @@ public class CommonChatService {
         return FluxStreamingBridge.stream(streamingChatModel, request);
     }
 
-    /** 同步通用对话，供钉钉/Web 非流式入口复用同一意图门后的兜底路径。 */
+    /** 同步通用对话，供 Web 非流式入口复用同一意图门后的兜底路径。 */
     public String chat(String question, Long userId) {
         ChatModel chatModel = llmProviderRegistry.getUserChatModel(userId);
         List<ChatMessage> messages = new ArrayList<>(2);

@@ -25,6 +25,7 @@ import com.linrun.interview.document.constant.DocumentStatus;
 import com.linrun.interview.document.constant.FileType;
 import com.linrun.interview.rag.constant.MetadataKeyConstant;
 import com.linrun.interview.document.constant.SegmentStatus;
+import com.linrun.interview.document.event.DocumentAcceptedEvent;
 import com.linrun.interview.document.event.DocumentChunkedEvent;
 import com.linrun.interview.document.vo.DocumentSplitParam;
 import com.linrun.interview.document.entity.KnowledgeBaseEntity;
@@ -121,95 +122,65 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     public Long upload(MultipartFile file, String title, String category,
                        DocumentAccessScope accessScope, LocalDate expireDate,
                        KnowledgeBaseType knowledgeBaseType) {
-        KnowledgeBaseType kbType = knowledgeBaseType != null
-            ? knowledgeBaseType : KnowledgeBaseType.DOCUMENT_SEARCH;
-        if (kbType == KnowledgeBaseType.DATA_QUERY) {
-            String probeName = file.getOriginalFilename();
-            FileType fileType = fileTypeResolver.resolve(probeName,
-                contentTypeDetectionService.detectContentType(file));
-            if (fileType != FileType.EXCEL && fileType != FileType.CSV) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST,
-                    "DATA_QUERY 仅支持 Excel/CSV 文件");
-            }
-        }
-        Long userId = UserContext.requireUserId();
-        String fileName = file.getOriginalFilename();
-
-        // 1. 校验
-        fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
-        String contentType = contentTypeDetectionService.detectContentType(file);
-        if (!fileValidationService.isKnowledgeBaseMimeType(contentType)
-            && !fileValidationService.isMarkdownExtension(fileName)
-            && !fileValidationService.isSpreadsheetExtension(fileName)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel 等");
-        }
-        // 2. 内容哈希去重（按用户隔离的跨版本去重；跨用户不互相阻断，也不泄漏他人文档存在性）
-        String contentHash = fileHashService.calculateHash(file);
-        if (versionService.findByContentHash(contentHash, userId).isPresent()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容已存在，请勿重复上传");
-        }
-
-        // 3. 存原始文件到 MinIO
-        String storageKey = storageService.uploadKnowledgeBase(file);
-        String docUrl = storageService.getFileUrl(storageKey);
-
-        byte[] fileBytes;
-        try {
-            fileBytes = file.getBytes();
-        } catch (Exception e) {
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED,
-                "读取上传文件失败: " + e.getMessage(), e);
-        }
-
-        // 4. 落库主表 + 版本（UPLOADED），再同步转换（UPLOADED → CONVERTING → CONVERTED/STORED）
-        LocalDateTime now = LocalDateTime.now();
-        KnowledgeBaseEntity entity = new KnowledgeBaseEntity();
-        entity.setUserId(userId);
-        entity.setFileHash(contentHash);
-        entity.setName(title != null && !title.isBlank() ? title : fileName);
-        entity.setCategory(category);
-        entity.setOriginalFilename(fileName);
-        entity.setFileSize(file.getSize());
-        entity.setContentType(contentType);
-        entity.setStorageKey(storageKey);
-        entity.setStorageUrl(docUrl);
-        entity.setUploadedAt(now);
-        entity.setAccessibleBy(accessScope != null ? accessScope.name() : DocumentAccessScope.PRIVATE.name());
-        entity.setExpireDate(expireDate);
-        entity.setDocStatus(DocumentStatus.UPLOADED);
-        entity.setKnowledgeBaseType(kbType);
-        if (kbType == KnowledgeBaseType.DATA_QUERY) {
-            entity.setTableName(excelProcessService.generatePhysicalTableName(userId, fileName));
-        }
-        entity = MapperUtils.save(knowledgeBaseEntityMapper, entity);
-
-        KnowledgeBaseVersionEntity version = new KnowledgeBaseVersionEntity();
-        version.setDocId(entity.getId());
-        version.setVersion(INITIAL_VERSION);
-        version.setDocUrl(docUrl);
-        version.setStorageKey(storageKey);
-        version.setContentHash(contentHash);
-        version.setStatus(DocumentStatus.UPLOADED);
-        version.setUploadUser(String.valueOf(userId));
-        version.setCreatedAt(now);
-        version.setUpdatedAt(now);
-        version = versionService.saveVersion(version);
-
-        entity.setCurrentVersionId(version.getVersionId());
-        MapperUtils.save(knowledgeBaseEntityMapper, entity);
-
-        convertFile(userId, entity, version.getVersionId(), fileBytes, fileName, contentType,
-            storageKey, kbType);
-        if (kbType == KnowledgeBaseType.DATA_QUERY) {
-            finalizeAfterDataQuery(entity, version);
-        } else {
-            finalizeAfterConvert(entity, version);
-        }
-
+        PersistedUpload persisted = persistUpload(file, title, category, accessScope, expireDate,
+            knowledgeBaseType);
+        convertPersisted(persisted, readUploadBytes(file));
         log.info("知识库上传完成: docId={}, versionId={}, status={}, kbType={}",
-            entity.getId(), version.getVersionId(), entity.getDocStatus(), kbType);
-        return entity.getId();
+            persisted.entity().getId(), persisted.version().getVersionId(),
+            persisted.entity().getDocStatus(), persisted.kbType());
+        return persisted.entity().getId();
+    }
+
+    @Override
+    @DistributeLock(key = "'kb:upload:' + T(com.linrun.interview.auth.security.UserContext).requireUserId() + ':' + #file.originalFilename",
+        waitTime = 0, leaseTime = 60, message = "同名文件正在上传，请稍后再试")
+    public Long acceptAndEnqueueConvert(MultipartFile file, String title, String category,
+                                        DocumentAccessScope accessScope, LocalDate expireDate,
+                                        KnowledgeBaseType knowledgeBaseType, boolean splitAfter) {
+        PersistedUpload persisted = persistUpload(file, title, category, accessScope, expireDate,
+            knowledgeBaseType);
+        Long docId = persisted.entity().getId();
+        eventPublisher.publishEvent(new DocumentAcceptedEvent(
+            docId, persisted.userId(), splitAfter));
+        log.info("知识库已接收并排队解析: docId={}, versionId={}, splitAfter={}",
+            docId, persisted.version().getVersionId(), splitAfter);
+        return docId;
+    }
+
+    @Override
+    @DistributeLock(key = "'kb:convert:' + #docId", waitTime = 0, leaseTime = -1,
+        message = "该文档正在解析，请稍后再试")
+    public void processAcceptedDocument(Long docId, boolean splitAfter) {
+        if (docId == null) {
+            return;
+        }
+        KnowledgeBaseEntity entity = knowledgeBaseEntityMapper.selectById(docId);
+        if (entity == null) {
+            log.warn("异步解析跳过，文档不存在: docId={}", docId);
+            return;
+        }
+        Long userId = entity.getUserId();
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文档缺少 userId: " + docId);
+        }
+        UserContext.setUserId(userId);
+        try {
+            DocumentStatus status = entity.getDocStatus();
+            if (status == DocumentStatus.UPLOADED || status == DocumentStatus.CONVERTING) {
+                KnowledgeBaseVersionEntity version = requireCurrentVersion(entity);
+                byte[] fileBytes = storageService.downloadFile(entity.getStorageKey());
+                convertPersisted(new PersistedUpload(userId, entity, version,
+                    resolveKbType(entity.getKnowledgeBaseType())), fileBytes);
+                entity = knowledgeBaseEntityMapper.selectById(docId);
+            }
+            if (splitAfter && entity != null
+                && entity.getKnowledgeBaseType() != KnowledgeBaseType.DATA_QUERY
+                && entity.getDocStatus() == DocumentStatus.CONVERTED) {
+                splitInternal(docId, chunkingService.defaultSplitParam());
+            }
+        } finally {
+            UserContext.clear();
+        }
     }
 
     @Override
@@ -352,10 +323,12 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
 
         List<TextSegment> segments;
         if (fileValidationService.isSpreadsheetExtension(entity.getOriginalFilename())) {
-            if (entity.getStorageKey() == null || entity.getStorageKey().isBlank()) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "表格原文件缺失，无法 ExcelSplitter 切块");
+            String convertedDocUrl = version.getConvertedDocUrl();
+            if (convertedDocUrl == null || convertedDocUrl.isBlank()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "表格 convertedDocUrl 缺失，无法 ExcelSplitter 切块");
             }
-            byte[] fileBytes = storageService.downloadFile(entity.getStorageKey());
+            byte[] fileBytes = storageService.downloadConvertedMarkdown(convertedDocUrl);
             int chunkSize = splitParam.chunkSize() != null
                 ? splitParam.chunkSize() : chunkingService.defaultSplitParam().chunkSize();
             try {
@@ -623,6 +596,117 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         metadata.put(MetadataKeyConstant.SOURCE_LOCATOR, evidenceMetadata.sourceLocator());
     }
 
+    private PersistedUpload persistUpload(MultipartFile file, String title, String category,
+                                          DocumentAccessScope accessScope, LocalDate expireDate,
+                                          KnowledgeBaseType knowledgeBaseType) {
+        KnowledgeBaseType kbType = resolveKbType(knowledgeBaseType);
+        if (kbType == KnowledgeBaseType.DATA_QUERY) {
+            String probeName = file.getOriginalFilename();
+            FileType fileType = fileTypeResolver.resolve(probeName,
+                contentTypeDetectionService.detectContentType(file));
+            if (fileType != FileType.EXCEL && fileType != FileType.CSV) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "DATA_QUERY 仅支持 Excel/CSV 文件");
+            }
+        }
+        Long userId = UserContext.requireUserId();
+        String fileName = file.getOriginalFilename();
+
+        fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
+        String contentType = contentTypeDetectionService.detectContentType(file);
+        if (!fileValidationService.isKnowledgeBaseMimeType(contentType)
+            && !fileValidationService.isMarkdownExtension(fileName)
+            && !fileValidationService.isSpreadsheetExtension(fileName)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "不支持的文件类型，仅支持 PDF、DOCX、DOC、TXT、MD、CSV、Excel 等");
+        }
+        String contentHash = fileHashService.calculateHash(file);
+        if (versionService.findByContentHash(contentHash, userId).isPresent()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容已存在，请勿重复上传");
+        }
+
+        String storageKey = storageService.uploadKnowledgeBase(file);
+        String docUrl = storageService.getFileUrl(storageKey);
+
+        LocalDateTime now = LocalDateTime.now();
+        KnowledgeBaseEntity entity = new KnowledgeBaseEntity();
+        entity.setUserId(userId);
+        entity.setFileHash(contentHash);
+        entity.setName(title != null && !title.isBlank() ? title : fileName);
+        entity.setCategory(category);
+        entity.setOriginalFilename(fileName);
+        entity.setFileSize(file.getSize());
+        entity.setContentType(contentType);
+        entity.setStorageKey(storageKey);
+        entity.setStorageUrl(docUrl);
+        entity.setUploadedAt(now);
+        entity.setAccessibleBy(accessScope != null ? accessScope.name() : DocumentAccessScope.PRIVATE.name());
+        entity.setExpireDate(expireDate);
+        entity.setDocStatus(DocumentStatus.UPLOADED);
+        entity.setKnowledgeBaseType(kbType);
+        if (kbType == KnowledgeBaseType.DATA_QUERY) {
+            entity.setTableName(excelProcessService.generatePhysicalTableName(userId, fileName));
+        }
+        entity = MapperUtils.save(knowledgeBaseEntityMapper, entity);
+
+        KnowledgeBaseVersionEntity version = new KnowledgeBaseVersionEntity();
+        version.setDocId(entity.getId());
+        version.setVersion(INITIAL_VERSION);
+        version.setDocUrl(docUrl);
+        version.setStorageKey(storageKey);
+        version.setContentHash(contentHash);
+        version.setStatus(DocumentStatus.UPLOADED);
+        version.setUploadUser(String.valueOf(userId));
+        version.setCreatedAt(now);
+        version.setUpdatedAt(now);
+        version = versionService.saveVersion(version);
+
+        entity.setCurrentVersionId(version.getVersionId());
+        MapperUtils.save(knowledgeBaseEntityMapper, entity);
+        return new PersistedUpload(userId, entity, version, kbType);
+    }
+
+    private void convertPersisted(PersistedUpload persisted, byte[] fileBytes) {
+        KnowledgeBaseEntity entity = persisted.entity();
+        KnowledgeBaseVersionEntity version = persisted.version();
+        convertFile(persisted.userId(), entity, version.getVersionId(), fileBytes,
+            entity.getOriginalFilename(), entity.getContentType(), entity.getStorageKey(),
+            persisted.kbType());
+        if (persisted.kbType() == KnowledgeBaseType.DATA_QUERY) {
+            finalizeAfterDataQuery(entity, version);
+        } else {
+            finalizeAfterConvert(entity, version);
+        }
+    }
+
+    private byte[] readUploadBytes(MultipartFile file) {
+        try {
+            return file.getBytes();
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED,
+                "读取上传文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    private KnowledgeBaseVersionEntity requireCurrentVersion(KnowledgeBaseEntity entity) {
+        if (entity.getCurrentVersionId() == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识库无当前版本: " + entity.getId());
+        }
+        return versionService.findById(entity.getCurrentVersionId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本记录不存在"));
+    }
+
+    private KnowledgeBaseType resolveKbType(KnowledgeBaseType knowledgeBaseType) {
+        return knowledgeBaseType != null ? knowledgeBaseType : KnowledgeBaseType.DOCUMENT_SEARCH;
+    }
+
+    private record PersistedUpload(
+        Long userId,
+        KnowledgeBaseEntity entity,
+        KnowledgeBaseVersionEntity version,
+        KnowledgeBaseType kbType
+    ) {}
+
     /**
      * 同步转换阶段（对齐业界实践 processFile）：UPLOADED → CONVERTING → CONVERTED/STORED。
      */
@@ -633,6 +717,9 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         knowledgeDocumentService.advanceDocumentAndVersionStatus(docId, versionId, DocumentStatus.CONVERTING);
         try {
             FileType fileType = fileTypeResolver.resolve(fileName, contentType);
+            if (isDocumentSearchSpreadsheet(fileType, kbType)) {
+                return finalizeSpreadsheetPassthrough(docId, versionId);
+            }
             FileProcessService processor = fileProcessServiceFactory.get(fileType, kbType);
             String converted = processor.processDocument(new DocumentParseRequest(
                 userId, docId, versionId, fileBytes, fileName, contentType, storageKey, kbType));
@@ -666,6 +753,31 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED,
                 "文件解析失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * DOCUMENT_SEARCH 的 Excel/CSV 不转 Markdown，
+     * convertedDocUrl 直接指向原文件，split 时从 convertedDocUrl 下载后 ExcelSplitter 切块。
+     */
+    private boolean isDocumentSearchSpreadsheet(FileType fileType, KnowledgeBaseType kbType) {
+        return kbType == KnowledgeBaseType.DOCUMENT_SEARCH
+            && (fileType == FileType.EXCEL || fileType == FileType.CSV);
+    }
+
+    private String finalizeSpreadsheetPassthrough(Long docId, Long versionId) {
+        KnowledgeBaseVersionEntity version = versionService.findById(versionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本记录不存在"));
+        String docUrl = version.getDocUrl();
+        if (docUrl == null || docUrl.isBlank()) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_PARSE_FAILED, "原文件地址缺失");
+        }
+        version.setConvertedDocUrl(docUrl);
+        versionService.updateVersion(version);
+        knowledgeDocumentService.advanceDocumentAndVersionStatus(
+            docId, versionId, DocumentStatus.CONVERTED);
+        log.info("表格文档检索跳过 Markdown 转换，convertedDocUrl 指向原文件: docId={}, versionId={}",
+            docId, versionId);
+        return null;
     }
 
     private String resolveConvertedMarkdown(KnowledgeBaseVersionEntity version) {

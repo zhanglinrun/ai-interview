@@ -15,18 +15,27 @@ export function formatFileSize(bytes: number): string {
 }
 
 export function formatDurationText(seconds?: number): string {
-  if (!seconds) return '-';
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '-';
 
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}分${secs}秒`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hours > 0) {
+    return mins > 0 ? `${hours}小时${mins}分` : `${hours}小时`;
+  }
+  if (mins > 0) {
+    return secs > 0 ? `${mins}分${secs}秒` : `${mins}分`;
+  }
+  return `${secs}秒`;
 }
 
 export function formatClockTime(seconds: number): string {
-  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
-  const mins = Math.floor(safeSeconds / 60);
+  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const mins = Math.floor((safeSeconds % 3600) / 60);
   const secs = safeSeconds % 60;
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const clock = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  return hours > 0 ? `${hours.toString().padStart(2, '0')}:${clock}` : clock;
 }
 
 export function formatShortId(id: string, length = 8): string {

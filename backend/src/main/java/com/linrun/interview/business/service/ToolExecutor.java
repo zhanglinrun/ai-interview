@@ -2,6 +2,7 @@ package com.linrun.interview.business.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.linrun.interview.business.vo.InterviewEvidence.Bundle;
 import com.linrun.interview.infra.observability.TraceContext;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -11,8 +12,10 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +31,7 @@ public class ToolExecutor {
   private final ToolCircuitBreakerStore circuitBreaker;
   private final ToolAuditService auditService;
   private final ObjectMapper objectMapper;
+  private final AgentTraceService agentTraceService;
 
   public <T> ToolResult<T> execute(String toolName, ToolExecutionContext context,
                                     Map<String, Object> input, Class<T> resultType) {
@@ -39,14 +43,14 @@ public class ToolExecutor {
     String role = context == null ? null : context.role();
     if (role == null || !descriptor.allowedRoles().contains(role)) {
       ToolResult<T> result = ToolResult.rejected("TOOL_ROLE_REJECTED", "当前角色不能调用工具: " + toolName);
-      auditService.recordQuietly(context, toolName, result, serializedSummary(input), 0L);
+      recordOutcome(toolName, context, result, serializedSummary(input), 0L);
       return result;
     }
     Map<String, Object> safeInput = input == null ? Map.of()
         : Collections.unmodifiableMap(new LinkedHashMap<>(input));
     if (serializedLength(safeInput) > descriptor.maxInputChars()) {
       ToolResult<T> result = ToolResult.rejected("TOOL_INPUT_TOO_LARGE", "工具输入超过长度限制");
-      auditService.recordQuietly(context, toolName, result, serializedSummary(safeInput), 0L);
+      recordOutcome(toolName, context, result, serializedSummary(safeInput), 0L);
       return result;
     }
     String cacheKey = cacheKey(toolName, descriptor, context, safeInput);
@@ -57,7 +61,7 @@ public class ToolExecutor {
       if (isCircuitOpen(toolName)) {
         ToolResult<T> result = ToolResult.<T>circuitOpen("工具熔断中")
             .measured(elapsed(start), false, 0);
-        auditService.recordQuietly(context, toolName, result, serializedSummary(safeInput), result.latencyMs());
+        recordOutcome(toolName, context, result, serializedSummary(safeInput), result.latencyMs());
         return result;
       }
       if (descriptor.cacheable()) {
@@ -66,7 +70,7 @@ public class ToolExecutor {
           T value = read(cached, resultType);
           ToolResult<T> result = ToolResult.success(value, "cache_hit")
               .measured(elapsed(start), true, 0);
-          auditService.recordQuietly(context, toolName, result, serializedSummary(safeInput), result.latencyMs());
+          recordOutcome(toolName, context, result, serializedSummary(safeInput), result.latencyMs());
           return result;
         }
       }
@@ -87,14 +91,14 @@ public class ToolExecutor {
           || result.status() == ToolStatus.DEGRADED || result.status() == ToolStatus.CIRCUIT_OPEN) {
         recordFailureQuietly(toolName);
       }
-      auditService.recordQuietly(context, toolName, result, serializedSummary(safeInput), result.latencyMs());
+      recordOutcome(toolName, context, result, serializedSummary(safeInput), result.latencyMs());
       return result;
     } catch (Exception e) {
       recordFailureQuietly(toolName);
       ToolResult<T> result = new ToolResult<>(ToolStatus.FAILED, null,
           "工具执行失败", "TOOL_EXECUTION_FAILED", safeMessage(e), elapsed(start),
           cacheHit, retries, null);
-      auditService.recordQuietly(context, toolName, result, serializedSummary(safeInput), result.latencyMs());
+      recordOutcome(toolName, context, result, serializedSummary(safeInput), result.latencyMs());
       return result;
     }
   }
@@ -172,6 +176,68 @@ public class ToolExecutor {
       }
     });
     return canonical;
+  }
+
+  private <T> void recordOutcome(String toolName, ToolExecutionContext context,
+                                 ToolResult<T> result, String inputSummary, long latencyMs) {
+    auditService.recordQuietly(context, toolName, result, inputSummary, latencyMs);
+    writeOrchestratorToolSpan(toolName, context, inputSummary, result, latencyMs);
+  }
+
+  private <T> void writeOrchestratorToolSpan(String toolName, ToolExecutionContext context,
+                                             String inputSummary, ToolResult<T> result,
+                                             long latencyMs) {
+    if (agentTraceService == null || context == null
+        || context.agentRunId() == null || context.agentRunId().isBlank()) {
+      return;
+    }
+    if ("resume.read".equals(toolName) || "readResume".equals(toolName)) {
+      return;
+    }
+    String observation = summarizeToolResult(toolName, result);
+    AgentRunHandle run = new AgentRunHandle(
+        context.agentRunId(),
+        context.traceId(),
+        null,
+        context.sessionId(),
+        context.userId(),
+        "question",
+        context.spanId(),
+        LocalDateTime.now());
+    agentTraceService.appendQuietly(run, new AgentSpanRecord(
+        "span-tool-" + UUID.randomUUID(),
+        context.spanId(),
+        context.role() == null ? "orchestrator" : context.role().toLowerCase(Locale.ROOT),
+        toolName,
+        inputSummary,
+        observation,
+        result.status() == ToolStatus.FAILED || result.status() == ToolStatus.TIMEOUT
+            ? "FAILED" : "COMPLETED",
+        latencyMs,
+        AgentSpanMetadata.write(objectMapper, AgentSpanMetadata.KIND_TOOL,
+            null, null, null, "agent.tool"),
+        0,
+        context.questionIndex()));
+  }
+
+  private <T> String summarizeToolResult(String toolName, ToolResult<T> result) {
+    if (result == null) {
+      return toolName + " completed";
+    }
+    if (result.data() instanceof Bundle bundle) {
+      int candidates = bundle.candidates() == null ? 0 : bundle.candidates().size();
+      if (candidates == 0) {
+        return result.status() == ToolStatus.EMPTY || result.status() == ToolStatus.SUCCESS
+            ? "empty result / skipped"
+            : result.summary() == null ? "empty result / skipped" : result.summary();
+      }
+      return "candidates=" + candidates
+          + " prompt=" + (bundle.promptEvidence() == null ? 0 : bundle.promptEvidence().size());
+    }
+    if (result.summary() != null && !result.summary().isBlank()) {
+      return result.summary();
+    }
+    return result.status() == null ? toolName + " completed" : result.status().name();
   }
 
   private String serializedSummary(Object value) {

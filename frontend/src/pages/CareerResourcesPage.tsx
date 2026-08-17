@@ -4,7 +4,6 @@ import {
   Code2,
   Coffee,
   Database,
-  FlaskConical,
   Map,
   MessageSquareText,
 } from 'lucide-react';
@@ -25,7 +24,7 @@ export default function CareerResourcesPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="求职资源"
-        description="常用的刷题和后端复习入口。学完后可回到专项训练或岗位实战检验掌握情况。"
+        description="常用的刷题和后端复习入口。学完后可带着 JD 和简历去做模拟面试。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -63,7 +62,7 @@ export default function CareerResourcesPage() {
         <h2 className="mb-3 text-base font-semibold text-stone-900 dark:text-stone-50">平台内练习</h2>
         <div className="grid max-w-4xl gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            ['/training', FlaskConical, '专项训练', 'Hot 100、RAG 问答与评测'],
+            ['/interview', MessageSquareText, '模拟面试', '按 JD、简历和知识库做文字模拟面试并查看复盘'],
             ['/knowledgebase', Database, '资料管理', '上传和维护分域知识资料'],
             ['/knowledgebase/chat', MessageSquareText, 'RAG 问答', '用引用证据检查自己的理解'],
           ].map(([path, Icon, title, description]) => (

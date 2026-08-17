@@ -75,31 +75,37 @@ public class InterviewTurnDecisionService {
         ? plannedTopic : previousTopic;
     CapabilityAtom atom = resolveCapability(request.topicId(), targetTopic);
     String evidenceQuery = buildEvidenceQuery(atom, action);
-    Bundle evidence;
-    if (toolExecutor == null) {
-      evidence = request.userId() == null
-          ? knowledgeRetrievalService.retrieveEvidence(request.knowledgeBaseIds(), evidenceQuery)
-          : knowledgeRetrievalService.retrieveEvidence(request.userId(),
-              request.knowledgeBaseIds(), evidenceQuery);
-    } else {
-      ExecutionIdentity identity = request.identity();
-      ToolExecutionContext toolContext = new ToolExecutionContext(
-          request.userId(), request.sessionId(),
-          identity == null ? TraceContext.getTraceId() : identity.traceId(),
-          identity == null ? null : identity.agentRunId(), null, "ORCHESTRATOR");
-      List<Long> requestedKnowledgeBases = request.knowledgeBaseIds() == null
-          ? List.of() : request.knowledgeBaseIds();
-      ToolResult<Bundle> evidenceResult = toolExecutor.execute("evidence.search", toolContext,
-          Map.of("query", evidenceQuery, "knowledgeBaseIds", requestedKnowledgeBases),
-          Bundle.class);
-      evidence = evidenceResult.data() == null
-          ? Bundle.empty(evidenceQuery) : evidenceResult.data();
-    }
     String rationale = buildRationale(action, signals, plannedTopic, previousTopic);
-    return new TurnDecision(action, atom, signals, rationale, evidence);
+    return new TurnDecision(action, atom, signals, rationale, Bundle.empty(evidenceQuery));
   }
 
-  AnswerSignals analyze(String answer) {
+  /** Search evidence after the turn_decision span exists so the tool can hang under it. */
+  public Bundle retrieveEvidence(DecisionRequest request, String evidenceQuery, String parentSpanId) {
+    String query = evidenceQuery == null ? "" : evidenceQuery;
+    if (toolExecutor == null) {
+      return request.userId() == null
+          ? knowledgeRetrievalService.retrieveEvidence(request.knowledgeBaseIds(), query)
+          : knowledgeRetrievalService.retrieveEvidence(request.userId(),
+              request.knowledgeBaseIds(), query);
+    }
+    ExecutionIdentity identity = request.identity();
+    ToolExecutionContext toolContext = new ToolExecutionContext(
+        request.userId(), request.sessionId(),
+        identity == null ? TraceContext.getTraceId() : identity.traceId(),
+        identity == null ? null : identity.agentRunId(),
+        parentSpanId,
+        "ORCHESTRATOR",
+        request.questionIndex());
+    List<Long> requestedKnowledgeBases = request.knowledgeBaseIds() == null
+        ? List.of() : request.knowledgeBaseIds();
+    ToolResult<Bundle> evidenceResult = toolExecutor.execute("evidence.search", toolContext,
+        Map.of("query", query, "knowledgeBaseIds", requestedKnowledgeBases),
+        Bundle.class);
+    return evidenceResult.data() == null ? Bundle.empty(query) : evidenceResult.data();
+  }
+
+  /** 供会话层在主问题作答后沉淀信号；与 decide 内规则一致。 */
+  public AnswerSignals analyze(String answer) {
     if (answer == null || answer.isBlank()) {
       return AnswerSignals.empty();
     }

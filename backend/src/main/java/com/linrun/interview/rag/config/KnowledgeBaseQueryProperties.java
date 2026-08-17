@@ -28,6 +28,11 @@ public class KnowledgeBaseQueryProperties {
     private Crag crag = new Crag();
     private Adaptive adaptive = new Adaptive();
     private MultiSource multiSource = new MultiSource();
+    /**
+     * 意图 / 改写 / HyDE / 路由 / 分解共用的快模型。各子项 model 非空时覆盖。
+     * 生成仍走 {@code generation.streaming-model} 或用户 BYOK。
+     */
+    private String decisionModel = "qwen3.5-flash";
     private int chunkOverlapChars = 80;
     private String chunkStrategy = "hybrid";
     private int chunkSizeChars = 800;
@@ -38,10 +43,17 @@ public class KnowledgeBaseQueryProperties {
     private String decomposePromptPath = "classpath:prompts/rag/decompose.txt";
     private String cragPromptPath = "classpath:prompts/rag/crag-grade.txt";
 
+    public String resolveDecisionModel(String override) {
+        if (override != null && !override.isBlank()) {
+            return override.trim();
+        }
+        return decisionModel == null || decisionModel.isBlank() ? "qwen3.5-flash" : decisionModel.trim();
+    }
+
     @Data
     public static class Rewrite {
         private boolean enabled = true;
-        /** 查询改写专用模型；空则复用默认 Provider 的 Chat 模型 */
+        /** 查询改写专用模型；空则使用 {@link #decisionModel} */
         private String model = "";
     }
 
@@ -86,23 +98,22 @@ public class KnowledgeBaseQueryProperties {
     }
 
     /**
-     * 重排配置：默认使用 DashScope gte-rerank 云端；显式 provider=local 时才启用本地 ONNX。
+     * 重排配置：仅使用本地 ONNX BGE-RERANKER。
      */
     @Data
     public static class Rerank {
-        /** 是否启用重排；关闭或失败时退回 RRF 融合排序 */
+        /** 是否启用重排；关闭或本地模型不可用时退回 RRF 融合排序 */
         private boolean enabled = true;
-        /** 重排实现：local（本地 ONNX BGE，优先）或 cloud（DashScope gte-rerank）；local 不可用时自动降级 cloud */
-        private String provider = "local";
-        /** 重排服务 baseUrl（DashScope 默认 https://dashscope.aliyuncs.com） */
-        private String baseUrl = "https://dashscope.aliyuncs.com";
-        /** 重排模型名 */
-        private String model = "gte-rerank-v2";
+        /**
+         * BGE rerank 最低分，按 0～1 理解；原始 logit 会先做 sigmoid。
+         * 默认 0.88 约等于 logit 2.0，用来挡「穿透/击穿」这类近义词干扰。
+         */
+        private double minScore = 0.88;
         /** 重排后保留的文档数 */
         private int topN = 6;
-        /** 单次重排超时（毫秒） */
-        private long timeoutMs = 3000;
-        /** 本地 ONNX reranker 配置（仅 provider=local 时生效） */
+        /** 本地模型缺失时是否 fail-fast 阻断启动（生产建议 true） */
+        private boolean failFastOnMissingModel = false;
+        /** 本地 ONNX BGE-RERANKER 配置 */
         private LocalOnnx local = new LocalOnnx();
 
         @Data
@@ -133,7 +144,7 @@ public class KnowledgeBaseQueryProperties {
     @Data
     public static class Context {
         /** 全部最终片段正文的最大字符数；小于 1 表示不限制。 */
-        private int maxTotalChars = 6000;
+        private int maxTotalChars = 18000;
     }
 
     /**
@@ -173,11 +184,11 @@ public class KnowledgeBaseQueryProperties {
         /** 是否启用 small-to-big 上下文扩展 */
         private boolean enabled = true;
         /**
-         * 扩展策略：append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块）。
+         * 扩展策略：keep/append（命中+兄弟+父块拼接）或 replace（有父块时用父块替换子块）。
          */
-        private String strategy = "replace";
+        private String strategy = "keep";
         /** 单个命中 chunk 扩展后的最大字符数 */
-        private int maxChars = 8000;
+        private int maxChars = 4000;
         /** 最多聚合的兄弟 chunk 数 */
         private int maxSiblings = 5;
         /** parent/brother 文本 Redis 缓存 TTL（秒），0 表示不缓存 */
@@ -195,7 +206,7 @@ public class KnowledgeBaseQueryProperties {
         private boolean enabled = true;
         /** 是否在意图识别前推"正在理解您的问题..."进度（关闭可省 ~0.4s 前端空进度） */
         private boolean progressEnabled = true;
-        /** 意图识别专用模型；空则复用默认 ChatModel */
+        /** 意图识别专用模型；空则使用 {@link KnowledgeBaseQueryProperties#decisionModel} */
         private String model = "";
         /** LLM 语义识别在三路融合中的权重 */
         private double llmWeight = 0.6;
@@ -281,14 +292,12 @@ public class KnowledgeBaseQueryProperties {
         private boolean enabled = true;
         /** 是否让 LLM 参与路由；关闭时使用规则路由，降低延迟和成本。 */
         private boolean llmRouteEnabled = true;
-        /** 路由专用模型；为空时复用当前 Provider。 */
+        /** 路由专用模型；空则使用 {@link KnowledgeBaseQueryProperties#decisionModel} */
         private String routeModel = "";
         /** SQL 数据源配置。 */
         private Sql sql = new Sql();
         /** Neo4j 数据源配置。 */
         private Neo4j neo4j = new Neo4j();
-        /** 钉钉入站配置。 */
-        private DingTalk dingTalk = new DingTalk();
 
         @Data
         public static class Sql {
@@ -327,14 +336,6 @@ public class KnowledgeBaseQueryProperties {
             private int maxRows = 100;
             private int maxRetries = 1;
             private String promptPath = "classpath:prompts/rag/text-to-cypher.txt";
-        }
-
-        @Data
-        public static class DingTalk {
-            private boolean enabled = false;
-            /** 受信 Webhook 的共享 Token；为空时拒绝所有外部请求。 */
-            private String token = "";
-            private int maxQuestionChars = 2000;
         }
     }
 

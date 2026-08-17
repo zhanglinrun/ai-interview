@@ -1,9 +1,12 @@
 import {useMemo, useRef} from 'react';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import type {InterviewMessage, InterviewQuestion, InterviewSession} from '../types/interview';
-import {Flag, Send} from 'lucide-react';
+import {Clock, Flag, Send} from 'lucide-react';
 import InterviewMessageBubble from './InterviewMessageBubble';
 import LoadingButtonContent from './LoadingButtonContent';
+import {useElapsedSeconds} from '../hooks/useElapsedSeconds';
+import {formatClockTime} from '../utils/format';
+import {resolveInterviewStartedAt} from '../utils/interviewTimer';
 
 interface InterviewChatPanelProps {
   session: InterviewSession;
@@ -15,6 +18,7 @@ interface InterviewChatPanelProps {
   isSubmitting: boolean;
   onShowCompleteConfirm: (show: boolean) => void;
   draftSaved?: boolean;
+  error?: string;
 }
 
 /**
@@ -30,8 +34,14 @@ export default function InterviewChatPanel({
   isSubmitting,
   onShowCompleteConfirm,
   draftSaved,
+  error,
 }: InterviewChatPanelProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const startedAt = useMemo(
+    () => resolveInterviewStartedAt(session.sessionId, session.createdAt),
+    [session.createdAt, session.sessionId],
+  );
+  const elapsedSeconds = useElapsedSeconds(startedAt);
 
   const progress = useMemo(() => {
     if (!session || !currentQuestion) return 0;
@@ -62,9 +72,18 @@ export default function InterviewChatPanel({
                 </span>
               )}
             </div>
-            <span className="text-xs font-medium tabular-nums text-stone-400 dark:text-stone-500">
-              {Math.round(progress)}%
-            </span>
+            <div className="flex items-center gap-3">
+              <span
+                className="inline-flex items-center gap-1.5 text-xs font-medium tabular-nums text-stone-500 dark:text-stone-400"
+                aria-label="已用时"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {formatClockTime(elapsedSeconds)}
+              </span>
+              <span className="text-xs font-medium tabular-nums text-stone-400 dark:text-stone-500">
+                {Math.round(progress)}%
+              </span>
+            </div>
           </div>
           <div className="h-1.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
             <div
@@ -96,6 +115,11 @@ export default function InterviewChatPanel({
 
         {/* 输入区域 */}
         <div className="border-t border-stone-200 bg-white px-4 py-4 dark:border-stone-800 dark:bg-stone-900 sm:px-5">
+          {error ? (
+            <p className="mb-2 text-sm text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          ) : null}
           <textarea
             value={answer}
             onChange={(e) => onAnswerChange(e.target.value)}

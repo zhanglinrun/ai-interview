@@ -6,5 +6,11 @@ import java.net.URI;
 public record MineruTaskResult(
     MineruTaskStatus status,
     URI resultZipUrl,
-    String failureMessage
-) {}
+    String failureMessage,
+    Integer totalPages
+) {
+
+  public MineruTaskResult(MineruTaskStatus status, URI resultZipUrl, String failureMessage) {
+    this(status, resultZipUrl, failureMessage, null);
+  }
+}

@@ -1,0 +1,25 @@
+# 可选：把本机 Docker MinIO API 打成 Cloudflare 快速隧道，供官方 MinerU 拉取预签名 PDF。
+# 不要和日常 compose 绑在一起常开——默认账号暴露在公网。
+#
+# 用法（仓库根目录）：
+#   docker compose --project-directory dev-ops --env-file .env -f dev-ops/docker-compose-minio-tunnel.yml up -d
+#   docker logs -f interview-minio-tunnel
+# 把日志里的 https://*.trycloudflare.com 写入根目录 .env：
+#   MINIO_EXTERNAL_ENDPOINT=https://xxxx.trycloudflare.com
+# 然后重启后端。解析完后：
+#   docker compose -f dev-ops/docker-compose-minio-tunnel.yml down
+
+name: ai-interview-minio-tunnel
+
+services:
+  minio-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: interview-minio-tunnel
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url
+      - http://host.docker.internal:${MINIO_API_HOST_PORT:-29000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

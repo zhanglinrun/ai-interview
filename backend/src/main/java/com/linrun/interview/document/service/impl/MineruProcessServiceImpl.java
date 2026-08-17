@@ -27,19 +27,19 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.net.URI;
-import java.net.InetAddress;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 官方 MinerU 异步解析编排：私有 MinIO → 短时 URL → submit/poll → 安全 ZIP →
- * 图片上传 MinIO + Markdown 重写 + 视觉 alt → converted/{docId}/{versionId}/full.md。
+ * 官方 MinerU 异步解析编排：本地字节直传 MinerU OSS（file-urls/batch）→
+ * 按 200 页切片轮询 → 安全 ZIP → 图片上传 MinIO + Markdown 重写 →
+ * converted/{docId}/{versionId}/full.md。超过 200 页必须切片，不能整本丢给云端。
  * 失败原因先持久化，再显式降级 Tika；外部调用均不在数据库事务中。
  */
 @Slf4j
@@ -103,16 +103,14 @@ public class MineruProcessServiceImpl implements FileProcessService {
     if (properties.getApiToken() == null || properties.getApiToken().isBlank()) {
       return fallback(request, task, MineruFailureCode.CONFIGURATION);
     }
-    if (request.storageKey() == null || request.storageKey().isBlank()) {
-      return fallback(request, task, MineruFailureCode.PUBLIC_URL_UNAVAILABLE);
+    byte[] sourceBytes = resolveSourceBytes(request);
+    if (sourceBytes.length == 0) {
+      return fallback(request, task, MineruFailureCode.SOURCE_UPLOAD_FAILED);
     }
 
     long started = System.nanoTime();
     try {
-      URI sourceUrl = createPublicSourceUrl(request.storageKey());
-      String providerTaskId = mineruClient.submit(sourceUrl, modelVersion(request));
-      taskService.markSubmitted(task, providerTaskId, nextPollAt());
-      String markdown = pollUntilCompleted(task, providerTaskId, request);
+      String markdown = parseByOfficialUpload(request, task, sourceBytes);
       taskService.markSucceeded(task);
       recordMetric("mineru", MineruFailureCode.UNKNOWN, started);
       log.info("MinerU 精准解析成功: docId={}, versionId={}, resultChars={}",
@@ -135,21 +133,63 @@ public class MineruProcessServiceImpl implements FileProcessService {
     }
   }
 
-  private String pollUntilCompleted(
+  private String parseByOfficialUpload(
+      DocumentParseRequest request,
       DocumentParseTaskEntity task,
-      String providerTaskId,
-      DocumentParseRequest request
+      byte[] sourceBytes
+  ) throws MineruClientException {
+    int pageCount = PdfPageCounter.count(sourceBytes);
+    List<String> windows = pageWindows(pageCount);
+    log.info("MinerU 直传切片: docId={}, bytes={}, pages={}, windows={}",
+        request.documentId(), sourceBytes.length, pageCount, windows);
+    List<String> parts = new ArrayList<>();
+    Integer knownPages = pageCount > 0 ? pageCount : null;
+    for (int i = 0; i < windows.size(); i++) {
+      String range = windows.get(i);
+      String batchId = mineruClient.submitLocalFile(
+          sourceBytes, request.fileName(), modelVersion(request), range);
+      taskService.markSubmitted(task, "batch:" + batchId, nextPollAt());
+      MineruTaskResult done = pollBatchUntilCompleted(task, batchId);
+      if (done.totalPages() != null) {
+        knownPages = done.totalPages();
+      }
+      parts.add(materializeZip(request, mineruClient.downloadResult(done.resultZipUrl())));
+      if (knownPages != null && windowEnd(range) >= knownPages) {
+        break;
+      }
+    }
+    String merged = String.join("\n\n", parts.stream().filter(part -> part != null && !part.isBlank()).toList());
+    if (merged.isBlank()) {
+      throw new MineruClientException(MineruFailureCode.FULL_MD_MISSING, "MinerU 切片合并后正文为空");
+    }
+    if (!request.persistentContextAvailable()) {
+      return merged;
+    }
+    return storageService.uploadConvertedMarkdown(
+        request.documentId(), request.versionId(), merged);
+  }
+
+  private MineruTaskResult pollBatchUntilCompleted(
+      DocumentParseTaskEntity task,
+      String batchId
   ) throws MineruClientException {
     Instant deadline = Instant.now().plusSeconds(Math.max(properties.getTaskTimeoutSeconds(), 1));
+    Integer totalPages = null;
     while (Instant.now().isBefore(deadline)) {
-      MineruTaskResult result = mineruClient.getTask(providerTaskId);
+      MineruTaskResult result = mineruClient.getBatchResult(batchId);
+      if (result.totalPages() != null) {
+        totalPages = result.totalPages();
+      }
       switch (result.status()) {
         case SUCCEEDED -> {
-          byte[] zip = mineruClient.downloadResult(result.resultZipUrl());
-          return processZipResult(request, zip);
+          return new MineruTaskResult(
+              result.status(), result.resultZipUrl(), result.failureMessage(), totalPages);
         }
         case FAILED -> throw new MineruClientException(
-            MineruFailureCode.TASK_FAILED, "MinerU provider task 执行失败");
+            MineruFailureCode.TASK_FAILED,
+            result.failureMessage() == null || result.failureMessage().isBlank()
+                ? "MinerU provider task 执行失败"
+                : "MinerU provider task 执行失败: " + result.failureMessage());
         case PENDING, RUNNING -> {
           taskService.markPolling(task, nextPollAt());
           pauseBeforeNextPoll();
@@ -159,36 +199,43 @@ public class MineruProcessServiceImpl implements FileProcessService {
     throw new MineruClientException(MineruFailureCode.TASK_TIMEOUT, "MinerU provider task 超时");
   }
 
-  private URI createPublicSourceUrl(String storageKey) throws MineruClientException {
-    URI sourceUrl;
-    try {
-      sourceUrl = storageService.presignDownload(
-          storageKey, Duration.ofSeconds(properties.getPresignedUrlTtlSeconds()));
-    } catch (Exception e) {
-      throw new MineruClientException(
-          MineruFailureCode.PUBLIC_URL_UNAVAILABLE, "无法生成 MinerU 文件下载地址", e);
+  private byte[] resolveSourceBytes(DocumentParseRequest request) {
+    if (request.fileBytes() != null && request.fileBytes().length > 1) {
+      return request.fileBytes();
     }
-    if (properties.isAllowPrivateSourceUrls()) {
-      return sourceUrl;
+    if (request.storageKey() == null || request.storageKey().isBlank()) {
+      return new byte[0];
     }
     try {
-      if (sourceUrl.getHost() == null || !"https".equalsIgnoreCase(sourceUrl.getScheme())) {
-        throw new MineruClientException(
-            MineruFailureCode.PUBLIC_URL_UNAVAILABLE, "MinerU 文件地址必须是公网 HTTPS");
-      }
-      for (InetAddress address : InetAddress.getAllByName(sourceUrl.getHost())) {
-        if (address.isAnyLocalAddress() || address.isLoopbackAddress()
-            || address.isLinkLocalAddress() || address.isSiteLocalAddress()) {
-          throw new MineruClientException(
-              MineruFailureCode.PUBLIC_URL_UNAVAILABLE, "MinerU 文件地址不是公网地址");
-        }
-      }
-      return sourceUrl;
-    } catch (MineruClientException e) {
-      throw e;
+      return storageService.downloadFile(request.storageKey());
     } catch (Exception e) {
-      throw new MineruClientException(
-          MineruFailureCode.PUBLIC_URL_UNAVAILABLE, "无法校验 MinerU 文件下载地址", e);
+      log.warn("无法从对象存储读取待解析文件: storageKey={}", request.storageKey(), e);
+      return new byte[0];
+    }
+  }
+
+  private List<String> pageWindows(int pageCount) {
+    int max = Math.max(properties.getMaxPagesPerRequest(), 1);
+    List<String> windows = new ArrayList<>();
+    if (pageCount < 1) {
+      windows.add("1-" + max);
+      return windows;
+    }
+    for (int start = 1; start <= pageCount; start += max) {
+      windows.add(start + "-" + Math.min(start + max - 1, pageCount));
+    }
+    return windows;
+  }
+
+  private int windowEnd(String range) {
+    int dash = range.lastIndexOf('-');
+    if (dash < 0) {
+      return Integer.MAX_VALUE;
+    }
+    try {
+      return Integer.parseInt(range.substring(dash + 1));
+    } catch (NumberFormatException e) {
+      return Integer.MAX_VALUE;
     }
   }
 
@@ -201,7 +248,7 @@ public class MineruProcessServiceImpl implements FileProcessService {
       return false;
     }
     try {
-      MineruTaskResult result = mineruClient.getTask(task.getProviderTaskId());
+      MineruTaskResult result = pollProvider(task.getProviderTaskId());
       if (result.status() == MineruTaskStatus.PENDING
           || result.status() == MineruTaskStatus.RUNNING) {
         if (isProviderTaskExpired(task)) {
@@ -211,6 +258,10 @@ public class MineruProcessServiceImpl implements FileProcessService {
         return false;
       }
       if (result.status() == MineruTaskStatus.FAILED) {
+        taskService.markFailed(task, MineruFailureCode.TASK_FAILED,
+            result.failureMessage() == null || result.failureMessage().isBlank()
+                ? "MinerU provider task 执行失败"
+                : result.failureMessage());
         return recoverWithTika(task, MineruFailureCode.TASK_FAILED);
       }
       String converted = processZipResult(buildRequestFromTask(task),
@@ -272,7 +323,24 @@ public class MineruProcessServiceImpl implements FileProcessService {
    * MinerU ZIP 产物处理：提取 full.md 与图片 → 图片上传 MinIO → 重写引用 + 视觉 alt → 上传 full.md。
    * 无持久化上下文时仅返回 Markdown 文本（单测/无 docId 场景）。
    */
+  private MineruTaskResult pollProvider(String providerTaskId) throws MineruClientException {
+    if (providerTaskId != null && providerTaskId.startsWith("batch:")) {
+      return mineruClient.getBatchResult(providerTaskId.substring("batch:".length()));
+    }
+    return mineruClient.getTask(providerTaskId);
+  }
+
   private String processZipResult(DocumentParseRequest request, byte[] zipBytes)
+      throws MineruClientException {
+    String rewritten = materializeZip(request, zipBytes);
+    if (!request.persistentContextAvailable()) {
+      return rewritten;
+    }
+    return storageService.uploadConvertedMarkdown(
+        request.documentId(), request.versionId(), rewritten);
+  }
+
+  private String materializeZip(DocumentParseRequest request, byte[] zipBytes)
       throws MineruClientException {
     if (!request.persistentContextAvailable()) {
       return zipExtractor.extractFullMarkdown(zipBytes);
@@ -284,9 +352,7 @@ public class MineruProcessServiceImpl implements FileProcessService {
           request.documentId(), request.versionId(), entry.getKey(), entry.getValue());
       imageUrlByFileName.put(entry.getKey(), imageUrl);
     }
-    String rewritten = imageRewriter.rewrite(pack.markdown(), imageUrlByFileName);
-    return storageService.uploadConvertedMarkdown(
-        request.documentId(), request.versionId(), rewritten);
+    return imageRewriter.rewrite(pack.markdown(), imageUrlByFileName);
   }
 
   private DocumentParseRequest buildRequestFromTask(DocumentParseTaskEntity task) {

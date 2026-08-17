@@ -498,7 +498,6 @@ CREATE TABLE IF NOT EXISTS `interview_sessions` (
     `evidence_snapshot_ids_json` TEXT       NULL,
     `github_repository_id`     BIGINT       NULL,
     `github_commit_sha`        CHAR(40)     NULL,
-    `coding_language`          VARCHAR(20)  NULL,
     `session_version`          BIGINT       NOT NULL DEFAULT 0,
     `current_stage`            VARCHAR(32)  NULL,
     `current_question_id`      BIGINT       NULL,
@@ -637,29 +636,6 @@ CREATE TABLE IF NOT EXISTS `interview_session_events` (
     KEY `idx_interview_event_reconnect` (`user_id`, `session_id`, `id`),
     KEY `idx_interview_event_trace` (`source_trace_id`, `created_at` DESC),
     CONSTRAINT `fk_interview_event_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `interview_code_drafts` (
-    `id`               BIGINT        NOT NULL AUTO_INCREMENT,
-    `user_id`          BIGINT        NOT NULL,
-    `session_id`       BIGINT        NOT NULL,
-    `question_id`      BIGINT        NOT NULL,
-    `language`         VARCHAR(20)   NOT NULL,
-    `source_code`      MEDIUMTEXT    NOT NULL,
-    `source_hash`      CHAR(64)      NOT NULL,
-    `judge_status`     VARCHAR(32)   NOT NULL,
-    `judge_submission_id` VARCHAR(191) NULL,
-    `judge_result_json` TEXT         NULL,
-    `command_id`       VARCHAR(64)   NOT NULL,
-    `created_at`       DATETIME(6)   NOT NULL,
-    `updated_at`       DATETIME(6)   NOT NULL,
-    `submitted_at`     DATETIME(6)   NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_interview_code_draft` (`session_id`, `question_id`),
-    KEY `idx_interview_code_user_session` (`user_id`, `session_id`),
-    CONSTRAINT `fk_interview_code_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_interview_code_session` FOREIGN KEY (`session_id`) REFERENCES `interview_sessions` (`id`),
-    CONSTRAINT `fk_interview_code_question` FOREIGN KEY (`question_id`) REFERENCES `interview_questions` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Multi-Agent 编排轨迹（Planner/Interviewer/Critic/Evaluator 运行摘要）
@@ -949,92 +925,6 @@ CREATE TABLE IF NOT EXISTS `platform_knowledge_manifest` (
         (`owner_user_id`, `data_domain`, `resource_id`, `resource_version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- JD 修改创建新行；面试运行时只引用冻结版本 ID，不受后续版本影响。
-CREATE TABLE IF NOT EXISTS `job_descriptions` (
-    `id`                    BIGINT        NOT NULL AUTO_INCREMENT,
-    `user_id`               BIGINT        NOT NULL,
-    `target_key`            VARCHAR(36)   NOT NULL,
-    `version`               INT           NOT NULL,
-    `title`                 VARCHAR(120)  NOT NULL,
-    `company`               VARCHAR(120)  NULL,
-    `job_track`             VARCHAR(32)   NOT NULL,
-    `jd_text`               MEDIUMTEXT    NULL,
-    `source_url`            VARCHAR(1000) NULL,
-    `content_hash`          CHAR(64)      NOT NULL,
-    `status`                VARCHAR(20)   NOT NULL,
-    `template_code`         VARCHAR(64)   NOT NULL,
-    `template_version`      VARCHAR(32)   NOT NULL,
-    `rubric_versions_json`  TEXT          NULL,
-    `frozen_at`             DATETIME(6)   NULL,
-    `created_at`            DATETIME(6)   NOT NULL,
-    `updated_at`            DATETIME(6)   NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_job_description_target_version` (`user_id`, `target_key`, `version`),
-    KEY `idx_job_description_user_status` (`user_id`, `status`, `updated_at` DESC),
-    CONSTRAINT `fk_job_description_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_job_description_template`
-        FOREIGN KEY (`template_code`, `template_version`)
-        REFERENCES `capability_templates` (`template_code`, `version`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 岗位实战准备任务：只向用户暴露范围、状态和降级，不暴露题目、Rubric 或证据正文。
-CREATE TABLE IF NOT EXISTS `job_interview_preparation_runs` (
-    `id`                         BIGINT        NOT NULL AUTO_INCREMENT,
-    `run_id`                     VARCHAR(36)   NOT NULL,
-    `user_id`                    BIGINT        NOT NULL,
-    `job_description_id`         BIGINT        NOT NULL,
-    `resume_id`                  BIGINT        NULL,
-    `github_repository_id`       BIGINT        NULL,
-    `knowledge_base_ids_json`    TEXT          NULL,
-    `include_personal_materials` TINYINT(1)    NOT NULL DEFAULT 0,
-    `coding_language`            VARCHAR(20)   NOT NULL,
-    `fingerprint`                CHAR(64)      NOT NULL,
-    `status`                     VARCHAR(24)   NOT NULL,
-    `attempt`                    INT           NOT NULL DEFAULT 0,
-    `input_snapshot_json`        LONGTEXT      NOT NULL,
-    `plan_json`                  LONGTEXT      NULL,
-    `evidence_snapshot_ids_json` TEXT          NULL,
-    `dependency_status_json`     TEXT          NULL,
-    `degraded_reasons_json`      TEXT          NULL,
-    `session_id`                 VARCHAR(36)   NULL,
-    `failure_code`               VARCHAR(64)   NULL,
-    `failure_detail`             VARCHAR(500)  NULL,
-    `created_at`                 DATETIME(6)   NOT NULL,
-    `updated_at`                 DATETIME(6)   NOT NULL,
-    `completed_at`               DATETIME(6)   NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_job_interview_preparation_run` (`run_id`),
-    KEY `idx_job_interview_preparation_reuse` (`user_id`, `fingerprint`, `status`, `created_at` DESC),
-    KEY `idx_job_interview_preparation_recovery` (`status`, `updated_at`),
-    CONSTRAINT `fk_job_interview_preparation_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_job_interview_preparation_job` FOREIGN KEY (`job_description_id`) REFERENCES `job_descriptions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `job_capability_mappings` (
-    `id`                  BIGINT       NOT NULL AUTO_INCREMENT,
-    `user_id`             BIGINT       NOT NULL,
-    `job_description_id`  BIGINT       NOT NULL,
-    `atom_id`             VARCHAR(64)  NOT NULL,
-    `atom_version`        VARCHAR(64)  NOT NULL,
-    `capability_name`     VARCHAR(128) NOT NULL,
-    `mapping_source`      VARCHAR(32)  NOT NULL,
-    `evidence_text`       VARCHAR(500) NULL,
-    `evidence_start`      INT          NULL,
-    `evidence_end`        INT          NULL,
-    `suggested_weight`    DECIMAL(8,6) NOT NULL,
-    `confirmed_weight`    DECIMAL(8,6) NULL,
-    `confidence`          DECIMAL(8,6) NOT NULL,
-    `enabled`             TINYINT(1)   NOT NULL DEFAULT 1,
-    `created_at`          DATETIME(6)  NOT NULL,
-    `updated_at`          DATETIME(6)  NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_job_mapping_atom` (`job_description_id`, `atom_id`, `atom_version`),
-    KEY `idx_job_mapping_user_job` (`user_id`, `job_description_id`, `enabled`),
-    CONSTRAINT `fk_job_mapping_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_job_mapping_job`
-        FOREIGN KEY (`job_description_id`) REFERENCES `job_descriptions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- ==================== 文档精准解析与证据快照 ====================
 CREATE TABLE IF NOT EXISTS `document_tasks` (
     `id`                BIGINT        NOT NULL AUTO_INCREMENT,
@@ -1192,147 +1082,7 @@ CREATE TABLE IF NOT EXISTS `github_code_evidence` (
         FOREIGN KEY (`repository_id`) REFERENCES `github_repository_bindings` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==================== Hot 100 算法面试（外部 Judge0） ====================
-CREATE TABLE IF NOT EXISTS `algorithm_content_imports` (
-    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
-    `schema_version`   VARCHAR(32)  NOT NULL,
-    `content_version`  VARCHAR(64)  NOT NULL,
-    `checksum`         CHAR(64)     NOT NULL,
-    `problem_count`    INT          NOT NULL,
-    `enabled_count`    INT          NOT NULL,
-    `imported_at`      DATETIME(6)  NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_algorithm_content_version` (`content_version`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 只保存题号、标题、标签和官方链接映射，不复制第三方原始题面或题解。
-CREATE TABLE IF NOT EXISTS `coding_problems` (
-    `id`                    BIGINT        NOT NULL AUTO_INCREMENT,
-    `catalog_version`       VARCHAR(64)   NOT NULL,
-    `hot_rank`              INT           NOT NULL,
-    `platform`              VARCHAR(32)   NOT NULL,
-    `platform_problem_id`   VARCHAR(32)   NOT NULL,
-    `slug`                  VARCHAR(191)  NOT NULL,
-    `title`                 VARCHAR(191)  NOT NULL,
-    `difficulty`            VARCHAR(16)   NOT NULL,
-    `tags_json`             TEXT          NOT NULL,
-    `source_url`            VARCHAR(500)  NOT NULL,
-    `active`                TINYINT(1)    NOT NULL DEFAULT 1,
-    `created_at`            DATETIME(6)   NOT NULL,
-    `updated_at`            DATETIME(6)   NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_coding_problem_catalog`
-        (`catalog_version`, `platform`, `platform_problem_id`),
-    UNIQUE KEY `uk_coding_problem_rank` (`catalog_version`, `hot_rank`),
-    KEY `idx_coding_problem_active_rank` (`active`, `hot_rank`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- statement_text、示例和测试均由本平台自行编写并版本化；hidden_tests_json 永不进入普通 API。
-CREATE TABLE IF NOT EXISTS `coding_problem_versions` (
-    `id`                       BIGINT       NOT NULL AUTO_INCREMENT,
-    `problem_id`               BIGINT       NOT NULL,
-    `version`                  VARCHAR(32)  NOT NULL,
-    `statement_text`           TEXT         NOT NULL,
-    `constraints_json`         TEXT         NOT NULL,
-    `public_examples_json`     TEXT         NOT NULL,
-    `complexity_rubric_json`   TEXT         NOT NULL,
-    `language_specs_json`      LONGTEXT     NOT NULL,
-    `public_tests_json`        LONGTEXT     NOT NULL,
-    `hidden_tests_json`        LONGTEXT     NOT NULL,
-    `content_hash`             CHAR(64)     NOT NULL,
-    `enabled`                  TINYINT(1)   NOT NULL DEFAULT 0,
-    `java_enabled`             TINYINT(1)   NOT NULL DEFAULT 0,
-    `python_enabled`           TINYINT(1)   NOT NULL DEFAULT 0,
-    `created_at`               DATETIME(6)  NOT NULL,
-    `updated_at`               DATETIME(6)  NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_coding_problem_version` (`problem_id`, `version`),
-    KEY `idx_coding_problem_version_enabled` (`enabled`, `java_enabled`, `python_enabled`),
-    CONSTRAINT `fk_coding_version_problem`
-        FOREIGN KEY (`problem_id`) REFERENCES `coding_problems` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `coding_attempts` (
-    `id`                   BIGINT       NOT NULL AUTO_INCREMENT,
-    `attempt_id`           CHAR(36)     NOT NULL,
-    `user_id`              BIGINT       NOT NULL,
-    `problem_version_id`   BIGINT       NOT NULL,
-    `mode`                 VARCHAR(24)  NOT NULL,
-    `context_id`           VARCHAR(80)  NULL,
-    `language`             VARCHAR(16)  NOT NULL,
-    `status`               VARCHAR(24)  NOT NULL,
-    `started_at`           DATETIME(6)  NOT NULL,
-    `submitted_at`         DATETIME(6)  NULL,
-    `completed_at`         DATETIME(6)  NULL,
-    `created_at`           DATETIME(6)  NOT NULL,
-    `updated_at`           DATETIME(6)  NOT NULL,
-    `lock_version`         INT          NOT NULL DEFAULT 0,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_coding_attempt_id` (`attempt_id`),
-    KEY `idx_coding_attempt_user_time` (`user_id`, `updated_at` DESC),
-    KEY `idx_coding_attempt_user_problem`
-        (`user_id`, `problem_version_id`, `status`, `updated_at` DESC),
-    KEY `idx_coding_attempt_context` (`user_id`, `mode`, `context_id`),
-    CONSTRAINT `fk_coding_attempt_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_coding_attempt_problem_version`
-        FOREIGN KEY (`problem_version_id`) REFERENCES `coding_problem_versions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `coding_drafts` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-    `user_id`       BIGINT       NOT NULL,
-    `attempt_id`    BIGINT       NOT NULL,
-    `language`      VARCHAR(16)  NOT NULL,
-    `source_code`   LONGTEXT     NOT NULL,
-    `code_hash`     CHAR(64)     NOT NULL,
-    `revision`      INT          NOT NULL DEFAULT 0,
-    `created_at`    DATETIME(6)  NOT NULL,
-    `updated_at`    DATETIME(6)  NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_coding_draft_attempt` (`attempt_id`),
-    KEY `idx_coding_draft_user_attempt` (`user_id`, `attempt_id`),
-    CONSTRAINT `fk_coding_draft_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_coding_draft_attempt`
-        FOREIGN KEY (`attempt_id`) REFERENCES `coding_attempts` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- source_code 仅用于固定本次执行快照和恢复后补判；普通日志/结果 DTO 均不返回该列。
-CREATE TABLE IF NOT EXISTS `judge_submissions` (
-    `id`                       BIGINT        NOT NULL AUTO_INCREMENT,
-    `submission_id`            CHAR(36)      NOT NULL,
-    `user_id`                  BIGINT        NOT NULL,
-    `attempt_id`               BIGINT        NOT NULL,
-    `idempotency_key`          VARCHAR(100)  NOT NULL,
-    `suite_type`               VARCHAR(16)   NOT NULL,
-    `language`                 VARCHAR(16)   NOT NULL,
-    `source_code`              LONGTEXT      NOT NULL,
-    `code_hash`                CHAR(64)      NOT NULL,
-    `status`                   VARCHAR(32)   NOT NULL,
-    `provider`                 VARCHAR(32)   NOT NULL,
-    `provider_submission_id`   VARCHAR(191)  NULL,
-    `passed_count`             INT           NOT NULL DEFAULT 0,
-    `total_count`              INT           NOT NULL,
-    `diagnostic`               VARCHAR(2000) NULL,
-    `time_ms`                  BIGINT        NULL,
-    `memory_kb`                BIGINT        NULL,
-    `failure_code`             VARCHAR(64)   NULL,
-    `submitted_at`             DATETIME(6)   NOT NULL,
-    `completed_at`             DATETIME(6)   NULL,
-    `created_at`               DATETIME(6)   NOT NULL,
-    `updated_at`               DATETIME(6)   NOT NULL,
-    `lock_version`             INT           NOT NULL DEFAULT 0,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_judge_submission_id` (`submission_id`),
-    UNIQUE KEY `uk_judge_submission_idempotency`
-        (`user_id`, `attempt_id`, `idempotency_key`),
-    KEY `idx_judge_submission_attempt` (`user_id`, `attempt_id`, `created_at` DESC),
-    KEY `idx_judge_submission_rejudge` (`status`, `updated_at`),
-    CONSTRAINT `fk_judge_submission_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-    CONSTRAINT `fk_judge_submission_attempt`
-        FOREIGN KEY (`attempt_id`) REFERENCES `coding_attempts` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ==================== 证据化复盘、能力画像与专项训练 ====================
+-- ==================== 证据化复盘与能力画像 ====================
 -- 客观事实先落库并立即可见；LLM 总结异步完成，只有 COMPLETED 报告可以写画像证据。
 CREATE TABLE IF NOT EXISTS `interview_evidence_reports` (
     `id`                   BIGINT        NOT NULL AUTO_INCREMENT,
@@ -1415,34 +1165,6 @@ CREATE TABLE IF NOT EXISTS `capability_profiles` (
     UNIQUE KEY `uk_capability_profile_user_atom` (`user_id`, `capability_atom_id`),
     KEY `idx_capability_profile_user_state` (`user_id`, `state`, `updated_at` DESC),
     CONSTRAINT `fk_capability_profile_user`
-        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `training_tasks` (
-    `id`                 BIGINT        NOT NULL AUTO_INCREMENT,
-    `task_id`            CHAR(36)      NOT NULL,
-    `user_id`            BIGINT        NOT NULL,
-    `report_id`          CHAR(36)      NULL,
-    `capability_atom_id` VARCHAR(191)  NOT NULL,
-    `training_type`      VARCHAR(32)   NOT NULL,
-    `status`             VARCHAR(20)   NOT NULL,
-    `source_question_id` BIGINT        NULL,
-    `question_text`      TEXT          NOT NULL,
-    `question_version`   VARCHAR(64)   NOT NULL,
-    `evidence_scope_json` TEXT         NULL,
-    `hint_used`          TINYINT(1)    NOT NULL DEFAULT 0,
-    `answer_viewed`      TINYINT(1)    NOT NULL DEFAULT 0,
-    `redo_count`         INT           NOT NULL DEFAULT 0,
-    `result_score`       INT           NULL,
-    `created_at`         DATETIME(6)   NOT NULL,
-    `started_at`         DATETIME(6)   NULL,
-    `completed_at`       DATETIME(6)   NULL,
-    `updated_at`         DATETIME(6)   NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_training_task_id` (`task_id`),
-    UNIQUE KEY `uk_training_report_atom` (`report_id`, `capability_atom_id`),
-    KEY `idx_training_task_user_status` (`user_id`, `status`, `updated_at` DESC),
-    CONSTRAINT `fk_training_task_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

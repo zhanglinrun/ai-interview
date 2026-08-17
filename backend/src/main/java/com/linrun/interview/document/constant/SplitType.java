@@ -1,17 +1,17 @@
 package com.linrun.interview.document.constant;
 
 /**
- * 文档切块策略（对齐业界实践 {@code SplitType}，本项目默认 PARENT_CHILD）。
+ * 文档切块策略（对齐 know-engine {@code SplitType}，默认 TITLE）。
  */
 public enum SplitType {
 
-  /** 兄弟分段（Markdown 标题 + 超长章节二次切割，默认）。 */
+  /** 兄弟分段（Markdown 标题 + 超长章节二次切割）。 */
   BROTHER,
 
-  /** 按标题层级切块（Parent-Child）。 */
+  /** 按标题切分（know-engine TITLE：1～titleLevel 级标题，超长才升格父子）。 */
   TITLE,
 
-  /** 按标题层级切块（Parent-Child）的显式名称；保留 TITLE 兼容旧请求。 */
+  /** TITLE 别名，兼容旧请求。 */
   PARENT_CHILD,
 
   /** 智能切块：Parent + chunkSize 10% overlap。 */

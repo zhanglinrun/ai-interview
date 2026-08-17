@@ -28,7 +28,7 @@ public record EvaluationReport(
         String question,
         String category,
         String userAnswer,
-        int score,
+        Integer score,
         String feedback
     ) {}
 

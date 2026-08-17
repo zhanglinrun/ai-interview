@@ -31,6 +31,8 @@ interface InterviewProps {
   };
   onBack: () => void;
   onInterviewComplete: () => void;
+  /** 准备页确认后，或恢复未完成场次时才自动建场。 */
+  autoStart?: boolean;
 }
 
 export default function Interview({
@@ -40,6 +42,7 @@ export default function Interview({
   initialConfig,
   onBack,
   onInterviewComplete,
+  autoStart = false,
 }: InterviewProps) {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
@@ -53,6 +56,7 @@ export default function Interview({
   const startedRef = useRef(false);
   const saveTimerRef = useRef<number>();
   const submitCommandRef = useRef(new Map<string, string>());
+  const submittingRef = useRef(false);
 
   const questionCount = initialConfig?.questionCount ?? 8;
   const llmProvider = initialConfig?.llmProvider ?? '';
@@ -104,7 +108,7 @@ export default function Interview({
         skillId,
         difficulty,
         customCategories: skillId === CUSTOM_SKILL_ID ? customCategories : undefined,
-        jdText: skillId === CUSTOM_SKILL_ID ? jdText : undefined,
+        jdText: jdText && jdText.trim() ? jdText.trim() : undefined,
         knowledgeBaseIds: knowledgeBaseIds && knowledgeBaseIds.length > 0 ? knowledgeBaseIds : undefined,
       });
 
@@ -157,14 +161,34 @@ export default function Interview({
     startedRef.current = true;
     if (sessionIdToResume) {
       resumeExistingSession(sessionIdToResume);
-    } else {
+    } else if (autoStart) {
       startInterview();
     }
-  }, [resumeExistingSession, sessionIdToResume, startInterview]);
+  }, [autoStart, resumeExistingSession, sessionIdToResume, startInterview]);
+
+  const recoverAfterSubmitFailure = useCallback(async (
+    sessionId: string,
+    submittedIndex: number,
+  ): Promise<boolean> => {
+    const existing = await interviewApi.getSession(sessionId);
+    const advanced = existing.currentQuestionIndex > submittedIndex
+      || existing.status === 'COMPLETED'
+      || existing.status === 'EVALUATED';
+    initSession(existing);
+    if (!advanced) {
+      return false;
+    }
+    setAnswer('');
+    setError('');
+    if (existing.status === 'COMPLETED' || existing.status === 'EVALUATED') {
+      onInterviewComplete();
+    }
+    return true;
+  }, [initSession, onInterviewComplete]);
 
   // 答案暂存（debounce）
   useEffect(() => {
-    if (!session || !currentQuestion || !answer.trim()) {
+    if (!session || !currentQuestion || !answer.trim() || isSubmitting) {
       return;
     }
     window.clearTimeout(saveTimerRef.current);
@@ -181,13 +205,17 @@ export default function Interview({
       }
     }, 1500);
     return () => window.clearTimeout(saveTimerRef.current);
-  }, [answer, currentQuestion, session]);
+  }, [answer, currentQuestion, isSubmitting, session]);
 
   const handleSubmitAnswer = async () => {
-    if (!answer.trim() || !session || !currentQuestion) return;
+    if (!answer.trim() || !session || !currentQuestion || submittingRef.current) return;
 
+    submittingRef.current = true;
     setIsSubmitting(true);
+    setError('');
+    window.clearTimeout(saveTimerRef.current);
 
+    const submittedIndex = currentQuestion.questionIndex;
     const userMessage: InterviewMessage = {
       type: 'user',
       content: answer
@@ -222,9 +250,17 @@ export default function Interview({
         onInterviewComplete();
       }
     } catch (err) {
-      setError(getErrorMessage(err, '提交答案失败，请重试'));
       console.error(err);
+      try {
+        if (await recoverAfterSubmitFailure(session.sessionId, submittedIndex)) {
+          return;
+        }
+      } catch (recoverErr) {
+        console.error(recoverErr);
+      }
+      setError(getErrorMessage(err, '提交答案失败，请重试'));
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -285,7 +321,37 @@ export default function Interview({
     );
   }
 
-  if (!session || !currentQuestion) return null;
+  if (!session || !currentQuestion) {
+    return (
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <EmptyState
+          title={error || (session ? '本场面试没有可继续的题目' : '面试尚未开始')}
+          description={session
+            ? '可以返回记录页查看报告，或重新开一场。'
+            : '创建或恢复会话后才能开始答题。'}
+          className="text-center"
+          action={
+            <div className="mt-4 flex gap-3 justify-center">
+              {!session && !sessionIdToResume ? (
+                <button
+                  onClick={startInterview}
+                  className="btn-primary px-4 py-2 text-sm"
+                >
+                  重试
+                </button>
+              ) : null}
+              <button
+                onClick={onBack}
+                className="btn-secondary px-4 py-2 text-sm"
+              >
+                返回
+              </button>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="pb-10">
@@ -310,6 +376,7 @@ export default function Interview({
         isSubmitting={isSubmitting}
         onShowCompleteConfirm={setShowCompleteConfirm}
         draftSaved={draftSaved}
+        error={error}
       />
 
       {/* 提前交卷确认对话框 */}

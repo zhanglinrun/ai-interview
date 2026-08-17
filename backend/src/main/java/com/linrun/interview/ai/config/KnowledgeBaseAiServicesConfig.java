@@ -22,9 +22,9 @@ public class KnowledgeBaseAiServicesConfig {
     public LlmIntentRecognitionAiService llmIntentRecognitionAiService(
         LlmProviderRegistry llmProviderRegistry,
         KnowledgeBaseQueryProperties queryProperties) {
-        String intentModel = queryProperties.getIntentRecognition().getModel();
-        log.info("[KnowledgeBaseAiServices] 构造 LlmIntentRecognitionAiService, model={}",
-            intentModel == null || intentModel.isBlank() ? "default" : intentModel);
+        String intentModel = queryProperties.resolveDecisionModel(
+            queryProperties.getIntentRecognition().getModel());
+        log.info("[KnowledgeBaseAiServices] 构造 LlmIntentRecognitionAiService, model={}", intentModel);
         return AiServices.builder(LlmIntentRecognitionAiService.class)
             .chatModel(llmProviderRegistry.getChatModelWithModel(null, intentModel))
             .build();

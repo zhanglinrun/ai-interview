@@ -11,9 +11,12 @@ import dev.langchain4j.data.document.splitter.DocumentByRegexSplitter;
 import dev.langchain4j.data.document.splitter.DocumentByWordSplitter;
 
 /**
- * 文档切块工厂（对齐业界实践 {@code DocumentSplitterFactory}，默认 PARENT_CHILD）。
+ * 文档切块工厂（对齐 know-engine {@code DocumentSplitterFactory}，默认 TITLE）。
  */
 public final class DocumentSplitterFactory {
+
+  /** know-engine TITLE 表单示例 / 测试用例使用的标题级数。 */
+  public static final int DEFAULT_TITLE_LEVEL = 3;
 
   private DocumentSplitterFactory() {
   }
@@ -33,7 +36,9 @@ public final class DocumentSplitterFactory {
     return switch (splitType) {
       case BROTHER -> new MarkdownHeaderBrotherTextSplitter(chunkSize, overlap);
       case TITLE, PARENT_CHILD -> {
-        int titleLevel = param.titleLevel() != null && param.titleLevel() > 0 ? param.titleLevel() : 2;
+        int titleLevel = param.titleLevel() != null && param.titleLevel() > 0
+            ? Math.min(6, param.titleLevel())
+            : DEFAULT_TITLE_LEVEL;
         yield new MarkdownHeaderParentTextSplitter(titleLevel, false, false, chunkSize, overlap);
       }
       case SMART -> new MarkdownHeaderParentTextSplitter(chunkSize, Math.max(0, (int) (chunkSize * 0.1)));

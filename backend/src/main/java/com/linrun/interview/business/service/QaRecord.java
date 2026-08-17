@@ -7,5 +7,10 @@ public record QaRecord(
     int questionIndex,
     String question,
     String category,
-    String userAnswer   // null 表示未回答
-) {}
+    String userAnswer,
+    Boolean criticApproved
+) {
+  public QaRecord(int questionIndex, String question, String category, String userAnswer) {
+    this(questionIndex, question, category, userAnswer, null);
+  }
+}

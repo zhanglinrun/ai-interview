@@ -1,6 +1,10 @@
 package com.linrun.interview.business.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linrun.interview.ai.service.LlmProviderRegistry;
+import com.linrun.interview.infra.observability.LlmUsageContext;
+import com.linrun.interview.infra.observability.LlmUsageContext.Context;
+import com.linrun.interview.infra.observability.TraceContext;
 import com.linrun.interview.infra.redis.RedisChatMemoryStore;
 import com.linrun.interview.business.vo.AgentTraceStep;
 import com.linrun.interview.business.service.AgentExecutionContext;
@@ -14,6 +18,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -35,6 +41,8 @@ public class AgentAiServiceFactory {
   private final AgentOrchestrationProperties properties;
   private final ToolExecutor toolExecutor;
   private final RedisChatMemoryStore chatMemoryStore;
+  private final AgentTraceService agentTraceService;
+  private final ObjectMapper objectMapper;
 
   private final ConcurrentHashMap<ChatModel, PlannerAiService> plannerCache = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<ChatModel, InterviewerAiService> interviewerCache = new ConcurrentHashMap<>();
@@ -106,15 +114,47 @@ public class AgentAiServiceFactory {
       @Override
       public void onEvent(ToolExecutedEvent event) {
         ToolExecutionRequest request = event.request();
-        if (context != null) {
-          context.append(
-              AgentTraceStep.ROLE_INTERVIEWER,
-              request != null ? request.name() : "",
-              request == null || request.arguments() == null ? "" : "tool arguments redacted",
-              summarizeToolObservation(request, event.resultText()));
+        String name = request == null || request.name() == null ? "tool" : request.name();
+        String input = request == null || request.arguments() == null ? "" : "tool arguments redacted";
+        String output = summarizeToolObservation(request, event.resultText());
+        if (!writeToolSpan(name, input, output) && context != null) {
+          context.append(AgentTraceStep.ROLE_INTERVIEWER, name, input, output);
         }
       }
     };
+  }
+
+  private boolean writeToolSpan(String name, String input, String output) {
+    Context usage = LlmUsageContext.current();
+    if (agentTraceService == null || usage == null
+        || usage.agentRunId() == null || usage.agentRunId().isBlank()
+        || usage.userId() == null
+        || usage.sessionId() == null || usage.sessionId().isBlank()) {
+      return false;
+    }
+    AgentRunHandle run = new AgentRunHandle(
+        usage.agentRunId(),
+        TraceContext.getTraceId(),
+        null,
+        usage.sessionId(),
+        usage.userId(),
+        usage.operation(),
+        usage.spanId(),
+        LocalDateTime.now());
+    agentTraceService.appendQuietly(run, new AgentSpanRecord(
+        "span-tool-" + UUID.randomUUID(),
+        usage.spanId(),
+        AgentTraceStep.ROLE_INTERVIEWER,
+        name,
+        input,
+        output,
+        "COMPLETED",
+        null,
+        AgentSpanMetadata.write(objectMapper, AgentSpanMetadata.KIND_TOOL,
+            null, null, null, usage.operation()),
+        0,
+        usage.questionIndex()));
+    return true;
   }
 
   private String summarizeToolObservation(ToolExecutionRequest request, String resultText) {

@@ -9,12 +9,24 @@ import {
 } from 'lucide-react';
 import type {AnswerItem, InterviewDetail} from '../api/history';
 import {getScoreTextColor} from '../utils/score';
+import {
+  type EvaluationStatus,
+  hasReliableEvaluationScore,
+  isDegradedEvaluationFeedback,
+  isEvaluationFailed,
+} from '../utils/interviewStatus';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
+  onReevaluate?: () => void;
+  reevaluating?: boolean;
 }
 
-export default function InterviewDetailPanel({interview}: InterviewDetailPanelProps) {
+export default function InterviewDetailPanel({
+  interview,
+  onReevaluate,
+  reevaluating = false,
+}: InterviewDetailPanelProps) {
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(
     () => new Set((interview.answers || []).map((_, index) => index)),
   );
@@ -33,7 +45,13 @@ export default function InterviewDetailPanel({interview}: InterviewDetailPanelPr
 
   return (
     <div className="space-y-5">
-      <ScoreCard score={interview.overallScore} feedback={interview.overallFeedback} />
+      <ScoreCard
+        score={interview.overallScore}
+        feedback={interview.overallFeedback}
+        evaluateStatus={interview.evaluateStatus}
+        onReevaluate={onReevaluate}
+        reevaluating={reevaluating}
+      />
 
       {interview.strengths && interview.strengths.length > 0 && (
         <StrengthsSection strengths={interview.strengths} />
@@ -52,9 +70,28 @@ export default function InterviewDetailPanel({interview}: InterviewDetailPanelPr
   );
 }
 
-function ScoreCard({score, feedback}: {score: number | null; feedback: string | null}) {
+function ScoreCard({
+  score,
+  feedback,
+  evaluateStatus,
+  onReevaluate,
+  reevaluating,
+}: {
+  score: number | null;
+  feedback: string | null;
+  evaluateStatus?: EvaluationStatus;
+  onReevaluate?: () => void;
+  reevaluating?: boolean;
+}) {
+  const failed = isEvaluationFailed(evaluateStatus) || isDegradedEvaluationFeedback(feedback);
+  const reliable = hasReliableEvaluationScore({
+    evaluateStatus,
+    overallScore: score,
+    overallFeedback: feedback,
+  });
   const circumference = 2 * Math.PI * 42;
-  const safeScore = score === null ? 0 : Math.max(0, Math.min(100, score));
+  const displayScore = reliable ? score : null;
+  const safeScore = displayScore === null ? 0 : Math.max(0, Math.min(100, displayScore));
   const strokeDashoffset = circumference - (safeScore / 100) * circumference;
 
   return (
@@ -82,16 +119,30 @@ function ScoreCard({score, feedback}: {score: number | null; feedback: string | 
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-semibold text-stone-900 dark:text-white">{score ?? '-'}</span>
+          <span className="text-2xl font-semibold text-stone-900 dark:text-white">{displayScore ?? '-'}</span>
           <span className="text-xs text-stone-500 dark:text-stone-400">总分</span>
         </div>
       </div>
 
       <div className="min-w-0 text-center sm:text-left">
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-white">面试反馈</h3>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
+          {failed ? '评估失败' : '面试反馈'}
+        </h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600 dark:text-stone-300">
-          {feedback || (score === null ? '本次尚未完成评估，暂时没有反馈。' : '本次暂无文字反馈。')}
+          {failed
+            ? (feedback || '评估未生成有效分数，请重新评估。')
+            : (feedback || (score === null ? '本次尚未完成评估，暂时没有反馈。' : '本次暂无文字反馈。'))}
         </p>
+        {failed && onReevaluate && (
+          <button
+            type="button"
+            onClick={onReevaluate}
+            disabled={reevaluating}
+            className="btn-primary mt-3 px-4 py-2 text-sm disabled:opacity-50"
+          >
+            {reevaluating ? '重新评估中…' : '重新评估'}
+          </button>
+        )}
       </div>
     </section>
   );
@@ -193,8 +244,14 @@ function QuestionCard({
           <span className="status-badge bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">
             {answer.category || '综合'}
           </span>
-          <span className={`text-sm font-semibold ${getScoreTextColor(answer.score, [80, 60])}`}>
-            {answer.score} 分
+          <span className={`text-sm font-semibold ${
+            answer.score == null || isDegradedEvaluationFeedback(answer.feedback)
+              ? 'text-stone-400'
+              : getScoreTextColor(answer.score, [80, 60])
+          }`}>
+            {answer.score == null || isDegradedEvaluationFeedback(answer.feedback)
+              ? '未评'
+              : `${answer.score} 分`}
           </span>
         </span>
         <ChevronDown className={`h-5 w-5 flex-shrink-0 text-stone-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />

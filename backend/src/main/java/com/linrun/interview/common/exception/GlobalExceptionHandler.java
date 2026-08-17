@@ -1,5 +1,6 @@
 package com.linrun.interview.common.exception;
 
+import cn.dev33.satoken.exception.NotLoginException;
 import com.linrun.interview.common.result.Result;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,6 +25,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.io.IOException;
@@ -59,6 +61,16 @@ public class GlobalExceptionHandler {
         }
         log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
         return Result.error(e.getCode(), e.getMessage());
+    }
+
+    /**
+     * Sa-Token 未登录不能落到「系统繁忙」，否则前端无法按 401 静默刷新 token。
+     */
+    @ExceptionHandler(NotLoginException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleNotLoginException(NotLoginException e) {
+        log.warn("未登录: {}", e.getMessage());
+        return Result.error(ErrorCode.UNAUTHORIZED, "未登录或 token 无效");
     }
     
     /**
@@ -121,6 +133,42 @@ public class GlobalExceptionHandler {
     public Result<Void> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
         log.warn("文件上传大小超限: {}", e.getMessage());
         return Result.error(ErrorCode.BAD_REQUEST, "文件大小超过限制");
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleMultipartException(MultipartException e) {
+        if (isPartCountExceeded(e)) {
+            log.warn("multipart 文件数超限: {}", e.getMessage());
+            return Result.error(ErrorCode.BAD_REQUEST, "单次上传文件过多，请减少数量后重试");
+        }
+        log.warn("multipart 解析失败: {}", e.getMessage());
+        return Result.error(ErrorCode.BAD_REQUEST, "上传请求无法解析，请检查文件后重试");
+    }
+
+    static boolean isPartCountExceeded(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            String typeName = current.getClass().getName();
+            if (typeName.contains("FileCountLimitExceededException")) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase(Locale.ROOT);
+                if (normalized.contains("max part")
+                        || normalized.contains("part count")
+                        || normalized.contains("number of parts")) {
+                    return true;
+                }
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return false;
     }
     
     /**

@@ -6,6 +6,16 @@ public record ToolExecutionContext(
     String traceId,
     String agentRunId,
     String spanId,
-    String role
+    String role,
+    Integer questionIndex
 ) {
+  public ToolExecutionContext(
+      Long userId,
+      String sessionId,
+      String traceId,
+      String agentRunId,
+      String spanId,
+      String role) {
+    this(userId, sessionId, traceId, agentRunId, spanId, role, null);
+  }
 }

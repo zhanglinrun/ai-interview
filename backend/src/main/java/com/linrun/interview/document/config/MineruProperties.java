@@ -26,6 +26,21 @@ public class MineruProperties {
 
     private String statusPath = "/api/v4/extract/task/{taskId}";
 
+    /** 官方本地文件：申请 MinerU OSS 上传链。 */
+    private String batchUploadPath = "/api/v4/file-urls/batch";
+
+    /** 官方本地文件：按 batch_id 查询解析进度。 */
+    private String batchStatusPath = "/api/v4/extract-results/batch/{batchId}";
+
+    /** 单次 PUT 到 MinerU OSS 的超时。70MB 级 PDF 需要远大于 JSON 超时。 */
+    private int uploadTimeoutMs = 180000;
+
+    /** 官方单文件页数上限；超出后按窗口切片。 */
+    private int maxPagesPerRequest = 200;
+
+    /** 官方单文件大小上限。 */
+    private long maxSourceBytes = 200L * 1024 * 1024;
+
     /** PDF / Word 默认精准解析模型。 */
     private String modelVersion = "vlm";
 
@@ -41,8 +56,8 @@ public class MineruProperties {
     /** 轮询间隔。 */
     private long pollIntervalMs = 2000;
 
-    /** 单次解析任务总超时。 */
-    private long taskTimeoutSeconds = 300;
+    /** 单次解析任务总超时。大页数 VLM 切片后仍可能超过 5 分钟。 */
+    private long taskTimeoutSeconds = 900;
 
     /** MinIO 预签名下载 URL 有效期。 */
     private int presignedUrlTtlSeconds = 600;

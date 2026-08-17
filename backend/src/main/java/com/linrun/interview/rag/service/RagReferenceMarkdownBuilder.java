@@ -26,9 +26,6 @@ public final class RagReferenceMarkdownBuilder {
     for (RagSourceDTO ref : references) {
       String title = firstNonBlank(ref.sourceName(), ref.documentTitle(), "来源" + idx);
       sb.append(idx).append(". ").append(escapeMarkdown(title));
-      if (ref.similarity() != null) {
-        sb.append("（相似度 ").append(String.format("%.2f", ref.similarity())).append("）");
-      }
       sb.append("\n");
       idx++;
     }
@@ -49,6 +46,28 @@ public final class RagReferenceMarkdownBuilder {
     }
     sb.append("\n请回复「选择第N个」或直接说明选项名称。");
     return sb.toString();
+  }
+
+  /**
+   * 清洗检索片段里的图片/链接/标题标记，避免前端引用区露出 {@code ![](http://...)} 或被当成标题渲染。
+   */
+  public static String sanitizeSnippet(String text, int maxChars) {
+    if (text == null || text.isBlank()) {
+      return "";
+    }
+    String snippet = text
+        .replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", " ")
+        .replaceAll("\\[[^\\]]+\\]\\([^)]*\\)", " ")
+        .replaceAll("(?i)<img[^>]*>", " ")
+        .replaceAll("https?://\\S+", " ")
+        .replaceAll("(?m)^#{1,6}\\s*", "")
+        .replaceAll("[*_`>]", "")
+        .replaceAll("\\s+", " ")
+        .trim();
+    if (maxChars <= 0 || snippet.length() <= maxChars) {
+      return snippet;
+    }
+    return snippet.substring(0, maxChars) + "...";
   }
 
   public static String escapeMarkdown(String text) {

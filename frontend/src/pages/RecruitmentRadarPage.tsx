@@ -14,7 +14,7 @@ export default function RecruitmentRadarPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="招聘雷达"
-        description="集中查看常用校招信息源。找到合适岗位后，复制 JD 到岗位实战开始针对性面试。"
+        description="集中查看常用校招信息源。找到合适岗位后，可到模拟面试按简历和主题开一场练习。"
       />
 
       <p className="mb-4 flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">

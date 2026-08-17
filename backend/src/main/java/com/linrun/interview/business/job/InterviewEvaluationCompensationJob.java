@@ -7,6 +7,8 @@ import com.linrun.interview.infra.persistence.MapperUtils;
 import com.linrun.interview.business.listener.EvaluateStreamProducer;
 import com.linrun.interview.business.mapper.InterviewSessionMapper;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
+import com.linrun.interview.business.service.EvaluationQuality;
+import com.linrun.interview.business.service.InterviewPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -16,23 +18,19 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 面试评估补偿任务：扫描「已完成但评估任务疑似丢失」的会话，重新入队。
- *
- * <p>覆盖场景：提交/交卷时评估任务入队失败（evaluate_status 停在 PENDING）、
- * 历史数据 evaluate_status 为 null 但会话已 COMPLETED。
- * 幂等性由消费端状态检查保证（已评估的会话消费时直接跳过）。
+ * 面试评估补偿：PENDING 丢失、FAILED、以及降级 0 分报告。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class InterviewEvaluationCompensationJob {
 
-    /** 完成超过该分钟数仍无评估进展才补偿，避免与正常入队的任务竞争 */
     private static final int STALE_MINUTES = 10;
     private static final int BATCH_LIMIT = 50;
 
     private final InterviewSessionMapper sessionMapper;
     private final EvaluateStreamProducer evaluateStreamProducer;
+    private final InterviewPersistenceService persistenceService;
 
     @Scheduled(fixedDelayString = "${app.interview.compensation.evaluate-delay-ms:300000}",
         initialDelayString = "${app.interview.compensation.evaluate-initial-delay-ms:90000}")
@@ -41,16 +39,23 @@ public class InterviewEvaluationCompensationJob {
     public void runEvaluationCompensation() {
         List<InterviewSessionEntity> staleSessions = sessionMapper.selectList(
             Wrappers.<InterviewSessionEntity>lambdaQuery()
-                .eq(InterviewSessionEntity::getStatus, InterviewSessionEntity.SessionStatus.COMPLETED)
-                .and(w -> w.eq(InterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.PENDING)
-                    .or().isNull(InterviewSessionEntity::getEvaluateStatus))
                 .isNull(InterviewSessionEntity::getPreparationRunId)
                 .lt(InterviewSessionEntity::getCompletedAt, LocalDateTime.now().minusMinutes(STALE_MINUTES))
+                .and(w -> w
+                    .nested(pending -> pending
+                        .eq(InterviewSessionEntity::getStatus, InterviewSessionEntity.SessionStatus.COMPLETED)
+                        .and(status -> status
+                            .eq(InterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.PENDING)
+                            .or().isNull(InterviewSessionEntity::getEvaluateStatus)))
+                    .or().eq(InterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.FAILED)
+                    .or().nested(degraded -> degraded
+                        .eq(InterviewSessionEntity::getStatus, InterviewSessionEntity.SessionStatus.EVALUATED)
+                        .eq(InterviewSessionEntity::getEvaluateStatus, AsyncTaskStatus.COMPLETED)))
                 .last("LIMIT " + BATCH_LIMIT));
         if (staleSessions.isEmpty()) {
             return;
         }
-        log.info("发现 {} 个评估任务疑似丢失的会话，开始补偿重派", staleSessions.size());
+        log.info("发现 {} 个评估补偿候选会话", staleSessions.size());
         int requeued = 0;
         for (InterviewSessionEntity session : staleSessions) {
             try {
@@ -58,7 +63,20 @@ public class InterviewEvaluationCompensationJob {
                     log.warn("旧评估补偿跳过岗位实战会话: sessionId={}", session.getSessionId());
                     continue;
                 }
-                if (session.getEvaluateStatus() == null) {
+                if (!shouldRequeue(session)) {
+                    continue;
+                }
+                int nextAttempt = EvaluationQuality.compensationAttempts(session.getEvaluateError()) + 1;
+                if (!EvaluationQuality.canCompensate(nextAttempt - 1)) {
+                    log.warn("评估补偿次数已达上限: sessionId={}", session.getSessionId());
+                    continue;
+                }
+                String error = EvaluationQuality.withCompensationAttempt(
+                    nextAttempt, session.getEvaluateError());
+                if (session.getEvaluateStatus() == AsyncTaskStatus.FAILED
+                    || session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+                    persistenceService.prepareReevaluation(session.getSessionId(), error);
+                } else if (session.getEvaluateStatus() == null) {
                     session.setEvaluateStatus(AsyncTaskStatus.PENDING);
                     MapperUtils.save(sessionMapper, session);
                 }
@@ -69,5 +87,17 @@ public class InterviewEvaluationCompensationJob {
             }
         }
         log.info("面试评估补偿任务完成: 重派 {}/{}", requeued, staleSessions.size());
+    }
+
+    boolean shouldRequeue(InterviewSessionEntity session) {
+        if (session.getEvaluateStatus() == AsyncTaskStatus.FAILED) {
+            return true;
+        }
+        if (session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            return EvaluationQuality.isDegradedFeedback(session.getOverallFeedback());
+        }
+        return session.getStatus() == InterviewSessionEntity.SessionStatus.COMPLETED
+            && (session.getEvaluateStatus() == AsyncTaskStatus.PENDING
+            || session.getEvaluateStatus() == null);
     }
 }

@@ -327,6 +327,9 @@ export const ragChatApi = {
             case 'token':
               onToken(typeof payload === 'string' ? payload : JSON.stringify(payload));
               return;
+            case 'progress':
+              onProgress?.(typeof payload === 'string' ? payload : JSON.stringify(payload));
+              return;
             case 'intent':
               if (payload && typeof payload === 'object') {
                 onIntent?.(payload as IntentStreamResult);

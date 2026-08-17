@@ -90,6 +90,27 @@ class InterviewOrchestratorTest {
   class StateMachine {
 
     @Test
+    @DisplayName("编造 evidence_ids：Grounding 打回后携带 retryHint 重出")
+    void rejectsFabricatedEvidenceIdsViaGrounding() {
+      properties.setCriticEnabled(true);
+      properties.setMaxReflexion(2);
+      when(interviewer.nextQuestion(anyString(), anyString(), anyString(), anyString()))
+          .thenReturn(new AgentQuestionOutput("Q-bad", "r", false, List.of("ev-fake")),
+              output("Q-good"));
+      when(critic.review(anyString()))
+          .thenReturn(new CriticVerdict(true, 90, "ok", ""));
+
+      GeneratedQuestion result = orchestrator.nextQuestion(request());
+
+      assertThat(result.question()).isEqualTo("Q-good");
+      assertThat(result.reflexionRounds()).isEqualTo(1);
+      ArgumentCaptor<String> instructionCaptor = ArgumentCaptor.forClass(String.class);
+      verify(interviewer, times(2))
+          .nextQuestion(anyString(), anyString(), anyString(), instructionCaptor.capture());
+      assertThat(instructionCaptor.getAllValues().get(1)).contains("ev-fake");
+    }
+
+    @Test
     @DisplayName("Critic 通过：首题直接产出，reflexionRounds=0 且 approved=true")
     void approvesFirstQuestion() {
       properties.setCriticEnabled(true);
@@ -186,6 +207,26 @@ class InterviewOrchestratorTest {
       verify(interviewer, times(2))
           .nextQuestion(anyString(), anyString(), anyString(), anyString());
       verify(critic, times(2)).review(anyString());
+    }
+
+    @Test
+    @DisplayName("Critic 空 retryHint 时不再烧一轮")
+    void stopsWhenCriticGivesEmptyRetryHint() {
+      properties.setCriticEnabled(true);
+      properties.setMaxReflexion(2);
+      when(interviewer.nextQuestion(anyString(), anyString(), anyString(), anyString()))
+          .thenReturn(output("Q1"));
+      when(critic.review(anyString()))
+          .thenReturn(new CriticVerdict(false, 30, "", ""));
+
+      GeneratedQuestion result = orchestrator.nextQuestion(request());
+
+      assertThat(result.question()).isEqualTo("Q1");
+      assertThat(result.criticApproved()).isFalse();
+      assertThat(result.reflexionRounds()).isZero();
+      verify(interviewer, times(1))
+          .nextQuestion(anyString(), anyString(), anyString(), anyString());
+      verify(critic, times(1)).review(anyString());
     }
   }
 

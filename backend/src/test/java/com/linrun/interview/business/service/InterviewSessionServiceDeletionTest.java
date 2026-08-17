@@ -53,6 +53,10 @@ class InterviewSessionServiceDeletionTest {
   private CandidateMemoryService candidateMemoryService;
   @Mock
   private AgentTraceService agentTraceService;
+  @Mock
+  private LegacyInterviewCommandService legacyCommandService;
+  @Mock
+  private InterviewTurnDecisionService turnDecisionService;
 
   @InjectMocks
   private InterviewSessionService service;

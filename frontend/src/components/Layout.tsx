@@ -2,11 +2,9 @@ import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {
   BookOpen,
   BrainCircuit,
-  BriefcaseBusiness,
   CalendarDays,
   ChevronRight,
   Database,
-  Dumbbell,
   GitBranch,
   History,
   Home,
@@ -44,8 +42,6 @@ const APP_NAME = 'AI 面试平台';
 
 export function resolveDocumentTitle(pathname: string): string {
   if (pathname === '/dashboard' || pathname === '/') return `工作台 · ${APP_NAME}`;
-  if (pathname.startsWith('/job-practice')) return `岗位实战 · ${APP_NAME}`;
-  if (pathname.startsWith('/training')) return `专项训练 · ${APP_NAME}`;
   if (pathname === '/recruitment') return `招聘雷达 · ${APP_NAME}`;
   if (pathname === '/resources') return `求职资源 · ${APP_NAME}`;
   if (pathname === '/profile') return `我的资料 · ${APP_NAME}`;
@@ -61,8 +57,8 @@ export function resolveDocumentTitle(pathname: string): string {
   if (pathname === '/knowledgebase/upload') return `上传文档 · ${APP_NAME}`;
   if (pathname === '/knowledgebase/chat') return `问答助手 · ${APP_NAME}`;
   if (pathname === '/knowledgebase') return `知识库 · ${APP_NAME}`;
-  if (pathname === '/agent-trace') return `Agent 编排 Trace · ${APP_NAME}`;
-  if (pathname === '/rag-traces') return `RAG 阶段 Trace · ${APP_NAME}`;
+  if (pathname === '/agent-trace') return `出题过程回放 · ${APP_NAME}`;
+  if (pathname === '/rag-traces') return `问答过程回放 · ${APP_NAME}`;
   if (pathname === '/eval') return `RAG 效果评测 · ${APP_NAME}`;
   if (pathname === '/settings') return `设置 · ${APP_NAME}`;
   return APP_NAME;
@@ -98,19 +94,19 @@ export default function Layout() {
   };
 
   const openInterviewModalWithResume = (resumeId: number) => {
-    navigate(`/job-practice?resume=${resumeId}`);
+    navigate(`/interview/${resumeId}`);
   };
 
   // 主叙事前置：意图问答 / Agent Trace / 评测；求职外围保留但后置。
   const navGroups: NavGroup[] = [
     {
-      id: 'demo',
-      title: '核心演示',
+      id: 'engine',
+      title: '知识引擎',
       items: [
         { id: 'kb-chat', path: '/knowledgebase/chat', label: '知识库问答', icon: MessageSquareText, description: '意图 + RAG' },
-        { id: 'agent-trace', path: '/agent-trace', label: 'Agent 编排 Trace', icon: GitBranch, description: '状态机 + Reflexion' },
-        { id: 'rag-traces', path: '/rag-traces', label: 'RAG 阶段 Trace', icon: GitBranch, description: '检索可观测性' },
-        { id: 'eval', path: '/eval', label: 'RAG 评测', icon: BrainCircuit, description: '一键固定集' },
+        { id: 'agent-trace', path: '/agent-trace', label: '出题过程回放', icon: GitBranch, description: 'Chat / Tool span 树' },
+        { id: 'rag-traces', path: '/rag-traces', label: '问答过程回放', icon: GitBranch, description: '一次提问怎么走的' },
+        { id: 'eval', path: '/eval', label: 'RAG 评测', icon: BrainCircuit, description: '标准五指标' },
         { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database },
       ],
     },
@@ -119,8 +115,7 @@ export default function Layout() {
       title: '面试训练',
       items: [
         { id: 'dashboard', path: '/dashboard', label: '工作台', icon: Home },
-        { id: 'job-practice', path: '/job-practice', label: '岗位实战', icon: BriefcaseBusiness },
-        { id: 'training', path: '/training', label: '专项训练', icon: Dumbbell },
+        { id: 'interview', path: '/interview', label: '模拟面试', icon: MessageSquareText },
         { id: 'records', path: '/interviews', label: '面试记录', icon: History },
       ],
     },
@@ -157,9 +152,8 @@ export default function Layout() {
     if (path === '/rag-traces') {
       return currentPath === '/rag-traces' || currentPath.startsWith('/rag-traces/');
     }
-    if (path === '/job-practice') {
-      return currentPath.startsWith('/job-practice')
-        || currentPath === '/interview-hub'
+    if (path === '/interview') {
+      return currentPath === '/interview-hub'
         || currentPath === '/interview'
         || currentPath.startsWith('/interview/');
     }

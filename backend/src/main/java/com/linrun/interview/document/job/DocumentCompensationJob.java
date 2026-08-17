@@ -3,10 +3,12 @@ package com.linrun.interview.document.job;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.linrun.interview.common.annotation.DistributeLock;
 import com.linrun.interview.document.constant.DocumentStatus;
+import com.linrun.interview.document.constant.KnowledgeBaseType;
 import com.linrun.interview.document.entity.KnowledgeBaseEntity;
 import com.linrun.interview.document.entity.KnowledgeBaseVersionEntity;
 import com.linrun.interview.document.mapper.KnowledgeBaseEntityMapper;
 import com.linrun.interview.document.service.DocumentCleanupService;
+import com.linrun.interview.document.service.DocumentProcessService;
 import com.linrun.interview.document.service.KnowledgeDocumentService;
 import com.linrun.interview.document.service.KnowledgeDocumentVersionService;
 import com.linrun.interview.document.service.KnowledgeSegmentService;
@@ -17,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -36,6 +39,47 @@ public class DocumentCompensationJob {
     private final KnowledgeBaseEntityMapper knowledgeBaseEntityMapper;
     private final DocumentCleanupService documentCleanupService;
     private final VectorizationTaskService vectorizationTaskService;
+    private final DocumentProcessService documentProcessService;
+
+    /**
+     * 解析补偿：扫描停留在 UPLOADED/CONVERTING 过久的文档。
+     * 批量上传先落库再异步解析，进程中断或事件丢失时由本任务续跑。
+     */
+    @Scheduled(fixedDelayString = "${app.knowledgebase.compensation.convert-delay-ms:60000}",
+        initialDelayString = "${app.knowledgebase.compensation.convert-initial-delay-ms:45000}")
+    @XxlJob("ragConvertCompensation")
+    @DistributeLock(key = "'kb:compensation:convert'", waitTime = 0, leaseTime = 600,
+        message = "文档解析补偿任务已在其他实例执行")
+    public void runConvertCompensation() {
+        log.info("========== 开始执行文档解析补偿任务 ==========");
+        int successCount = 0;
+        int failCount = 0;
+        try {
+            LocalDateTime staleBefore = LocalDateTime.now().minusSeconds(90);
+            List<KnowledgeBaseEntity> docs = knowledgeBaseEntityMapper.selectList(
+                Wrappers.<KnowledgeBaseEntity>lambdaQuery()
+                    .in(KnowledgeBaseEntity::getDocStatus,
+                        DocumentStatus.UPLOADED, DocumentStatus.CONVERTING)
+                    .le(KnowledgeBaseEntity::getUploadedAt, staleBefore)
+                    .orderByAsc(KnowledgeBaseEntity::getUploadedAt)
+                    .last("LIMIT 20"));
+            log.info("发现 {} 个待解析文档", docs.size());
+            for (KnowledgeBaseEntity doc : docs) {
+                try {
+                    boolean splitAfter = doc.getKnowledgeBaseType() != KnowledgeBaseType.DATA_QUERY;
+                    documentProcessService.processAcceptedDocument(doc.getId(), splitAfter);
+                    successCount++;
+                } catch (Exception e) {
+                    failCount++;
+                    log.error("文档解析补偿失败: docId={}", doc.getId(), e);
+                }
+            }
+        } catch (Exception e) {
+            log.error("文档解析补偿任务执行异常", e);
+        }
+        log.info("========== 文档解析补偿任务完成，成功: {}，失败: {} ==========",
+            successCount, failCount);
+    }
 
     /**
      * 向量化补偿任务：分页扫描达到重试时间、租约空闲且未终止的 CHUNKED 当前版本。

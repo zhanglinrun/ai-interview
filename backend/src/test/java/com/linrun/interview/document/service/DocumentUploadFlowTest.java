@@ -117,6 +117,30 @@ class DocumentUploadFlowTest {
   }
 
   @Test
+  @DisplayName("DOCUMENT_SEARCH + Excel：convertedDocUrl 指向原文件，不写 Markdown")
+  void documentSearchExcelPassthrough() {
+    MultipartFile file = mockFile("questions.csv", "text/csv", "题目,答案\nJVM,GC\n");
+    stubCommonUpload(file, FileType.CSV, KnowledgeBaseType.DOCUMENT_SEARCH);
+
+    Long docId = service.upload(file, "questions", "java", DocumentAccessScope.PRIVATE, null);
+
+    assertThat(docId).isEqualTo(100L);
+    verify(knowledgeDocumentService).advanceDocumentAndVersionStatus(
+        100L, 200L, DocumentStatus.CONVERTING);
+    verify(knowledgeDocumentService).advanceDocumentAndVersionStatus(
+        100L, 200L, DocumentStatus.CONVERTED);
+    verify(fileProcessServiceFactory, org.mockito.Mockito.never())
+        .get(FileType.CSV, KnowledgeBaseType.DOCUMENT_SEARCH);
+    verify(storageService, org.mockito.Mockito.never())
+        .uploadConvertedMarkdown(anyLong(), anyLong(), any());
+
+    ArgumentCaptor<KnowledgeBaseVersionEntity> versionCaptor =
+        ArgumentCaptor.forClass(KnowledgeBaseVersionEntity.class);
+    verify(versionService).updateVersion(versionCaptor.capture());
+    assertThat(versionCaptor.getValue().getConvertedDocUrl()).isEqualTo("http://minio/kb/key");
+  }
+
+  @Test
   @DisplayName("DATA_QUERY + Excel：upload → import → STORED，不写 convertedDocUrl")
   void dataQueryExcelUploadFlow() {
     MultipartFile file = mockFile("sales.xlsx",
@@ -224,6 +248,7 @@ class DocumentUploadFlowTest {
       KnowledgeBaseVersionEntity v = new KnowledgeBaseVersionEntity();
       v.setVersionId(200L);
       v.setDocId(100L);
+      v.setDocUrl("http://minio/kb/key");
       return Optional.of(v);
     });
     if (kbType == KnowledgeBaseType.DATA_QUERY) {

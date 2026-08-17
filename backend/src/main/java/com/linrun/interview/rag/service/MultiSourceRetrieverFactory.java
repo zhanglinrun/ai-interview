@@ -106,10 +106,8 @@ public class MultiSourceRetrieverFactory {
   }
 
   private ChatModel chatModel(Long userId) {
-    if (userId != null) {
-      return llmProviderRegistry.getUserChatModel(userId);
-    }
-    return llmProviderRegistry.getChatModelWithModel(null, properties.getMultiSource().getRouteModel());
+    return llmProviderRegistry.getChatModelWithModel(
+        null, properties.resolveDecisionModel(properties.getMultiSource().getRouteModel()));
   }
 
   private String loadPrompt(String location) {

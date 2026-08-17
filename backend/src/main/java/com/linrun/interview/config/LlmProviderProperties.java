@@ -22,6 +22,8 @@ public class LlmProviderProperties {
     private String configEnvPath;
     private SecurityConfig security = new SecurityConfig();
     private ThinkingConfig thinking = new ThinkingConfig();
+    /** 非流式 ChatModel 读超时（秒）。意图/改写/HyDE/路由卡死时失败回退，不影响流式生成。 */
+    private int chatReadTimeoutSeconds = 45;
 
     @Data
     public static class ProviderConfig {

@@ -15,7 +15,7 @@ import java.util.function.Consumer;
  */
 public class ProgressAwareContentAggregator implements ContentAggregator {
 
-  private static final String MSG_RERANK = "正在精排...";
+  private static final String MSG_AGGREGATE = "正在排序筛选结果...";
   private static final String MSG_GENERATE = "正在生成回答...";
 
   private final ContentAggregator delegate;
@@ -50,7 +50,7 @@ public class ProgressAwareContentAggregator implements ContentAggregator {
   @Override
   public List<Content> aggregate(Map<Query, Collection<List<Content>>> queryToContents) {
     if (progressCallback != null && rerankProgressSent.compareAndSet(false, true)) {
-      progressCallback.accept(MSG_RERANK);
+      progressCallback.accept(MSG_AGGREGATE);
     }
     List<Content> results = delegate.aggregate(queryToContents);
     if (emitGenerateProgress && progressCallback != null) {

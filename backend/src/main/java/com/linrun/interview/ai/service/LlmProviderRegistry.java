@@ -23,6 +23,7 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -267,7 +268,9 @@ public class LlmProviderRegistry {
 
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
             // classpath 同时存在 spring-restclient 与 jdk 两个 HTTP client SPI，显式指定避免启动冲突
-            .httpClientBuilder(JdkHttpClient.builder())
+            .httpClientBuilder(JdkHttpClient.builder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .readTimeout(chatReadTimeout()))
             .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
             .apiKey(config.apiKey())
             .defaultRequestParameters(buildChatRequestParameters(config, modelName))
@@ -276,6 +279,10 @@ public class LlmProviderRegistry {
             builder.listeners(chatModelListeners);
         }
         return new SafeGuardChatModel(builder.build(), properties.getAdvisors());
+    }
+
+    private Duration chatReadTimeout() {
+        return Duration.ofSeconds(Math.max(3, properties.getChatReadTimeoutSeconds()));
     }
 
     private StreamingChatModel createStreamingChatModel(String providerId) {
@@ -343,7 +350,9 @@ public class LlmProviderRegistry {
             providerId, config.baseUrl(), config.embeddingModel());
 
         return OpenAiEmbeddingModel.builder()
-            .httpClientBuilder(JdkHttpClient.builder())
+            .httpClientBuilder(JdkHttpClient.builder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .readTimeout(chatReadTimeout()))
             .baseUrl(ApiPathResolver.resolveBaseUrl(config.baseUrl()))
             .apiKey(config.apiKey())
             .modelName(config.embeddingModel())

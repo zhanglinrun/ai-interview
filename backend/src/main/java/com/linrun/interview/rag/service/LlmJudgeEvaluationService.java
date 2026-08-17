@@ -43,7 +43,8 @@ public class LlmJudgeEvaluationService {
       1. 如果提供了参考答案，以参考答案为主要依据。
       2. 如果提供了上下文，以上下文为事实边界，不能奖励编造内容。
       3. 不要因为文风华丽而给高分，优先看事实、覆盖和可执行性。
-      4. 只输出结构化 JSON，不要输出 Markdown 或解释性前后缀。
+      4. 四个分数必须是 0 到 1 的小数（例如 0.9），不要写 90 或百分号。
+      5. 只输出结构化 JSON，字段名必须是 relevance、accuracy、completeness、helpfulness、reason、improvement。
       """;
 
   private final LlmProviderRegistry llmProviderRegistry;
@@ -82,19 +83,16 @@ public class LlmJudgeEvaluationService {
   private EvalRunResponse.JudgeItemResult evaluateCase(EvalRunRequest.JudgeCase judgeCase) {
     double minOverallScore = minOverallScoreOrDefault(judgeCase.minOverallScore());
     try {
-      JudgeScore score = structuredOutputInvoker.invoke(
-          llmProviderRegistry.getChatModelOrDefault(null),
-          SYSTEM_PROMPT,
-          buildUserPrompt(judgeCase),
-          JudgeScore.class,
-          ErrorCode.AI_SERVICE_ERROR,
-          "LLM-as-Judge 评测失败: ",
-          "[EvalRunJudge] ",
-          log);
-      double relevance = clamp(score.relevance());
-      double accuracy = clamp(score.accuracy());
-      double completeness = clamp(score.completeness());
-      double helpfulness = clamp(score.helpfulness());
+      JudgeScore score = invokeJudge(judgeCase);
+      if (isBlankScore(score)) {
+        log.warn("LLM-as-Judge 返回空分，重试一次: questionLen={}",
+            judgeCase.question() == null ? 0 : judgeCase.question().length());
+        score = invokeJudge(judgeCase);
+      }
+      double relevance = normalizeScore(score.relevance());
+      double accuracy = normalizeScore(score.accuracy());
+      double completeness = normalizeScore(score.completeness());
+      double helpfulness = normalizeScore(score.helpfulness());
       double overall = round((relevance + accuracy + completeness + helpfulness) / 4.0);
       return new EvalRunResponse.JudgeItemResult(
           judgeCase.question(),
@@ -121,6 +119,39 @@ public class LlmJudgeEvaluationService {
           "LLM-as-Judge 评测失败: " + e.getMessage(),
           "检查模型连通性、裁判 prompt 或该用例输入长度");
     }
+  }
+
+  private JudgeScore invokeJudge(EvalRunRequest.JudgeCase judgeCase) {
+    return structuredOutputInvoker.invoke(
+        llmProviderRegistry.getChatModelOrDefault(null),
+        SYSTEM_PROMPT,
+        buildUserPrompt(judgeCase),
+        JudgeScore.class,
+        ErrorCode.AI_SERVICE_ERROR,
+        "LLM-as-Judge 评测失败: ",
+        "[EvalRunJudge] ",
+        log);
+  }
+
+  private static boolean isBlankScore(JudgeScore score) {
+    return score == null
+        || (isZero(score.relevance())
+            && isZero(score.accuracy())
+            && isZero(score.completeness())
+            && isZero(score.helpfulness())
+            && (score.reason() == null || score.reason().isBlank()));
+  }
+
+  private static boolean isZero(Double value) {
+    return value == null || value == 0.0d;
+  }
+
+  static double normalizeScore(Double value) {
+    if (value == null || value.isNaN() || value.isInfinite()) {
+      return 0.0;
+    }
+    double normalized = value > 1.0 && value <= 100.0 ? value / 100.0 : value;
+    return Math.round(Math.max(0.0, Math.min(1.0, normalized)) * 10000.0) / 10000.0;
   }
 
   private String buildUserPrompt(EvalRunRequest.JudgeCase judgeCase) {

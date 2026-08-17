@@ -70,7 +70,6 @@ GEMINI.md
 !/README.md
 !/SETUP_API_KEYS.md
 !/dev-ops/**/*.md
-!/eval/ragas/DATASET_REVIEW.md
 !backend/src/test/resources/test-files/sample-resume.md
 
 # Local design and implementation notes
@@ -84,10 +83,8 @@ Thumbs.db
 
 study/**
 
-# RAG evaluation corpus (third-party PDFs) and eval run artifacts — local only
-eval/corpus/
-eval/fixtures/*.inspect.ndjson
-eval/.work/
+# RAG evaluation (local only — do not commit)
+eval/
 
 .trellis/
 .cursor/

@@ -91,64 +91,6 @@ public class RabbitMqEngineConfig {
             .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_EVALUATE_DLQ_ROUTING);
     }
 
-    // ==================== 岗位实战准备 ====================
-
-    @Bean
-    public Queue jobInterviewPrepareQueue() {
-        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_QUEUE)
-            .withArgument("x-dead-letter-exchange", AsyncTaskStreamConstants.RABBIT_TASK_DLX)
-            .withArgument("x-dead-letter-routing-key",
-                AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ_ROUTING)
-            .build();
-    }
-
-    @Bean
-    public Queue jobInterviewPrepareDlq() {
-        return QueueBuilder.durable(
-            AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ).build();
-    }
-
-    @Bean
-    public Binding jobInterviewPrepareBinding() {
-        return BindingBuilder.bind(jobInterviewPrepareQueue()).to(taskExchange())
-            .with(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_ROUTING);
-    }
-
-    @Bean
-    public Binding jobInterviewPrepareDlqBinding() {
-        return BindingBuilder.bind(jobInterviewPrepareDlq()).to(taskDlx())
-            .with(AsyncTaskStreamConstants.RABBIT_JOB_INTERVIEW_PREPARE_DLQ_ROUTING);
-    }
-
-    // ==================== 证据化复盘 ====================
-
-    @Bean
-    public Queue interviewReportQueue() {
-        return QueueBuilder.durable(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_QUEUE)
-            .withArgument("x-dead-letter-exchange", AsyncTaskStreamConstants.RABBIT_TASK_DLX)
-            .withArgument("x-dead-letter-routing-key",
-                AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ_ROUTING)
-            .build();
-    }
-
-    @Bean
-    public Queue interviewReportDlq() {
-        return QueueBuilder.durable(
-            AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ).build();
-    }
-
-    @Bean
-    public Binding interviewReportBinding() {
-        return BindingBuilder.bind(interviewReportQueue()).to(taskExchange())
-            .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_ROUTING);
-    }
-
-    @Bean
-    public Binding interviewReportDlqBinding() {
-        return BindingBuilder.bind(interviewReportDlq()).to(taskDlx())
-            .with(AsyncTaskStreamConstants.RABBIT_INTERVIEW_REPORT_DLQ_ROUTING);
-    }
-
     // ==================== 监听容器工厂（重试 → DLQ） ====================
 
     /**

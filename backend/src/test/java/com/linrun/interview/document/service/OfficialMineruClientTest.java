@@ -37,6 +37,22 @@ class OfficialMineruClientTest {
               + server.getAddress().getPort() + "/result.zip\"}}";
       respond(exchange, 200, body, "application/json");
     });
+    server.createContext("/api/v4/file-urls/batch", exchange -> respond(
+        exchange, 200,
+        "{\"code\":0,\"data\":{\"batch_id\":\"batch-1\",\"file_urls\":[\"http://127.0.0.1:"
+            + server.getAddress().getPort() + "/upload\"]}}",
+        "application/json"));
+    server.createContext("/upload", exchange -> {
+      exchange.sendResponseHeaders(200, -1);
+      exchange.close();
+    });
+    server.createContext("/api/v4/extract-results/batch/batch-1", exchange -> respond(
+        exchange, 200,
+        "{\"code\":0,\"data\":{\"batch_id\":\"batch-1\",\"extract_result\":[{"
+            + "\"state\":\"done\",\"full_zip_url\":\"http://127.0.0.1:"
+            + server.getAddress().getPort() + "/result.zip\","
+            + "\"extract_progress\":{\"total_pages\":261}}]}}",
+        "application/json"));
     server.createContext("/result.zip", exchange -> respond(
         exchange, 200, "PK-not-a-real-zip", "application/zip"));
     server.start();
@@ -65,6 +81,23 @@ class OfficialMineruClientTest {
 
     assertThat(taskId).isEqualTo("task-1");
     assertThat(result.status()).isEqualTo(MineruTaskStatus.SUCCEEDED);
+    assertThat(result.resultZipUrl()).hasHost("127.0.0.1");
+  }
+
+  @Test
+  @DisplayName("本地文件走官方 file-urls/batch 直传并按 batch_id 轮询")
+  void uploadsLocalFileAndPollsBatch() throws Exception {
+    OfficialMineruClient client = new OfficialMineruClient(
+        properties,
+        new ObjectMapper(),
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+
+    String batchId = client.submitLocalFile("pdf-bytes".getBytes(), "redis.pdf", "vlm", "1-200");
+    MineruTaskResult result = client.getBatchResult(batchId);
+
+    assertThat(batchId).isEqualTo("batch-1");
+    assertThat(result.status()).isEqualTo(MineruTaskStatus.SUCCEEDED);
+    assertThat(result.totalPages()).isEqualTo(261);
     assertThat(result.resultZipUrl()).hasHost("127.0.0.1");
   }
 

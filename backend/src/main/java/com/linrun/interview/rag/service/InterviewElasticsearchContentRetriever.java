@@ -130,6 +130,21 @@ public class InterviewElasticsearchContentRetriever implements ElasticsearchRetr
         if (progressCallback != null && retrieveProgressSent.compareAndSet(false, true)) {
             progressCallback.accept("正在召回候选...");
         }
+        RagQueryTrace.Span span = RagQueryTrace.start(trace, RagQueryTrace.SPAN_RETRIEVAL, RagQueryTrace.TYPE_RETRIEVER);
+        if (span != null) {
+            span.input(query == null || query.text() == null ? "" : query.text());
+        }
+        try {
+            return retrieveAndRecord(query, span);
+        } catch (RuntimeException e) {
+            if (span != null) {
+                span.fail(e.getMessage());
+            }
+            throw e;
+        }
+    }
+
+    private List<Content> retrieveAndRecord(Query query, RagQueryTrace.Span span) {
         EmbeddingSearchResult<TextSegment> result;
         if (isFullTextMode()) {
             result = search(null, query.text());
@@ -163,6 +178,9 @@ public class InterviewElasticsearchContentRetriever implements ElasticsearchRetr
 
         if (trace != null) {
             trace.recordRetrieved(contents);
+        }
+        if (span != null) {
+            span.complete(contents.size() + " docs");
         }
         log.info("[InterviewElasticsearchContentRetriever] 子块检索完成: query='{}', 命中 {} 条",
             query.text(), contents.size());

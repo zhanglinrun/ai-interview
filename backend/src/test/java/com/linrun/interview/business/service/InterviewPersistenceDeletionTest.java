@@ -64,7 +64,7 @@ class InterviewPersistenceDeletionTest {
   }
 
   @Test
-  @DisplayName("只删除当前用户会话并在主记录前清理岗位实战子数据")
+  @DisplayName("只删除当前用户会话并在主记录前清理附属数据")
   void shouldDeleteOwnedArtifactsBeforeSession() {
     InterviewSessionEntity session = new InterviewSessionEntity();
     session.setId(11L);

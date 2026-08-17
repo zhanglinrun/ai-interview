@@ -20,7 +20,9 @@ import com.linrun.interview.business.vo.InterviewReportDTO;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
 import com.linrun.interview.business.vo.InterviewSessionDTO.SessionStatus;
 import com.linrun.interview.business.service.AnswerEvaluationService;
+import com.linrun.interview.business.service.InterviewOrchestrator;
 import com.linrun.interview.business.service.InterviewPersistenceService;
+import com.linrun.interview.infra.observability.LlmUsageContext;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.StreamMessageId;
@@ -45,6 +47,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final LlmProviderRegistry llmProviderRegistry;
     private final CandidateMemoryService candidateMemoryService;
     private final InterviewSessionCache sessionCache;
+    private final InterviewOrchestrator orchestrator;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -54,7 +57,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         ObjectMapper objectMapper,
         LlmProviderRegistry llmProviderRegistry,
         CandidateMemoryService candidateMemoryService,
-        InterviewSessionCache sessionCache
+        InterviewSessionCache sessionCache,
+        InterviewOrchestrator orchestrator
     ) {
         super(redisService);
         this.sessionRepository = interviewSessionMapper;
@@ -64,6 +68,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.llmProviderRegistry = llmProviderRegistry;
         this.candidateMemoryService = candidateMemoryService;
         this.sessionCache = sessionCache;
+        this.orchestrator = orchestrator;
     }
 
     record EvaluatePayload(String sessionId, Long userId) {}
@@ -103,9 +108,13 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     protected boolean shouldSkip(EvaluatePayload payload) {
         Optional<InterviewSessionEntity> session = persistenceService.findBySessionIdInternal(
             payload.sessionId());
-        return session.isEmpty()
-            || !payload.userId().equals(session.get().getUserId())
-            || session.get().getEvaluateStatus() == AsyncTaskStatus.COMPLETED;
+        if (session.isEmpty() || !payload.userId().equals(session.get().getUserId())) {
+            return true;
+        }
+        if (session.get().getEvaluateStatus() != AsyncTaskStatus.COMPLETED) {
+            return false;
+        }
+        return persistenceService.loadStoredReportInternal(payload.sessionId()).isPresent();
     }
 
     @Override
@@ -138,13 +147,15 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         // 报告与能力观测跨两个本地事务：若进程在二者之间退出，broker 会重投。
         // 此处从数据库报告重建观测，不重新调用 LLM；唯一键保证部分成功后的重复写入安全。
         if (session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
-            InterviewReportDTO storedReport = persistenceService.loadStoredReportInternal(sessionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
-                    "会话已标记评估完成，但持久化报告不完整"));
-            candidateMemoryService.extractAndSave(session, storedReport, questions);
-            sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
-            log.info("已从持久化报告恢复能力观测: sessionId={}", sessionId);
-            return;
+            Optional<InterviewReportDTO> storedReport =
+                persistenceService.loadStoredReportInternal(sessionId);
+            if (storedReport.isPresent()) {
+                candidateMemoryService.extractAndSave(session, storedReport.get(), questions);
+                sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+                log.info("已从持久化报告恢复能力观测: sessionId={}", sessionId);
+                return;
+            }
+            log.info("已评估会话缺少有效报告，重新评估: sessionId={}", sessionId);
         }
 
         List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(sessionId);
@@ -160,9 +171,20 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         ChatModel chatModel = llmProviderRegistry.getUserChatModel(payload.userId());
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
-        InterviewReportDTO report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
+        long startedNanos = System.nanoTime();
+        InterviewReportDTO report;
+        try (LlmUsageContext.Scope ignored = orchestrator.openEvaluatingUsage(sessionId, payload.userId())) {
+            report = evaluationService.evaluateInterview(chatModel, sessionId, resumeText, questions);
+        } catch (RuntimeException e) {
+            orchestrator.recordEvaluationFailed(sessionId, payload.userId(),
+                (System.nanoTime() - startedNanos) / 1_000_000L, e.getMessage(), false);
+            throw e;
+        }
         persistenceService.saveReport(sessionId, report);
         sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+        orchestrator.recordEvaluationCompleted(sessionId, payload.userId(),
+            (System.nanoTime() - startedNanos) / 1_000_000L,
+            "score=" + report.overallScore());
         // 能力观测是报告的确定性派生数据；失败触发 MQ 重试，重投时直接走上面的恢复分支。
         candidateMemoryService.extractAndSave(session, report, questions);
     }
@@ -175,6 +197,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected void markFailed(EvaluatePayload payload, String error) {
         updateEvaluateStatus(payload, AsyncTaskStatus.FAILED, error);
+        orchestrator.recordEvaluationFailed(payload.sessionId(), payload.userId(), 0L, error, true);
     }
 
     /**

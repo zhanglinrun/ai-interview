@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -36,14 +35,13 @@ import static org.mockito.Mockito.when;
 class MineruProcessServiceTest {
 
   @Test
-  @DisplayName("提交预签名 URL、轮询并从 ZIP 提取 full.md 后上传 MinIO")
+  @DisplayName("直传 MinerU OSS、轮询并从 ZIP 提取 full.md 后上传 MinIO")
   void parsesThroughOfficialAsyncApi() throws Exception {
     Fixture fixture = fixture();
-    when(fixture.storage.presignDownload(eq("knowledgebases/a.pdf"), any(Duration.class)))
-        .thenReturn(URI.create("https://files.example.com/a.pdf?signature=secret"));
-    when(fixture.client.submit(any(URI.class), eq("vlm"))).thenReturn("provider-1");
-    when(fixture.client.getTask("provider-1")).thenReturn(new MineruTaskResult(
-        MineruTaskStatus.SUCCEEDED, URI.create("https://result.example.com/r.zip"), null));
+    when(fixture.client.submitLocalFile(any(byte[].class), eq("a.pdf"), eq("vlm"), eq("1-200")))
+        .thenReturn("batch-1");
+    when(fixture.client.getBatchResult("batch-1")).thenReturn(new MineruTaskResult(
+        MineruTaskStatus.SUCCEEDED, URI.create("https://result.example.com/r.zip"), null, 1));
     when(fixture.client.downloadResult(any(URI.class))).thenReturn(zip("# 精准解析"));
     when(fixture.storage.uploadConvertedMarkdown(eq(11L), eq(13L), eq("# 精准解析")))
         .thenReturn("https://minio.example.com/converted/11/13/full.md");
@@ -51,7 +49,8 @@ class MineruProcessServiceTest {
     String result = fixture.service.processDocument(request());
 
     assertThat(result).isEqualTo("https://minio.example.com/converted/11/13/full.md");
-    verify(fixture.client).submit(any(URI.class), eq("vlm"));
+    verify(fixture.client).submitLocalFile(any(byte[].class), eq("a.pdf"), eq("vlm"), eq("1-200"));
+    verify(fixture.client, never()).submit(any(URI.class), anyString());
     verify(fixture.storage).uploadConvertedMarkdown(eq(11L), eq(13L), eq("# 精准解析"));
     verify(fixture.tika, never()).parseContent(any(byte[].class), any(String.class));
     verify(fixture.tasks).markSucceeded(fixture.task);
@@ -61,11 +60,10 @@ class MineruProcessServiceTest {
   @DisplayName("ZIP 内图片上传 MinIO 并重写 Markdown 引用")
   void uploadsImagesAndRewritesMarkdown() throws Exception {
     Fixture fixture = fixture();
-    when(fixture.storage.presignDownload(eq("knowledgebases/a.pdf"), any(Duration.class)))
-        .thenReturn(URI.create("https://files.example.com/a.pdf"));
-    when(fixture.client.submit(any(URI.class), eq("vlm"))).thenReturn("provider-1");
-    when(fixture.client.getTask("provider-1")).thenReturn(new MineruTaskResult(
-        MineruTaskStatus.SUCCEEDED, URI.create("https://result.example.com/r.zip"), null));
+    when(fixture.client.submitLocalFile(any(byte[].class), eq("a.pdf"), eq("vlm"), eq("1-200")))
+        .thenReturn("batch-1");
+    when(fixture.client.getBatchResult("batch-1")).thenReturn(new MineruTaskResult(
+        MineruTaskStatus.SUCCEEDED, URI.create("https://result.example.com/r.zip"), null, 1));
     when(fixture.client.downloadResult(any(URI.class))).thenReturn(zipWithImage());
     when(fixture.storage.uploadConvertedImage(eq(11L), eq(13L), eq("fig1.png"), any(byte[].class)))
         .thenReturn("https://minio.example.com/converted/11/13/images/fig1.png");
@@ -94,10 +92,8 @@ class MineruProcessServiceTest {
   @DisplayName("401 等官方失败显式记录原因并降级 Tika")
   void fallsBackToTikaWithVisibleReason() throws Exception {
     Fixture fixture = fixture();
-    when(fixture.storage.presignDownload(eq("knowledgebases/a.pdf"), any(Duration.class)))
-        .thenReturn(URI.create("https://files.example.com/a.pdf"));
-    when(fixture.client.submit(any(URI.class), eq("vlm"))).thenThrow(
-        new MineruClientException(MineruFailureCode.AUTHENTICATION, "认证失败"));
+    when(fixture.client.submitLocalFile(any(byte[].class), eq("a.pdf"), eq("vlm"), eq("1-200")))
+        .thenThrow(new MineruClientException(MineruFailureCode.AUTHENTICATION, "认证失败"));
     when(fixture.tika.parseContent(any(byte[].class), eq("a.pdf"))).thenReturn("tika text");
 
     String result = fixture.service.processDocument(request());

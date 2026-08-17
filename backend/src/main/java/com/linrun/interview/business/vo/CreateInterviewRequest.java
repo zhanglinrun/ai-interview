@@ -30,7 +30,7 @@ public record CreateInterviewRequest(
 
     List<Category> customCategories,      // 自定义面试冻结的能力分类
 
-    String jdText,                         // JD 原文（自定义面试时作为出题依据）
+    String jdText,                         // JD 原文（可选；挂到主题上供 Planner / 出题使用）
 
     List<Long> knowledgeBaseIds            // 关联的岗位知识库 ID（可选，出题时 RAG 检索注入）
 ) {}

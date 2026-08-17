@@ -127,18 +127,12 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
 
     @Override
     public List<TextSegment> split(Document document) {
-        System.out.println("开始解析Markdown文档...");
-        // 移除文档中所有空行
-        String text = Arrays.stream(document.text().split("\n"))
-                .filter(line -> !line.trim().isEmpty())
-                .collect(Collectors.joining("\n"));
-
+        String text = normalizeNewlines(document.text());
         List<TextSegment> result = new ArrayList<>();
         List<DocumentWithMetadata> segments = splitWithMetadata(text, document.metadata().toMap());
         for (DocumentWithMetadata segment : segments) {
             result.add(new TextSegment(segment.getContent(), Metadata.from(segment.getMetadata())));
         }
-
         return result;
     }
 
@@ -150,11 +144,7 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
      */
 
     public List<TextSegment> splitText(String text) {
-        // 移除文本中所有空行
-        String filteredText = Arrays.stream(text.split("\n"))
-                .filter(line -> !line.trim().isEmpty())
-                .collect(Collectors.joining("\n"));
-
+        String filteredText = normalizeNewlines(text);
         List<TextSegment> result = new ArrayList<>();
         List<DocumentWithMetadata> segments = splitWithMetadata(filteredText, new HashMap<>());
         for (DocumentWithMetadata segment : segments) {
@@ -201,9 +191,9 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
                 }
             }
 
-            // 代码块内的内容直接添加，不做标题检测
+            // 代码块内的内容直接添加，不做标题检测；保留缩进和空行
             if (inCodeBlock) {
-                currentContent.add(strippedLine);
+                currentContent.add(line);
                 continue;
             }
 
@@ -243,23 +233,15 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
                             currentContent.clear();
                         }
 
-                        // 根据stripHeaders配置决定是否保留标题行
                         if (!stripHeaders) {
-                            currentContent.add(strippedLine);
+                            currentContent.add(line);
                         }
 
                         break interrupted;
                     }
                 }
 
-                // 处理非标题行
-                if (!strippedLine.isEmpty()) {
-                    currentContent.add(strippedLine);
-                } else if (!currentContent.isEmpty()) {
-                    // 遇到空行时，保存当前累积的内容
-                    linesWithMetadata.add(new Line(String.join("\n", currentContent), currentMetadata));
-                    currentContent.clear();
-                }
+                currentContent.add(line);
             }
 
             // 更新当前元数据为最新的标题信息
@@ -282,6 +264,8 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
                     .map(line -> new DocumentWithMetadata(line.getContent(), line.getMetadata()))
                     .collect(Collectors.toList());
         }
+
+        segments = applyHierarchy(segments);
 
         // 如果设置了 chunkSize，对超出大小的分片进行二次切割
         if (chunkSize > 0) {
@@ -331,7 +315,8 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
      * <p>
      * 切割规则：
      * - 未超出 chunkSize 的分片保持不变
-     * - 超出 chunkSize 的分片：保留完整分片（标记为跳过embedding），同时生成拆分后的多个分片
+     * - 超出 chunkSize 的分片：保留完整分片（标记为跳过 embedding），
+     *   子块先按更细标题切，再按段落 / 代码块边界滑窗
      *
      * @param segments 原始分片列表
      * @return 切割后的分片列表
@@ -340,6 +325,11 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
         List<DocumentWithMetadata> result = new ArrayList<>();
         for (DocumentWithMetadata segment : segments) {
             String content = segment.getContent();
+            Object skip = segment.getMetadata().get(SKIP_EMBEDDING);
+            if (Integer.valueOf(1).equals(skip) || "1".equals(String.valueOf(skip))) {
+                result.add(segment);
+                continue;
+            }
             if (content.length() <= chunkSize) {
                 // 未超出 chunkSize，保持原分片不变
                 result.add(segment);
@@ -354,30 +344,41 @@ public class MarkdownHeaderParentTextSplitter implements DocumentSplitter {
                 fullMetadata.put(SKIP_EMBEDDING, 1);
                 result.add(new DocumentWithMetadata(content, fullMetadata));
 
-                // 2. 生成拆分后的多个分片
-                int start = 0;
-                while (start < content.length()) {
-                    int end = Math.min(start + chunkSize, content.length());
-                    String subContent = content.substring(start, end);
-
-                    // 复制元数据并进行更新
+                int childSize = ParentChildOverflowSplitter.childChunkSize(chunkSize);
+                int childOverlap = Math.min(overlap, Math.max(0, childSize - 1));
+                for (String subContent : ParentChildOverflowSplitter.splitChildren(content, childSize, childOverlap)) {
+                    if (subContent == null || subContent.isBlank()) {
+                        continue;
+                    }
                     Map<String, Object> subMetadata = new HashMap<>(segment.getMetadata());
                     subMetadata.put(CHUNK_ID, SnowflakeIdGenerator.getInstance().nextIdStr());
                     subMetadata.put(PARENT_CHUNK_ID, parentChunkId);
-
                     result.add(new DocumentWithMetadata(subContent, subMetadata));
-
-                    if (end == content.length()) {
-                        break;
-                    }
-                    // 下一片的起始位置 = 当前片的结束位置 - overlap
-                    start = end - Math.min(overlap, end);
                 }
             }
         }
         return result;
     }
 
+
+    private static List<DocumentWithMetadata> applyHierarchy(List<DocumentWithMetadata> segments) {
+        List<ParentChildHierarchyLinker.Section> linked = ParentChildHierarchyLinker.link(
+            segments.stream()
+                .map(segment -> new ParentChildHierarchyLinker.Section(segment.getContent(), segment.getMetadata()))
+                .toList());
+        List<DocumentWithMetadata> result = new ArrayList<>(linked.size());
+        for (ParentChildHierarchyLinker.Section section : linked) {
+            result.add(new DocumentWithMetadata(section.content(), section.metadata()));
+        }
+        return result;
+    }
+
+    private static String normalizeNewlines(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        return text.replace("\r\n", "\n").replace('\r', '\n');
+    }
 
     /**
      * 内部类：表示带有元数据的文本行
