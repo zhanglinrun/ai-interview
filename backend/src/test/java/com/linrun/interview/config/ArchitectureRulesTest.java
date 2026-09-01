@@ -15,7 +15,7 @@ class ArchitectureRulesTest {
 
     @ArchTest
     static final ArchRule legacyModulesMustNotReturn = noClasses()
-        .should().resideInAnyPackage("..modules..", "..infrastructure..", "..common.security..", "..dingtalk..");
+        .should().resideInAnyPackage("..modules..", "..infrastructure..", "..common.security..");
 
     @ArchTest
     static final ArchRule controllersMustNotDependOnInfrastructure = noClasses()

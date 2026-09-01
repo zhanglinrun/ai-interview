@@ -6,11 +6,19 @@ export function isValidTraceId(value: unknown): value is string {
   return typeof value === 'string' && TRACE_PATTERN.test(value);
 }
 
-export function createTraceId(): string {
-  const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
+/**
+ * Generate a client-side identifier when the browser provides UUID support.
+ * Older browsers and non-secure contexts expose crypto without randomUUID.
+ */
+export function createClientId(): string {
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  return cryptoApi && typeof cryptoApi.randomUUID === 'function'
+    ? cryptoApi.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return uuid.slice(0, 64);
+}
+
+export function createTraceId(): string {
+  return createClientId().slice(0, 64);
 }
 
 export function rememberTraceId(value: unknown): string | null {

@@ -39,7 +39,6 @@ public class InterviewEvaluationCompensationJob {
     public void runEvaluationCompensation() {
         List<InterviewSessionEntity> staleSessions = sessionMapper.selectList(
             Wrappers.<InterviewSessionEntity>lambdaQuery()
-                .isNull(InterviewSessionEntity::getPreparationRunId)
                 .lt(InterviewSessionEntity::getCompletedAt, LocalDateTime.now().minusMinutes(STALE_MINUTES))
                 .and(w -> w
                     .nested(pending -> pending
@@ -59,10 +58,6 @@ public class InterviewEvaluationCompensationJob {
         int requeued = 0;
         for (InterviewSessionEntity session : staleSessions) {
             try {
-                if (session.getPreparationRunId() != null) {
-                    log.warn("旧评估补偿跳过岗位实战会话: sessionId={}", session.getSessionId());
-                    continue;
-                }
                 if (!shouldRequeue(session)) {
                     continue;
                 }

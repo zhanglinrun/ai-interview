@@ -65,4 +65,24 @@ public interface InterviewCommandMapper extends BaseMapper<InterviewCommandEntit
       @Param("failureDetail") String failureDetail,
       @Param("failedAt") LocalDateTime failedAt
   );
+
+  /** 服务重启后回收遗留的处理租约，并释放对应会话的 active_command_id。 */
+  @Update("""
+      UPDATE interview_commands c
+      JOIN interview_sessions s
+        ON s.user_id = c.user_id AND s.session_id = c.session_id
+       AND s.active_command_id = c.command_id
+      SET c.status = 'FAILED',
+          c.failure_code = 'COMMAND_LEASE_EXPIRED',
+          c.failure_detail = '服务重启后自动回收遗留指令',
+          c.updated_at = #{failedAt},
+          c.completed_at = #{failedAt},
+          s.active_command_id = NULL
+      WHERE c.status = 'PROCESSING'
+        AND c.updated_at <= #{staleBefore}
+      """)
+  int failStaleProcessingCommands(
+      @Param("staleBefore") LocalDateTime staleBefore,
+      @Param("failedAt") LocalDateTime failedAt
+  );
 }

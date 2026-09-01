@@ -49,7 +49,6 @@ const VERIFY_META: Record<MemoryVerificationState, string> = {
 const FOLLOW_UP_LABELS: Record<string, string> = {
   DEEPEN: '深挖',
   CLARIFY: '澄清',
-  REMEDIATE: '补救',
   SWITCH_TOPIC: '换题',
 };
 

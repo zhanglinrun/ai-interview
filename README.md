@@ -88,7 +88,7 @@ flowchart LR
 
 ### 3. Multi-Agent 模拟面试
 
-- **主链路**：创建会话 → Planner → Interviewer（可读简历）→ Critic → 有界 Reflexion → 作答 → `DEEPEN` / `CLARIFY` / `REMEDIATE` / `SWITCH_TOPIC` → 下一题
+- **主链路**：创建会话 → Planner → Interviewer（可读简历）→ Critic → 有界 Reflexion → 作答 → `DEEPEN` / `CLARIFY` / `SWITCH_TOPIC` → 下一题
 - **状态机**：`PLANNING → ASKING → CRITIQUING` 等阶段只在 Java 侧维护，不跑自由 AgentLoop
 - **记忆**：短期窗口保留近 1～2 轮原文；本场用答题信号摘要；跨场 `CandidateMemory` 按评估分沉淀
 - **回退**：`app.ai.agent.enabled=false` 时退回旧批量出题，这是运行策略，不是删除功能

@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {interviewApi} from '../api/interview';
-import {getErrorMessage} from '../api/request';
+import {ApiError, getErrorMessage} from '../api/request';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InterviewChatPanel from '../components/InterviewChatPanel';
 import InterviewPageHeader from '../components/InterviewPageHeader';
@@ -13,6 +13,7 @@ import type {
   InterviewSession,
 } from '../types/interview';
 import { MessagesSquare } from 'lucide-react';
+import { createClientId } from '../stores/traceStore';
 
 const CUSTOM_SKILL_ID = 'custom';
 
@@ -224,7 +225,7 @@ export default function Interview({
 
     try {
       const commandKey = `${session.sessionId}:${currentQuestion.questionIndex}`;
-      const commandId = submitCommandRef.current.get(commandKey) ?? `cmd-${crypto.randomUUID()}`;
+      const commandId = submitCommandRef.current.get(commandKey) ?? `cmd-${createClientId()}`;
       submitCommandRef.current.set(commandKey, commandId);
       const response = await interviewApi.submitAnswer({
         sessionId: session.sessionId,
@@ -251,6 +252,12 @@ export default function Interview({
       }
     } catch (err) {
       console.error(err);
+      if (err instanceof ApiError && err.code === 3011) {
+        // A previous browser tab or a crashed request may have left a stale
+        // command lease. Let the next retry receive a fresh command id after
+        // the server-side compensation job releases that lease.
+        submitCommandRef.current.delete(`${session.sessionId}:${submittedIndex}`);
+      }
       try {
         if (await recoverAfterSubmitFailure(session.sessionId, submittedIndex)) {
           return;

@@ -49,7 +49,7 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
           "系统设计如何做限流", "微服务是什么", "微服务和单体架构有什么区别",
           "RAG 的召回和重排怎么设计", "Agent 怎么做工具调用"),
       InterviewIntent.CODE_REVIEW, List.of(
-          "帮我分析这段代码的复杂度", "这道 LeetCode 怎么优化", "代码为什么空指针", "帮我做代码审查"),
+          "帮我分析这段代码的复杂度", "这道算法题怎么优化", "代码为什么空指针", "帮我做代码审查"),
       InterviewIntent.RESUME_STATS, List.of(
           "分析我的简历匹配度", "根据简历挖项目问题", "简历有哪些技术短板", "对比两份简历的优劣"),
       InterviewIntent.INTERVIEW_PREP, List.of(
@@ -85,7 +85,7 @@ public class FusionIntentRecognitionService implements IntentRecognitionService 
           "幻觉", "grounded", "知识库", "检索增强", "编排", "orchestrat",
           "reflexion", "planner", "critic", "onnx", "bge"),
       InterviewIntent.CODE_REVIEW, List.of(
-          "代码", "bug", "报错", "复杂度", "leetcode", "算法", "优化", "空指针", "审查",
+          "代码", "bug", "报错", "复杂度", "算法", "优化", "空指针", "审查",
           "debug", "调试", "堆栈", "时间复杂度", "动态规划", "链表", "二叉树"),
       InterviewIntent.RESUME_STATS, List.of(
           "简历", "项目经历", "匹配度", "技能匹配", "经历", "亮点", "短板"),

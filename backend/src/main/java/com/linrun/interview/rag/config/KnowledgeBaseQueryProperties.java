@@ -123,7 +123,7 @@ public class KnowledgeBaseQueryProperties {
             /** tokenizer 文件 classpath 路径（来自同仓库的 tokenizer.json） */
             private String tokenizerPath = "classpath:model/bge-reranker-model/tokenizer.json";
             /** 模型最大序列长度（BGE-RERANKER-v2-m3 默认 8192） */
-            private int maxSequenceLength = 8192;
+            private int maxSequenceLength = 4096;
         }
     }
 

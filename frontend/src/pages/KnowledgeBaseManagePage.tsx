@@ -105,6 +105,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   // 分类编辑状态
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingCategoryValue, setEditingCategoryValue] = useState('');
+  const [editingCategoryMode, setEditingCategoryMode] = useState<'existing' | 'new'>('existing');
   const [savingCategory, setSavingCategory] = useState(false);
   const categoryInputRef = useRef<HTMLInputElement>(null);
 
@@ -416,6 +417,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const handleStartEditCategory = (kb: KnowledgeBaseItem) => {
     setEditingCategoryId(kb.id);
     setEditingCategoryValue(kb.category || '');
+    setEditingCategoryMode(kb.category && categories.includes(kb.category) ? 'existing' : 'new');
     setTimeout(() => {
       categoryInputRef.current?.focus();
     }, 50);
@@ -425,6 +427,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const handleCancelEditCategory = () => {
     setEditingCategoryId(null);
     setEditingCategoryValue('');
+    setEditingCategoryMode('existing');
   };
 
   // 保存分类
@@ -435,6 +438,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       await knowledgeBaseApi.updateCategory(id, categoryToSave);
       setEditingCategoryId(null);
       setEditingCategoryValue('');
+      setEditingCategoryMode('existing');
       await loadData();
     } catch (error) {
       console.error('更新分类失败:', error);
@@ -485,7 +489,7 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
       {(queueSummary.active || queueSummary.failed > 0) && (
         <div className="relative mb-4 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 pr-10 text-sm text-amber-800 dark:text-amber-200">
           {queueSummary.active
-            ? `后台上传进行中：已接收 ${queueSummary.accepted}/${queueSummary.total}，队列中 ${queueSummary.pending} 个（最多 2 路并行）。请勿关闭或刷新本标签页，否则尚未发出的文件会中断。`
+            ? `后台上传进行中：已接收 ${queueSummary.accepted}/${queueSummary.total}，队列中 ${queueSummary.pending} 个（按小批次串行提交）。请勿关闭或刷新本标签页，否则尚未发出的文件会中断。`
             : `后台上传结束：成功 ${queueSummary.accepted}，失败 ${queueSummary.failed}。`}
           {queueSummary.failedItems.length > 0 && (
             <ul className="mt-2 space-y-1 text-xs">
@@ -656,23 +660,40 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   </td>
                   <td className="px-6 py-4">
                       {editingCategoryId === kb.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            ref={categoryInputRef}
-                            type="text"
-                            value={editingCategoryValue}
-                            onChange={(e) => setEditingCategoryValue(e.target.value)}
-                            onKeyDown={(e) => handleCategoryKeyDown(e, kb.id)}
-                            placeholder="输入分类名称"
-                            list="category-suggestions"
-                            className="w-24 px-2 py-1 text-sm border border-primary-300 dark:border-primary-600 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={editingCategoryMode === 'new' ? '__new__' : editingCategoryValue}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              if (next === '__new__') {
+                                setEditingCategoryMode('new');
+                                setEditingCategoryValue('');
+                              } else {
+                                setEditingCategoryMode('existing');
+                                setEditingCategoryValue(next);
+                              }
+                            }}
                             disabled={savingCategory}
-                          />
-                          <datalist id="category-suggestions">
+                            className="max-w-[10rem] rounded border border-primary-300 bg-white px-2 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-primary-600 dark:bg-slate-700 dark:text-white"
+                          >
+                            <option value="">未分类</option>
                             {categories.map((cat) => (
-                              <option key={cat} value={cat} />
+                              <option key={cat} value={cat}>{cat}</option>
                             ))}
-                          </datalist>
+                            <option value="__new__">新建分类...</option>
+                          </select>
+                          {editingCategoryMode === 'new' && (
+                            <input
+                              ref={categoryInputRef}
+                              type="text"
+                              value={editingCategoryValue}
+                              onChange={(e) => setEditingCategoryValue(e.target.value)}
+                              onKeyDown={(e) => handleCategoryKeyDown(e, kb.id)}
+                              placeholder="输入新分类"
+                              className="w-28 rounded border border-primary-300 bg-white px-2 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-primary-600 dark:bg-slate-700 dark:text-white"
+                              disabled={savingCategory}
+                            />
+                          )}
                           <button
                             onClick={() => handleSaveCategory(kb.id)}
                             disabled={savingCategory}

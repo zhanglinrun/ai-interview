@@ -16,7 +16,7 @@ cases:
     questionIndex: 1
     mysqlQuestionCount: 1
     lastAnswer: 这个问题我不清楚，之前也没用过。
-    expectedAction: REMEDIATE
+    expectedAction: CLARIFY
     expectedTarget: MySQL
     expectedFollowUp: true
 
@@ -56,7 +56,7 @@ cases:
     questionIndex: 1
     mysqlQuestionCount: 1
     lastAnswer: 我知道事务涉及 ACID、隔离级别、MVCC 和锁，但是具体为什么能避免并发异常我不确定，这部分没有系统实践过，也记不清实现细节。
-    expectedAction: REMEDIATE
+    expectedAction: CLARIFY
     expectedTarget: MySQL
     expectedFollowUp: true
 

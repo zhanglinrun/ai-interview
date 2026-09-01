@@ -34,7 +34,7 @@ export interface InterviewQuestion {
   isFollowUp?: boolean;
   parentQuestionIndex?: number | null;
   capabilityAtomId?: string | null;
-  followUpAction?: 'DEEPEN' | 'CLARIFY' | 'REMEDIATE' | 'SWITCH_TOPIC' | null;
+  followUpAction?: 'DEEPEN' | 'CLARIFY' | 'SWITCH_TOPIC' | null;
   evidenceIds?: string[];
 }
 

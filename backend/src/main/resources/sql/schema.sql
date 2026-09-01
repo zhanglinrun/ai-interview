@@ -487,9 +487,6 @@ CREATE TABLE IF NOT EXISTS `interview_sessions` (
     `llm_provider`             VARCHAR(50)  NULL,
     `knowledge_base_ids_json`  TEXT         NULL,
     `interview_plan_json`      TEXT         NULL,
-    `preparation_run_id`       VARCHAR(36)  NULL,
-    `job_description_id`       BIGINT       NULL,
-    `job_description_version`  INT          NULL,
     `capability_template_code` VARCHAR(64)  NULL,
     `capability_template_version` VARCHAR(32) NULL,
     `plan_version`             VARCHAR(80)  NULL,
@@ -520,8 +517,6 @@ CREATE TABLE IF NOT EXISTS `interview_sessions` (
     KEY `idx_interview_session_resume_status_created` (`resume_id`, `status`, `created_at`),
     KEY `idx_interview_session_skill_created` (`skill_id`, `created_at`),
     KEY `idx_interview_sessions_user_id` (`user_id`),
-    UNIQUE KEY `uk_interview_preparation_run` (`preparation_run_id`),
-    KEY `idx_interview_job_user_status` (`user_id`, `job_description_id`, `status`, `created_at`),
     CONSTRAINT `fk_interview_sessions_resume` FOREIGN KEY (`resume_id`) REFERENCES `resumes` (`id`),
     CONSTRAINT `fk_interview_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

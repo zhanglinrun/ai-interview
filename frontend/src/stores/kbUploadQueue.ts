@@ -4,17 +4,19 @@ import {
   type BatchUploadResponse,
   type DocumentAccessScope,
 } from '../api/knowledgebase';
+import { createClientId } from './traceStore';
 
 const RATE_LIMIT_CODE = 8001;
 const MAX_UPLOAD_RETRIES = 3;
 
 /**
- * 每个文件单独 multipart，避免十几个大 PDF 打成一包被跨境链路掐断。
- * 并行路数用来吃满上行。4 路会把 1G 的后端顶到 cgroup 上限，
- * Tomcat 来不及解析 multipart 就回空 400，前端只能报「请求失败」。
+ * 批量接口本身会逐个接收并异步处理文件，因此应尽量减少 HTTP 请求数。
+ * 每批限制总大小，避免一批大 PDF 超过 nginx/Spring 的 multipart 上限；
+ * 单路串行也能避免跨境链路和后端内存被并发 multipart 请求打满。
  */
-export const KB_UPLOAD_BATCH_SIZE = 1;
-export const KB_UPLOAD_CONCURRENCY = 2;
+export const KB_UPLOAD_BATCH_SIZE = 8;
+export const KB_UPLOAD_MAX_BYTES = 240 * 1024 * 1024;
+export const KB_UPLOAD_CONCURRENCY = 1;
 
 export type KbUploadQueueStatus = 'pending' | 'uploading' | 'accepted' | 'failed';
 
@@ -44,9 +46,7 @@ function emit() {
 }
 
 function nextId(): string {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return createClientId();
 }
 
 export function subscribeKbUploadQueue(listener: Listener): () => void {
@@ -123,27 +123,55 @@ async function pump() {
 
 async function runUploadWorker() {
   while (true) {
-    const next = files.shift();
-    if (!next) {
+    const chunk = takeNextBatch();
+    if (chunk.length === 0) {
       return;
     }
-    const chunk = [next];
-    const item = items.find((entry) => entry.id === next.id);
-    if (item) {
-      item.status = 'uploading';
+    for (const next of chunk) {
+      const item = items.find((entry) => entry.id === next.id);
+      if (item) {
+        item.status = 'uploading';
+      }
     }
     emit();
     try {
       const result = await uploadChunkWithRetry(chunk);
       applyBatchResult(chunk, result);
     } catch (error) {
-      if (item) {
-        item.status = 'failed';
-        item.error = error instanceof Error ? error.message : '上传失败';
+      for (const next of chunk) {
+        const item = items.find((entry) => entry.id === next.id);
+        if (item) {
+          item.status = 'failed';
+          item.error = error instanceof Error ? error.message : '上传失败';
+        }
       }
     }
     emit();
   }
+}
+
+function takeNextBatch(): EnqueuedFile[] {
+  const first = files.shift();
+  if (!first) {
+    return [];
+  }
+
+  const chunk = [first];
+  let totalBytes = first.file.size;
+  while (chunk.length < KB_UPLOAD_BATCH_SIZE && files.length > 0) {
+    const candidate = files[0];
+    // 不把不同上传选项混进同一批，避免分类/可见范围串到别的任务。
+    if (candidate.category !== first.category || candidate.accessibleBy !== first.accessibleBy) {
+      break;
+    }
+    if (chunk.length > 0 && totalBytes + candidate.file.size > KB_UPLOAD_MAX_BYTES) {
+      break;
+    }
+    files.shift();
+    chunk.push(candidate);
+    totalBytes += candidate.file.size;
+  }
+  return chunk;
 }
 
 async function uploadChunkWithRetry(chunk: EnqueuedFile[]): Promise<BatchUploadResponse> {

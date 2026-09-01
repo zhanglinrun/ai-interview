@@ -1,10 +1,8 @@
 import {
   ArrowUpRight,
   BookOpenCheck,
-  Code2,
   Coffee,
   Database,
-  Map,
   MessageSquareText,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -13,8 +11,6 @@ import PageHeader from '../components/ui/PageHeader';
 import { LEARNING_RESOURCES } from '../constants/productLinks';
 
 const RESOURCE_ICONS: Record<string, LucideIcon> = {
-  'leetcode-cn': Code2,
-  programmercarl: Map,
   'java-guide': Coffee,
   'mianzha-nixi': BookOpenCheck,
 };
@@ -24,7 +20,7 @@ export default function CareerResourcesPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="求职资源"
-        description="常用的刷题和后端复习入口。学完后可带着 JD 和简历去做模拟面试。"
+        description="常用的后端复习入口，可结合 JD、简历和知识库进行模拟面试。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

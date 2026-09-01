@@ -60,15 +60,16 @@ class InterviewTurnDecisionServiceTest {
     }
 
     @Test
-    @DisplayName("明确不会时不切换计划主题，降低脚手架复核当前能力")
-    void remediatesExplicitUncertainty() {
+    @DisplayName("明确不会时不切换计划主题，用 CLARIFY 降低脚手架复核当前能力")
+    void clarifiesExplicitUncertainty() {
       TurnDecision decision = service.decide(request(
           1, plan(1), "这个我不太清楚，之前也没用过。"));
 
-      assertThat(decision.action()).isEqualTo(FollowUpAction.REMEDIATE);
+      assertThat(decision.action()).isEqualTo(FollowUpAction.CLARIFY);
       assertThat(decision.targetCapability().label()).isEqualTo("MySQL");
       assertThat(decision.answerSignals().expressesUncertainty()).isTrue();
       assertThat(decision.requiresFollowUp()).isTrue();
+      assertThat(decision.rationale()).contains("不确定");
     }
 
     @Test

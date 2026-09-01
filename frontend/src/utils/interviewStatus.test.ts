@@ -32,7 +32,7 @@ describe('interviewStatus', () => {
     })).toBe(true);
   });
 
-  it('maps leftover job-practice READY as 待开始 instead of 已创建', () => {
+  it('maps a ready session as 待开始 instead of 已创建', () => {
     expect(getInterviewStatusText('READY', null)).toBe('待开始');
     expect(getInterviewStatusText('CREATED', null)).toBe('已创建');
   });

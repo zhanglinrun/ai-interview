@@ -124,10 +124,8 @@ public class InterviewTurnDecisionService {
     if (questionIndex <= 0 || previousTopic == null) {
       return FollowUpAction.SWITCH_TOPIC;
     }
-    if (signals.expressesUncertainty()) {
-      return FollowUpAction.REMEDIATE;
-    }
-    if (signals.meaningfulChars() < MIN_CLARIFIABLE_CHARS
+    if (signals.expressesUncertainty()
+        || signals.meaningfulChars() < MIN_CLARIFIABLE_CHARS
         || !signals.hasReasoning()
         || (!signals.hasExample() && !signals.hasTradeOff())) {
       return FollowUpAction.CLARIFY;
@@ -207,8 +205,7 @@ public class InterviewTurnDecisionService {
   private String buildEvidenceQuery(CapabilityAtom atom, FollowUpAction action) {
     String actionHint = switch (action) {
       case DEEPEN -> "边界条件 工程取舍";
-      case CLARIFY -> "核心原理 判断依据";
-      case REMEDIATE -> "基础原理 常见误区";
+      case CLARIFY -> "核心原理 判断依据 常见误区";
       case SWITCH_TOPIC -> "核心知识点 面试考点";
     };
     return (atom.label() + " " + atom.description() + " " + actionHint).strip();
@@ -217,8 +214,9 @@ public class InterviewTurnDecisionService {
   private String buildRationale(FollowUpAction action, AnswerSignals signals,
                                 PlanTopic plannedTopic, PlanTopic previousTopic) {
     return switch (action) {
-      case REMEDIATE -> "上一答明确表达不确定，暂不切换大纲节点，先用更低脚手架问题复核基础。";
-      case CLARIFY -> "上一答缺少足够的因果、示例或取舍信号，保留当前能力原子并要求补充。";
+      case CLARIFY -> signals.expressesUncertainty()
+          ? "上一答明确表达不确定，暂不切换大纲节点，先用更低脚手架问题复核基础。"
+          : "上一答缺少足够的因果、示例或取舍信号，保留当前能力原子并要求补充。";
       case DEEPEN -> "上一答包含因果及实践/取舍信号，且计划仍处于同一主题，继续深挖边界。";
       case SWITCH_TOPIC -> previousTopic == null
           ? "首题按 Planner 大纲进入目标能力原子。"

@@ -211,7 +211,6 @@ function App() {
 
               {/* 面试中心 */}
               <Route path="interview-hub" element={<Navigate to="/interview" replace />} />
-              <Route path="job-practice/*" element={<Navigate to="/interview" replace />} />
 
               {/* 面试记录列表 */}
               <Route path="interviews" element={<InterviewHistoryWrapper />} />

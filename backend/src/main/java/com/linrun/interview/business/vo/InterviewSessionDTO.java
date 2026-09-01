@@ -23,13 +23,13 @@ public record InterviewSessionDTO(
     }
     public enum SessionStatus {
         CREATED,      // 会话已创建
-        READY,        // 岗位实战已准备
+        READY,        // 会话已准备
         IN_PROGRESS,  // 面试进行中
-        PAUSED,       // 岗位实战已暂停
-        COMPLETING,   // 岗位实战正在收尾
+        PAUSED,       // 面试已暂停
+        COMPLETING,   // 面试正在收尾
         COMPLETED,    // 面试已完成
-        EVALUATED,    // 已生成旧版评估报告
-        ABORTED,      // 岗位实战已中止
-        FAILED        // 岗位实战失败
+        EVALUATED,    // 已生成评估报告
+        ABORTED,      // 会话已中止
+        FAILED        // 会话运行失败
     }
 }

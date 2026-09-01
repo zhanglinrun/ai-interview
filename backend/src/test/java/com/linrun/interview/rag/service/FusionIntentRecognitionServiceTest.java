@@ -56,7 +56,7 @@ class FusionIntentRecognitionServiceTest {
     when(llmIntentRecognitionAiService.recognize(anyString()))
         .thenThrow(new IllegalStateException("model timeout"));
 
-    IntentRecognitionResult result = service.recognize("这道 LeetCode 怎么优化");
+    IntentRecognitionResult result = service.recognize("这道算法题怎么优化");
 
     assertThat(result.related()).isTrue();
     assertThat(result.resolvedIntent()).isEqualTo(InterviewIntent.CODE_REVIEW);

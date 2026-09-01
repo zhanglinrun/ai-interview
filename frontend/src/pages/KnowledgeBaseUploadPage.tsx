@@ -83,7 +83,7 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [batchCategory, setBatchCategory] = useState('');
+  const [uploadCategory, setUploadCategory] = useState('');
   const [existingCategories, setExistingCategories] = useState<string[]>([]);
   const [accessibleBy, setAccessibleBy] = useState<DocumentAccessScope>('PRIVATE');
   const [expireDate, setExpireDate] = useState('');
@@ -100,13 +100,14 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     setNotice('');
 
     try {
-      const data = await documentApi.upload(file, name, undefined, accessibleBy, expireDate);
+      const category = uploadCategory.trim() || undefined;
+      const data = await documentApi.upload(file, name, category, accessibleBy, expireDate);
       setNotice(`已接收文档，生成 ${data.segmentCount} 个知识分段，正在异步向量化。`);
       onUploadComplete({
         knowledgeBase: {
           id: data.documentId,
           name: name || file.name,
-          category: '',
+          category: category || '',
           fileSize: file.size,
           contentLength: 0,
           docStatus: data.status as UploadKnowledgeBaseResponse['knowledgeBase']['docStatus'],
@@ -126,7 +127,7 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
     setError('');
     setNotice('');
     enqueueKbBatchUpload(files, {
-      category: batchCategory.trim() || undefined,
+      category: uploadCategory.trim() || undefined,
       accessibleBy,
     });
     setNotice(`已将 ${files.length} 个文件加入后台上传队列。请保持浏览器标签页打开，直到管理页提示全部接收完成。`);
@@ -194,15 +195,16 @@ export default function KnowledgeBaseUploadPage({ onUploadComplete, onBack }: Kn
             )}
           </FormSection>
 
-          {uploadMode === 'batch' && (
-            <FormSection title="统一分类" description="这批文件共用一个分类，可选择已有项或新建。">
-              <CategoryField
-                value={batchCategory}
-                categories={existingCategories}
-                onChange={setBatchCategory}
-              />
-            </FormSection>
-          )}
+          <FormSection
+            title={uploadMode === 'batch' ? '统一分类' : '分类'}
+            description={uploadMode === 'batch' ? '这批文件共用一个分类，可选择已有项或新建。' : '可选择已有分类，也可以直接新建。'}
+          >
+            <CategoryField
+              value={uploadCategory}
+              categories={existingCategories}
+              onChange={setUploadCategory}
+            />
+          </FormSection>
         </aside>
 
         <div className="surface-card p-5 md:p-6">

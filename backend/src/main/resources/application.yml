@@ -399,7 +399,8 @@ app:
         local:
           model-path: ${APP_AI_RAG_RERANK_LOCAL_MODEL_PATH:classpath:model/bge-reranker-model/model_quantized.onnx}
           tokenizer-path: ${APP_AI_RAG_RERANK_LOCAL_TOKENIZER_PATH:classpath:model/bge-reranker-model/tokenizer.json}
-          max-sequence-length: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:8192}
+          # 业务 chunk 默认远小于 4096 token；限制上限可显著降低 ONNX 单次推理的 native 峰值。
+          max-sequence-length: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:4096}
       # 父子/兄弟分段扩展（small-to-big）：子块完成 RRF/rerank/TopN 后，按 parentChunkId
       # 取父块章节，或按 brotherChunkId 取同组兄弟按序拼接，再交给 LLM。
       # 开启后每次检索会多一次 segment 表批量查询（按 chunkId / brotherChunkId 命中索引）。

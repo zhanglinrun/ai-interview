@@ -14,9 +14,10 @@ import type {
   SubmitAnswerResponse
 } from '../types/interview';
 import type {EvaluateStatus} from './history';
+import { createClientId } from '../stores/traceStore';
 
 function newCommandId(): string {
-  return `cmd-${crypto.randomUUID()}`;
+  return `cmd-${createClientId()}`;
 }
 
 export interface TextSessionMeta {

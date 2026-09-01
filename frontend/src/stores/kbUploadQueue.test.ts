@@ -15,7 +15,7 @@ describe('kbUploadQueue', () => {
     vi.clearAllMocks();
   });
 
-  it('每个文件单独请求，一个失败不影响其余', async () => {
+  it('多个文件合并请求，一个批次成功后全部标记为已接收', async () => {
     uploadKnowledgeBaseBatch.mockImplementation(async (files: File[]) => ({
       success: files.length,
       failed: 0,
@@ -34,15 +34,15 @@ describe('kbUploadQueue', () => {
     expect(getKbUploadQueueSummary().active).toBe(true);
 
     await vi.waitFor(() => {
-      expect(uploadKnowledgeBaseBatch).toHaveBeenCalledTimes(2);
+      expect(uploadKnowledgeBaseBatch).toHaveBeenCalledTimes(1);
       expect(getKbUploadQueueSummary().accepted).toBe(2);
       expect(getKbUploadQueueSummary().active).toBe(false);
     }, { timeout: 3000 });
-    const sent = uploadKnowledgeBaseBatch.mock.calls.map((call) => call[0][0].name).sort();
+    const sent = uploadKnowledgeBaseBatch.mock.calls[0][0].map((file: File) => file.name).sort();
     expect(sent).toEqual(['a.pdf', 'b.pdf']);
   });
 
-  it('同时最多两路在传', async () => {
+  it('批次按上限拆分且始终单路串行', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const releases: Array<() => void> = [];
@@ -63,8 +63,8 @@ describe('kbUploadQueue', () => {
       });
     });
 
-    const { enqueueKbBatchUpload, KB_UPLOAD_CONCURRENCY } = await import('./kbUploadQueue');
-    const selected = Array.from({ length: KB_UPLOAD_CONCURRENCY + 2 }, (_, index) => (
+    const { enqueueKbBatchUpload, KB_UPLOAD_BATCH_SIZE, KB_UPLOAD_CONCURRENCY } = await import('./kbUploadQueue');
+    const selected = Array.from({ length: KB_UPLOAD_BATCH_SIZE * 2 + 1 }, (_, index) => (
       new File([String(index)], `file-${index}.md`, { type: 'text/markdown' })
     ));
     enqueueKbBatchUpload(selected, { accessibleBy: 'PRIVATE' });
@@ -77,9 +77,12 @@ describe('kbUploadQueue', () => {
 
     releases.splice(0).forEach((release) => release());
     await vi.waitFor(() => {
-      expect(uploadKnowledgeBaseBatch).toHaveBeenCalledTimes(selected.length);
+      expect(uploadKnowledgeBaseBatch).toHaveBeenCalledTimes(2);
     }, { timeout: 3000 });
     releases.splice(0).forEach((release) => release());
+    await vi.waitFor(() => {
+      expect(uploadKnowledgeBaseBatch).toHaveBeenCalledTimes(3);
+    }, { timeout: 3000 });
   });
 
   it('超过单批上限时拆成多次请求', async () => {

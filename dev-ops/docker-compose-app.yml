@@ -230,6 +230,7 @@ services:
       # 开发编排使用固定本地默认值；上线必须在 .env 换成强随机串。
       APP_AI_CONFIG_ENCRYPTION_KEY: ${APP_AI_CONFIG_ENCRYPTION_KEY:-ai-interview-dev-only-provider-api-key-encryption}
       APP_AI_CONFIG_REQUIRE_ENCRYPTION_KEY: "true"
+      APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN: ${APP_AI_RAG_RERANK_LOCAL_MAX_SEQ_LEN:-4096}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DB: ${APP_MYSQL_DB:-ai_interview_v2}

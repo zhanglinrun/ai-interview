@@ -18,7 +18,7 @@ import com.linrun.interview.business.entity.InterviewAnswerEntity;
 import com.linrun.interview.business.vo.InterviewQuestionDTO;
 import com.linrun.interview.business.vo.InterviewReportDTO;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
-import com.linrun.interview.business.service.JobInterviewSessionDeletionService;
+import com.linrun.interview.business.service.InterviewSessionDeletionService;
 import com.linrun.interview.business.mapper.ResumeEntityMapper;
 import com.linrun.interview.business.entity.ResumeEntity;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +49,7 @@ public class InterviewPersistenceService {
   private final InterviewAnswerMapper interviewAnswerMapper;
   private final ResumeEntityMapper resumeEntityMapper;
   private final ObjectMapper objectMapper;
-  private final JobInterviewSessionDeletionService jobInterviewSessionDeletionService;
+  private final InterviewSessionDeletionService interviewSessionDeletionService;
 
   @Transactional(rollbackFor = Exception.class)
   public InterviewSessionEntity saveSession(String sessionId, Long resumeId,
@@ -297,10 +297,6 @@ public class InterviewPersistenceService {
       }
 
       InterviewSessionEntity session = sessionOpt.get();
-      if (session.getPreparationRunId() != null) {
-        log.warn("旧版评估报告拒绝覆盖岗位实战会话: sessionId={}", sessionId);
-        return;
-      }
       session.setOverallScore(report.overallScore());
       session.setOverallFeedback(report.overallFeedback());
       session.setStrengthsJson(objectMapper.writeValueAsString(report.strengths()));
@@ -490,7 +486,6 @@ public class InterviewPersistenceService {
 
   public Optional<InterviewSessionEntity> findBySessionIdInternal(String sessionId) {
     return findSessionEntityBySessionId(sessionId)
-      .filter(session -> session.getPreparationRunId() == null)
       .map(this::attachResumeIfPresent);
   }
 
@@ -514,7 +509,7 @@ public class InterviewPersistenceService {
     Long userId = UserContext.requireUserId();
     List<InterviewSessionEntity> sessions = findByResumeId(resumeId);
     for (InterviewSessionEntity session : sessions) {
-      jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
+      interviewSessionDeletionService.deleteOwnedSessionArtifacts(
           userId, session.getId(), session.getSessionId());
       interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
           .eq(InterviewSessionEntity::getId, session.getId())
@@ -531,7 +526,7 @@ public class InterviewPersistenceService {
     InterviewSessionEntity session = findSessionByUserAndSessionId(userId, sessionId)
       .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
     try {
-      jobInterviewSessionDeletionService.deleteOwnedSessionArtifacts(
+      interviewSessionDeletionService.deleteOwnedSessionArtifacts(
           userId, session.getId(), session.getSessionId());
       interviewSessionMapper.delete(Wrappers.<InterviewSessionEntity>lambdaQuery()
           .eq(InterviewSessionEntity::getId, session.getId())
@@ -540,7 +535,7 @@ public class InterviewPersistenceService {
       throw e;
     } catch (RuntimeException e) {
       throw new BusinessException(ErrorCode.INTERNAL_ERROR,
-          "删除面试记录失败：" + JobInterviewSessionDeletionService.rootMessage(e), e);
+          "删除面试记录失败：" + InterviewSessionDeletionService.rootMessage(e), e);
     }
     log.info("已删除面试会话: sessionId={}", sessionId);
   }

@@ -2,7 +2,6 @@ package com.linrun.interview.business.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -38,11 +37,10 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("面试会话附属数据删除")
-class JobInterviewSessionDeletionServiceTest {
+class InterviewSessionDeletionServiceTest {
 
   @Mock
   private InterviewSessionMapper interviewSessionMapper;
@@ -64,11 +62,8 @@ class JobInterviewSessionDeletionServiceTest {
   private CandidateMemoryMapper candidateMemoryMapper;
   @Mock
   private CapabilityProfileService capabilityProfileService;
-  @Mock
-  private JdbcTemplate jdbcTemplate;
-
   @InjectMocks
-  private JobInterviewSessionDeletionService service;
+  private InterviewSessionDeletionService service;
 
   @BeforeEach
   void initializeMybatisMetadata() {
@@ -87,19 +82,16 @@ class JobInterviewSessionDeletionServiceTest {
   }
 
   @Test
-  @DisplayName("先解除长期学习溯源，再按外键顺序删除报告、草稿、答案和题目")
+  @DisplayName("先解除长期学习溯源，再按外键顺序删除报告、答案和题目")
   void shouldDeleteForeignKeyChildrenBeforeSessionOwnedArtifacts() {
     CapabilityEvidenceEntity evidence = new CapabilityEvidenceEntity();
     evidence.setCapabilityAtomId("java.concurrent");
     when(capabilityEvidenceMapper.selectList(any())).thenReturn(List.of(evidence));
-    when(jdbcTemplate.queryForList(JobInterviewSessionDeletionService.LEFTOVER_CODE_DRAFTS_PROBE_SQL))
-        .thenReturn(List.of());
-
     service.deleteOwnedSessionArtifacts(7L, 11L, "session-1");
 
     InOrder order = inOrder(
         capabilityEvidenceMapper, usageRecordMapper, candidateMemoryMapper,
-        interviewSessionMapper, jdbcTemplate, interviewAnswerMapper,
+        interviewSessionMapper, interviewAnswerMapper,
         commandMapper, eventMapper, agentRunStepMapper, agentRunMapper,
         capabilityProfileService);
     order.verify(capabilityEvidenceMapper).update(isNull(), any());
@@ -107,9 +99,6 @@ class JobInterviewSessionDeletionServiceTest {
     order.verify(candidateMemoryMapper).update(isNull(), any());
     order.verify(interviewSessionMapper).clearCurrentQuestionId(7L, 11L);
     order.verify(interviewSessionMapper).deleteEvidenceReportsBySession(7L, 11L);
-    order.verify(jdbcTemplate).update(
-        JobInterviewSessionDeletionService.LEFTOVER_CODE_DRAFTS_DELETE_SQL,
-        7L, 11L);
     order.verify(interviewAnswerMapper).delete(any());
     order.verify(interviewSessionMapper).deleteQuestionsBySession(7L, 11L);
     order.verify(commandMapper).delete(any());
@@ -121,23 +110,6 @@ class JobInterviewSessionDeletionServiceTest {
     verify(capabilityEvidenceMapper, never()).delete(any());
     verify(usageRecordMapper, never()).delete(any());
     verify(candidateMemoryMapper, never()).delete(any());
-  }
-
-  @Test
-  @DisplayName("新库没有岗位实战代码草稿表时跳过该删除")
-  void shouldSkipMissingLeftoverCodeDraftsTable() {
-    when(capabilityEvidenceMapper.selectList(any())).thenReturn(List.of());
-    when(jdbcTemplate.queryForList(JobInterviewSessionDeletionService.LEFTOVER_CODE_DRAFTS_PROBE_SQL))
-        .thenThrow(new org.springframework.jdbc.BadSqlGrammarException(
-            "probe", JobInterviewSessionDeletionService.LEFTOVER_CODE_DRAFTS_PROBE_SQL,
-            new java.sql.SQLException("Table 'interview_code_drafts' doesn't exist")));
-
-    service.deleteOwnedSessionArtifacts(7L, 11L, "session-1");
-
-    verify(interviewSessionMapper).clearCurrentQuestionId(7L, 11L);
-    verify(interviewSessionMapper).deleteEvidenceReportsBySession(7L, 11L);
-    verify(interviewSessionMapper).deleteQuestionsBySession(7L, 11L);
-    verify(jdbcTemplate, never()).update(anyString(), any(), any());
   }
 
   @Test

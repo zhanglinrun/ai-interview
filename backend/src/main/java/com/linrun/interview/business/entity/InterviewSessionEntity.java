@@ -88,13 +88,8 @@ public class InterviewSessionEntity {
     // 关联知识库 ID 列表（JSON）
     private String knowledgeBaseIdsJson;
 
-    // Multi-Agent 编排的面试大纲（JSON，null 表示旧批量出题会话）
+    // Multi-Agent 编排的面试大纲（JSON）
     private String interviewPlanJson;
-
-    // 岗位实战增量字段；旧模拟面试为 null。
-    private String preparationRunId;
-
-    private Long jobDescriptionId;
 
     private String capabilityTemplateCode;
 
@@ -106,14 +101,14 @@ public class InterviewSessionEntity {
 
     public enum SessionStatus {
         CREATED,      // 会话已创建
-        READY,        // 岗位实战已准备
+        READY,        // 会话已准备
         IN_PROGRESS,  // 面试进行中
-        PAUSED,       // 岗位实战断点续面
+        PAUSED,       // 面试已暂停
         COMPLETING,   // 正在收尾
         COMPLETED,    // 面试已完成
-        EVALUATED,    // 旧模拟面试已生成评估报告
-        ABORTED,      // 岗位实战已中止，不更新画像
-        FAILED        // 岗位实战运行失败
+        EVALUATED,    // 已生成评估报告
+        ABORTED,      // 会话已中止
+        FAILED        // 会话运行失败
     }
     
     
@@ -293,22 +288,6 @@ public class InterviewSessionEntity {
 
     public void setInterviewPlanJson(String interviewPlanJson) {
         this.interviewPlanJson = interviewPlanJson;
-    }
-
-    public String getPreparationRunId() {
-        return preparationRunId;
-    }
-
-    public void setPreparationRunId(String preparationRunId) {
-        this.preparationRunId = preparationRunId;
-    }
-
-    public Long getJobDescriptionId() {
-        return jobDescriptionId;
-    }
-
-    public void setJobDescriptionId(Long jobDescriptionId) {
-        this.jobDescriptionId = jobDescriptionId;
     }
 
     public String getCapabilityTemplateCode() {

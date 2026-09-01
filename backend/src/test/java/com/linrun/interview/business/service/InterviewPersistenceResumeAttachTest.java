@@ -34,7 +34,7 @@ class InterviewPersistenceResumeAttachTest {
   @Mock
   private ResumeEntityMapper resumeMapper;
   @Mock
-  private JobInterviewSessionDeletionService deletionService;
+  private InterviewSessionDeletionService deletionService;
 
   private InterviewPersistenceService service;
 

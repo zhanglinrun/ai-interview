@@ -11,8 +11,6 @@ describe('CareerResourcesPage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('link', { name: /力扣中国/ })).toHaveAttribute('href', 'https://leetcode.cn/');
-    expect(screen.getByRole('link', { name: /代码随想录/ })).toHaveAttribute('href', 'https://programmercarl.com/');
     expect(screen.getByRole('link', { name: /JavaGuide/ })).toHaveAttribute('href', 'https://javaguide.cn/');
     expect(screen.getByRole('link', { name: /面渣逆袭/ })).toHaveAttribute(
       'href',

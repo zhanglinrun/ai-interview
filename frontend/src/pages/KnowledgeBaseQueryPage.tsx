@@ -609,6 +609,21 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     });
   };
 
+  const handleToggleCategory = (items: KnowledgeBaseItem[]) => {
+    setSelectedKbIds(prev => {
+      const next = new Set(prev);
+      const allSelected = items.length > 0 && items.every((item) => next.has(item.id));
+      items.forEach((item) => {
+        if (allSelected) {
+          next.delete(item.id);
+        } else {
+          next.add(item.id);
+        }
+      });
+      return next;
+    });
+  };
+
   const kbNeedsSync = useMemo(() => {
     if (!currentSessionId) return false;
     if (selectedKbIds.size !== sessionBoundKbIds.size) return true;
@@ -1139,16 +1154,6 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
             <>
               <div className="border-b border-stone-200 bg-white px-4 py-3 dark:border-stone-800 dark:bg-stone-950">
                 <h2 className="truncate text-sm font-semibold text-stone-900 dark:text-stone-50">{sessionHeading}</h2>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {selectedKnowledgeBases.map((kb) => (
-                    <span
-                      key={kb.id}
-                      className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
-                    >
-                      {kb.name}
-                    </span>
-                  ))}
-                </div>
                 {missingQueryableMaterials && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-950/30">
                     <p className="text-xs text-amber-800 dark:text-amber-200">本次对话没有可提问的资料，请在右侧勾选向量化完成的知识库。</p>
@@ -1408,20 +1413,30 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                 <div className="space-y-2">
                   {groupedKnowledgeBases.map((group) => (
                     <div key={group.name} className="overflow-hidden rounded-lg border border-stone-200/80 dark:border-stone-800">
-                      <button
-                        type="button"
-                        onClick={() => toggleCategory(group.name)}
-                        aria-expanded={group.isExpanded}
-                        className="flex w-full items-center justify-between bg-stone-50 px-3 py-2 transition-colors hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800"
-                      >
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between bg-stone-50 px-3 py-2 dark:bg-stone-900">
+                        <button
+                          type="button"
+                          onClick={() => toggleCategory(group.name)}
+                          aria-expanded={group.isExpanded}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:text-stone-900 dark:hover:text-white"
+                        >
                           <ChevronRight
-                            className={`h-3.5 w-3.5 text-stone-400 transition-transform ${group.isExpanded ? 'rotate-90' : ''}`}
+                            className={`h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform ${group.isExpanded ? 'rotate-90' : ''}`}
                           />
-                          <span className="text-sm font-medium text-stone-700 dark:text-stone-300">{group.name}</span>
-                        </div>
-                        <span className="text-[11px] text-stone-400">{group.items.length}</span>
-                      </button>
+                          <span className="truncate text-sm font-medium text-stone-700 dark:text-stone-300">{group.name}</span>
+                          <span className="text-[11px] text-stone-400">{group.items.length}</span>
+                        </button>
+                        <label className="ml-2 inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400">
+                          <input
+                            type="checkbox"
+                            checked={group.items.length > 0 && group.items.every((item) => selectedKbIds.has(item.id))}
+                            onChange={() => handleToggleCategory(group.items)}
+                            aria-label={`选择分类 ${group.name}`}
+                            className="h-3.5 w-3.5 rounded text-primary-500 focus:ring-primary-500"
+                          />
+                          全选
+                        </label>
+                      </div>
                       {group.isExpanded && (
                         <div className="space-y-1 p-1.5">
                           {group.items.map((kb) => (

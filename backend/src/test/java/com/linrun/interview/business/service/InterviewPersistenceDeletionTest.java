@@ -18,7 +18,7 @@ import com.linrun.interview.auth.security.UserContext;
 import com.linrun.interview.business.mapper.InterviewAnswerMapper;
 import com.linrun.interview.business.mapper.InterviewSessionMapper;
 import com.linrun.interview.business.entity.InterviewSessionEntity;
-import com.linrun.interview.business.service.JobInterviewSessionDeletionService;
+import com.linrun.interview.business.service.InterviewSessionDeletionService;
 import com.linrun.interview.business.mapper.ResumeEntityMapper;
 import java.util.Arrays;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -44,7 +44,7 @@ class InterviewPersistenceDeletionTest {
   @Mock
   private ObjectMapper objectMapper;
   @Mock
-  private JobInterviewSessionDeletionService deletionService;
+  private InterviewSessionDeletionService deletionService;
 
   private InterviewPersistenceService service;
 

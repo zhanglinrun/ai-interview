@@ -45,7 +45,9 @@ public class RerankService implements ScoringModel {
   }
 
   @Override
-  public Response<List<Double>> scoreAll(List<TextSegment> segments, String query) {
+  public synchronized Response<List<Double>> scoreAll(List<TextSegment> segments, String query) {
+    // ONNX Runtime allocates sizeable native tensors per inference. Serialize calls
+    // so concurrent RAG requests cannot multiply the native peak and hit the cgroup cap.
     if (segments == null || segments.isEmpty()) {
       return Response.from(List.of());
     }

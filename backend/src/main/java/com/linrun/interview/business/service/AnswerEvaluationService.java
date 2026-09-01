@@ -46,8 +46,7 @@ public class AnswerEvaluationService implements InterviewEvaluationPort {
                     q.userAnswer(), q.criticApproved()))
                 .toList();
 
-            // 旧文字面试不再注入未经审核的静态 Markdown 答案。岗位实战由版本化 Rubric
-            // 与证据快照评估；这里保留通用回答评估，并显式传空参考上下文。
+            // 评估链路使用通用回答评估，并显式传空参考上下文。
             EvaluationReport report = unifiedEvaluationService.evaluate(
                 chatModel, sessionId, qaRecords, resumeText, ""
             );

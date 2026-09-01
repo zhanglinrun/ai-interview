@@ -32,20 +32,6 @@ export const RECRUITMENT_SOURCES: readonly ExternalResource[] = [
 
 export const LEARNING_RESOURCES: readonly ExternalResource[] = [
   {
-    id: 'leetcode-cn',
-    name: '力扣中国',
-    url: 'https://leetcode.cn/',
-    description: '练习算法题和参加周赛，作为平台外的刷题补充。',
-    badge: '算法平台',
-  },
-  {
-    id: 'programmercarl',
-    name: '代码随想录',
-    url: 'https://programmercarl.com/',
-    description: '按数据结构与算法专题刷题，适合制定系统复习路线。',
-    badge: '算法路线',
-  },
-  {
     id: 'java-guide',
     name: 'JavaGuide',
     url: 'https://javaguide.cn/',
